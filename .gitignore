@@ -1,0 +1,8 @@
+# === Build-Files ===
+build/
+
+# === Compiled Binaries & Objects ===
+*.o
+
+# === Secrets ===
+secrets.conf

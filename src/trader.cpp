@@ -1,0 +1,77 @@
+/****
+ * Copyright (C) 2025 Dave Beusing <david.beusing@gmail.com>
+ * 
+ * MIT License - https://opensource.org/license/mit/
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the “Software”), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is furnished 
+ * to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all 
+ * copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A 
+ * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT 
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION 
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * 
+ */
+#include "../include/trader.hpp"
+#include <iostream>
+#include <fstream>
+#include <chrono>
+#include <iomanip>
+
+Trader::Trader(std::string symbol, RiskConfig config) : symbol(std::move(symbol)), risk(config) {}
+
+TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi) {
+	if (!position.open) {
+		if (sma5 > sma20 && rsi < 30) {
+			// BUY
+			position.open = true;
+			position.entry_price = price;
+			position.quantity = (risk.max_total_usdt * risk.risk_per_trade) / price;
+			position.highest_price = price;
+			position.stop_loss_price = price * (1.0 - risk.stop_loss_percent);
+			position.take_profit_price = price * (1.0 + risk.take_profit_percent);
+			log_trade(TradeAction::BUY, price);
+			return TradeAction::BUY;
+		}
+	} else {
+		// Trailing SL nachziehen
+		if (price > position.highest_price) {
+			position.highest_price = price;
+			position.stop_loss_price = price * (1.0 - risk.stop_loss_percent);
+		}
+		// Bedingungen für Exit
+		bool stop_loss_hit = price <= position.stop_loss_price;
+		bool take_profit_hit = price >= position.take_profit_price;
+		bool sell_signal = (sma5 < sma20 && rsi > 70);
+		if (stop_loss_hit || take_profit_hit || sell_signal) {
+			log_trade(TradeAction::SELL, price);
+			position = TradePosition(); // Reset
+			return TradeAction::SELL;
+		}
+	}
+	return TradeAction::NONE;
+}
+
+void Trader::log_trade(TradeAction action, double price) {
+	std::ofstream file("trades.csv", std::ios::app);
+	auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	std::stringstream timestamp;
+	timestamp << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S");
+	std::string action_str = (action == TradeAction::BUY ? "BUY" : "SELL");
+	file << timestamp.str() << "," << action_str << "," << symbol << "," << price << "," << position.quantity << "\n";
+	file.close();
+	std::cout << "[TRADE] " << action_str << " " << position.quantity << " " << symbol << " @ $" << price << std::endl;
+}
+
+const TradePosition& Trader::get_position() const {
+	return position;
+}
