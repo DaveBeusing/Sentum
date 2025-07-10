@@ -50,7 +50,7 @@ void draw_chart(const std::vector<double>& prices, const std::string& symbol) {
 	double min = *std::min_element(prices.begin(), prices.end());
 	double max = *std::max_element(prices.begin(), prices.end());
 	int height = 10;
-	std::cout << "=== 📈 " << symbol << " Live Chart (Farbig) ===\n";
+	std::cout << "=== " << symbol << " Live Chart ===\n";
 	std::cout << std::fixed << std::setprecision(2);
 	std::cout << "Aktuell: $" << prices.back() << "   (Min: $" << min << " | Max: $" << max << ")\n\n";
 	for (int row = height; row >= 0; --row) {
@@ -165,10 +165,12 @@ int main() {
 		}
 
 		// Ausgabe oben
-		std::cout << color << direction << " Preis: $" << price << " \033[0m | " << rsi_info << " | " << sma_info << " | " << signal_str << " | " << action_str << "\n\n";
+		std::cout << color << direction << " Price: $" << price << " \033[0m | " << rsi_info << " | " << sma_info << " | " << signal_str << " | " << action_str << "\n\n";
 
 		// Chart aktualisieren
 		draw_chart(price_history, symbol);
+
+		std::cout << "🏁 Total: " << trader.get_total_profit() << " USDC | 🟢 Wins: " << trader.get_win_count() << " | 🔴 Losses: " << trader.get_lose_count() << "\n";
 	});
 
 	std::cout << "📡 WebSocket gestartet für " << symbol << "\n";

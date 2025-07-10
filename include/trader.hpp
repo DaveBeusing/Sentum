@@ -25,10 +25,11 @@
 #include <string>
 
 struct RiskConfig {
-	double max_total_usdt = 1000.0;         // z. B. Gesamtbudget
-	double risk_per_trade = 0.1;            // z. B. 10 % pro Trade
-	double stop_loss_percent = 0.03;        // z. B. 3 % SL
-	double take_profit_percent = 0.05;      // z. B. 5 % TP (optional)
+	double max_total_usdt = 1000.0;			// z. B. Gesamtbudget
+	double risk_per_trade = 0.1;			// z. B. 10 % pro Trade
+	double stop_loss_percent = 0.03;		// z. B. 3 % SL
+	double take_profit_percent = 0.05;		// z. B. 5 % TP (optional)
+	double fee_percent = 0.001;				// 0.1% Standard Binance Fee (0.095% Taker 0.1% Maker)
 };
 
 struct TradePosition {
@@ -43,15 +44,24 @@ struct TradePosition {
 enum class TradeAction { NONE, BUY, SELL };
 
 class Trader {
-public:
-	Trader(std::string symbol, RiskConfig config);
-	TradeAction evaluate(double price, double sma5, double sma20, double rsi);
-	void log_trade(TradeAction action, double price);
-	const TradePosition& get_position() const;
 
-private:
-	std::string symbol;
-	RiskConfig risk;
-	TradePosition position;
+	public:
+		Trader(std::string symbol, RiskConfig config);
+		TradeAction evaluate(double price, double sma5, double sma20, double rsi);
+		void log_trade(TradeAction action, double price);
+		const TradePosition& get_position() const;
+		// Statistik
+		double get_total_profit() const;
+		int get_win_count() const;
+		int get_lose_count() const;
+
+	private:
+		std::string symbol;
+		RiskConfig risk;
+		TradePosition position;
+		// Performance
+		double total_profit;
+		int win_count;
+		int lose_count;
 };
 

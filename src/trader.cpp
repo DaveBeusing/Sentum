@@ -43,7 +43,7 @@ TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi
 			return TradeAction::BUY;
 		}
 	} else {
-		// Trailing SL nachziehen
+		// Trailing Stop-Loss nachziehen
 		if (price > position.highest_price) {
 			position.highest_price = price;
 			position.stop_loss_price = price * (1.0 - risk.stop_loss_percent);
@@ -54,6 +54,23 @@ TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi
 		bool sell_signal = (sma5 < sma20 && rsi > 70);
 		if (stop_loss_hit || take_profit_hit || sell_signal) {
 			log_trade(TradeAction::SELL, price);
+			// Profit/Verlust berechnen
+			double gross_profit = (price - position.entry_price) * position.quantity;
+			double buy_fee = position.entry_price * position.quantity * risk.fee_percent;
+			double sell_fee = price * position.quantity * risk.fee_percent;
+			double net_profit = gross_profit - buy_fee - sell_fee;
+
+			total_profit += net_profit;
+
+			if (net_profit >= 0) win_count++;
+			else lose_count++;
+
+			std::cout << "[RESULT] Trade Result: "
+						<< (net_profit >= 0 ? "\033[32m" : "\033[31m")
+						<< (net_profit >= 0 ? "+" : "") << net_profit << " USDT"
+						<< "\033[0m | Total: " << total_profit << " USDT"
+						<< " | Wins: " << win_count << " | Losses: " << lose_count << "\n";
+
 			position = TradePosition(); // Reset
 			return TradeAction::SELL;
 		}
@@ -67,11 +84,31 @@ void Trader::log_trade(TradeAction action, double price) {
 	std::stringstream timestamp;
 	timestamp << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S");
 	std::string action_str = (action == TradeAction::BUY ? "BUY" : "SELL");
-	file << timestamp.str() << "," << action_str << "," << symbol << "," << price << "," << position.quantity << "\n";
+	file << timestamp.str() << "," << action_str << "," << symbol << "," << price << "," << position.quantity;
+	if (action == TradeAction::SELL) {
+		double gross_profit = (price - position.entry_price) * position.quantity;
+		double buy_fee = position.entry_price * position.quantity * risk.fee_percent;
+		double sell_fee = price * position.quantity * risk.fee_percent;
+		double net_profit = gross_profit - buy_fee - sell_fee;
+		file << "," << net_profit;
+	}
+	file << "\n";
 	file.close();
 	std::cout << "[TRADE] " << action_str << " " << position.quantity << " " << symbol << " @ $" << price << std::endl;
 }
 
 const TradePosition& Trader::get_position() const {
 	return position;
+}
+
+double Trader::get_total_profit() const {
+	return total_profit;
+}
+
+int Trader::get_win_count() const {
+	return win_count;
+}
+
+int Trader::get_lose_count() const {
+	return lose_count;
 }
