@@ -17,6 +17,7 @@ add_executable(
 	src/sma.cpp
 	src/strategy.cpp
 	src/trader.cpp
+	src/chart.cpp
 )
 
 # Boost + OpenSSL

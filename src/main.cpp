@@ -21,11 +21,13 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
+
 #include "../include/wsclient.hpp"
 #include "../include/rsi.hpp"
 #include "../include/sma.hpp"
 #include "../include/strategy.hpp"
 #include "../include/trader.hpp"
+#include "../include/chart.hpp"
 
 #include <iostream>
 #include <vector>
@@ -44,39 +46,10 @@ void clear_terminal() {
 	std::cout << "\033[2J\033[1;1H";
 }
 
-// Preis-Chart als ASCII
-void draw_chart(const std::vector<double>& prices, const std::string& symbol) {
-	if (prices.empty()) return;
-	double min = *std::min_element(prices.begin(), prices.end());
-	double max = *std::max_element(prices.begin(), prices.end());
-	int height = 10;
-	std::cout << "=== " << symbol << " Live Chart ===\n";
-	std::cout << std::fixed << std::setprecision(2);
-	std::cout << "Aktuell: $" << prices.back() << "   (Min: $" << min << " | Max: $" << max << ")\n\n";
-	for (int row = height; row >= 0; --row) {
-		for (size_t i = 0; i < prices.size(); ++i) {
-			double scaled = (prices[i] - min) / (max - min + 0.0001);
-			int level = scaled * height;
-			if (level >= row) {
-				std::string color = "\033[0m";  // default
-				if (i > 0) {
-					if (prices[i] > prices[i - 1]) color = "\033[32m";  // grün
-					else if (prices[i] < prices[i - 1]) color = "\033[31m"; // rot
-				}
-				std::cout << color << "█" << "\033[0m";
-			} else {
-				std::cout << " ";
-			}
-		}
-		std::cout << "\n";
-	}
-	std::cout << std::string(prices.size(), '-') << "\n";
-	std::cout << "↑ grün, ↓ rot — Ctrl+C zum Beenden\n";
-}
-
 int main() {
 	std::string symbol = "BTCUSDC";
 	std::vector<double> price_history;
+	std::vector<double> equity_history;
 	RiskConfig risk = {1000.0, 0.1, 0.03, 0.05};  // Max 1k USD, 10%, SL: 3%, TP: 5%
 	Trader trader(symbol, risk);
 
@@ -156,6 +129,7 @@ int main() {
 				action_str = "\033[32mEXECUTED: BUY ✅\033[0m";
 				break;
 			case TradeAction::SELL:
+				equity_history.push_back(trader.get_total_profit());
 				action_str = "\033[31mEXECUTED: SELL ❌\033[0m";
 				break;
 			case TradeAction::NONE:
@@ -167,8 +141,9 @@ int main() {
 		// Ausgabe oben
 		std::cout << color << direction << " Price: $" << price << " \033[0m | " << rsi_info << " | " << sma_info << " | " << signal_str << " | " << action_str << "\n\n";
 
-		// Chart aktualisieren
-		draw_chart(price_history, symbol);
+		// Charts aktualisieren
+		Chart::draw_price_chart(price_history, symbol, trader.get_position());
+		Chart::draw_equity_chart(equity_history);
 
 		std::cout << "🏁 Total: " << trader.get_total_profit() << " USDC | 🟢 Wins: " << trader.get_win_count() << " | 🔴 Losses: " << trader.get_lose_count() << "\n";
 	});

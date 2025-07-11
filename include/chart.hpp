@@ -22,7 +22,12 @@
  * 
  */
 #pragma once
+#include <vector>
 #include <string>
+#include "../include/trader.hpp" // für TradePosition
 
-std::string get_api_key();
-std::string get_secret_key();
+class Chart {
+public:
+	static void draw_price_chart(const std::vector<double>& prices, const std::string& symbol, const TradePosition& position);
+	static void draw_equity_chart(const std::vector<double>& equity_history);
+};
