@@ -1,15 +1,12 @@
 # 📈 Sentum  
 **Intelligent Signals. Real-Time Decisions. Confident Trading.**
 
-
 ## 🔍 Overview
-
 **Sentum** is a high-performance, C++17-based trading bot tailored for real-time signal processing and automated trading strategies. With a clean modular design and secure WebSocket integration to Binance, it delivers precise market reactions in milliseconds.
 
-Built for developers, quants, and fintech teams who demand **control, performance, and reliability**.
+> _Built for precision. Designed for performance. Engineered for markets._  
 
-
-## ⚙️ Key Features
+## Key Features
 - 🔌 Real-time data via Binance WebSocket API
 - 📊 Technical indicators (e.g., SMA crossover) built in
 - 🧠 Strategy modules are modular and easily extendable
@@ -18,7 +15,7 @@ Built for developers, quants, and fintech teams who demand **control, performanc
 - 🧩 Lightweight, no unnecessary dependencies
 
 
-## 🛠️ Technology Stack
+## Technology Stack
 | Component         | Technology                   |
 |------------------|------------------------------|
 | Language          | C++17                        |
@@ -28,7 +25,7 @@ Built for developers, quants, and fintech teams who demand **control, performanc
 | Build System      | CMake & Make                 |
 | Exchange          | Binance (Spot Market)        |
 
-## 🧱 Project Structure
+## Project Structure
 ```
 sentum/
 ├── include/
@@ -61,63 +58,38 @@ secret_key=your_binance_api_secret
 
 ```
 
-## 🚀 Quick Start
-
+## Quick Start
 ### 1. Prepare your system
 ```bash
 sudo apt update
 sudo apt install -y build-essential libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libssl-dev cmake git libwebsocketpp-dev
 ```
-
 ### 2. Clone the repository
 ```bash
 git clone https://github.com/DaveBeusing/Sentum.git
 cd sentum
 ```
-
 ### 3. Build
 ```bash
 mkdir build && cd build
 cmake ..
 make
 ```
-
 ### 4. Run
 ```bash
 ./client
 ```
 
-
-## 🔒 Security & Design Principles
-> **Sentum** follows the principle: _Strategies can change, stability must not._
-- Graceful error handling and reconnect logic
-- Secrets (API keys) stored outside of version control
-- Code built for readability and extendability
-
-
-## 👤 Target Audience
-- Algorithmic traders and quantitative analysts
-- C++ developers in fintech and trading
-- Teams building low-latency trading infrastructure
-- Open-source contributors with market experience
-
-## 🚧 Roadmap
+## Roadmap
 - [ ] WebSocket auto-reconnect logic
 - [ ] Configurable strategies (via JSON/YAML)
 - [ ] Historical backtesting module
 - [ ] REST order execution support
 - [ ] Dashboard UI for live strategy monitoring
 
-
-## 📜 License
-This project is licensed under the MIT License.  
-All source files include license headers.
-
-## 🤝 Contributing
+## Contributing
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change or propose.
-
-## ⭐ If you find this project useful...
-...consider starring the repo or sharing it with fellow devs and traders!
+If you find this project useful consider starring the repo or sharing it with fellow devs and traders!
 
 ## ⚠️ DISCLAIMER ⚠️
 The Content is for informational purposes only, you should not construe any such information or other material as legal, tax, investment, financial, or other advice.
@@ -125,6 +97,27 @@ The Content is for informational purposes only, you should not construe any such
 <b>Please read and understand DISCLAIMER.md in addition to the aforementioned disclaimer.</b>
 
 <b>You need to have a basic understanding of the topic and be hands-on to make this piece of code profitable, otherwise you will lose your money, be warned!</b>
+
+## License
+Copyright ©️ 2025 Dave Beusing
+
+MIT License - https://opensource.org/license/mit/
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the “Software”), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished 
+to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all 
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A 
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT 
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION 
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 ---
