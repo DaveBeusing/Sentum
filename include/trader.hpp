@@ -50,7 +50,7 @@ class Trader {
 		TradeAction evaluate(double price, double sma5, double sma20, double rsi);
 		void log_trade(TradeAction action, double price);
 		const TradePosition& get_position() const;
-		// Statistik
+		// Performance
 		double get_total_profit() const;
 		int get_win_count() const;
 		int get_lose_count() const;
