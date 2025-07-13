@@ -27,7 +27,7 @@
 #include <chrono>
 #include <iomanip>
 
-Trader::Trader(std::string symbol, RiskConfig config) : symbol(std::move(symbol)), risk(config) {}
+Trader::Trader(std::string symbol, RiskConfig config) : symbol(std::move(symbol)), risk(config), total_profit(0.0), win_count(0), lose_count(0) {}
 
 TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi) {
 	if (!position.open) {
@@ -39,6 +39,7 @@ TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi
 			position.highest_price = price;
 			position.stop_loss_price = price * (1.0 - risk.stop_loss_percent);
 			position.take_profit_price = price * (1.0 + risk.take_profit_percent);
+			position.entry_time = std::chrono::system_clock::now();
 			log_trade(TradeAction::BUY, price);
 			return TradeAction::BUY;
 		}
@@ -59,11 +60,12 @@ TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi
 			double buy_fee = position.entry_price * position.quantity * risk.fee_percent;
 			double sell_fee = price * position.quantity * risk.fee_percent;
 			double net_profit = gross_profit - buy_fee - sell_fee;
-
 			total_profit += net_profit;
-
-			if (net_profit >= 0) win_count++;
-			else lose_count++;
+			if (net_profit >= 0.0) {
+				win_count++;
+			} else {
+				lose_count++;
+			}
 
 			std::cout << "[RESULT] Trade Result: "
 						<< (net_profit >= 0 ? "\033[32m" : "\033[31m")

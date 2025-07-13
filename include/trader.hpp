@@ -23,6 +23,7 @@
  */
 #pragma once
 #include <string>
+#include <chrono>
 
 struct RiskConfig {
 	double max_total_usdt = 1000.0;			// z. B. Gesamtbudget
@@ -39,6 +40,7 @@ struct TradePosition {
 	double highest_price = 0.0;
 	double stop_loss_price = 0.0;
 	double take_profit_price = 0.0;
+	std::chrono::system_clock::time_point entry_time;
 };
 
 enum class TradeAction { NONE, BUY, SELL };

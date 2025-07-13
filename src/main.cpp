@@ -36,6 +36,7 @@
 #include <chrono>
 #include <thread>
 #include <mutex>
+#include <ctime>
 
 double last_price = 0.0;
 const int MAX_POINTS = 60;
@@ -62,6 +63,11 @@ int main() {
 		price_history.push_back(price);
 
 		clear_terminal();
+
+		//Uhrzeit
+		std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+		std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+		std::cout << "\n" << std::put_time(std::localtime(&now_c), "%Y-%m-%d %H:%M:%S") << "\n\n";
 
 		// Preisänderung
 		std::string direction = "→";
@@ -148,9 +154,16 @@ int main() {
 			double tp_dist = pos.take_profit_price - price;
 			double sl_pct = ((price - pos.stop_loss_price) / price) * 100.0;
 			double tp_pct = ((pos.take_profit_price - price) / price) * 100.0;
+
+			// Dauer in Position berechnen
+			std::chrono::seconds duration = std::chrono::duration_cast<std::chrono::seconds>(now - pos.entry_time);
+			int minutes = static_cast<int>(duration.count() / 60);
+			int seconds = static_cast<int>(duration.count() % 60);
+
+			std::cout << " | In Position: " << std::setfill('0') << std::setw(2) << minutes << ":" << std::setfill('0') << std::setw(2) << seconds << "\n";
 			std::cout << std::fixed << std::setprecision(2);
-			std::cout << "\n Stop-Loss: \033[31m$" << pos.stop_loss_price << " (" << sl_dist << " USDC, " << sl_pct << "% below current Price)\033[0m\n";
-			std::cout << " Take-Profit: \033[32m$" << pos.take_profit_price << " (" << tp_dist << " USDC, " << tp_pct << "% above current Price)\033[0m\n\n";
+			std::cout << " | Stop-Loss: \033[31m$" << pos.stop_loss_price << " (" << sl_dist << " USDC, " << sl_pct << "% below current Price)\033[0m\n";
+			std::cout << " | Take-Profit: \033[32m$" << pos.take_profit_price << " (" << tp_dist << " USDC, " << tp_pct << "% above current Price)\033[0m\n\n";
 		}
 
 		// Charts aktualisieren
