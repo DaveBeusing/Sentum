@@ -28,33 +28,46 @@
 ## Project Structure
 ```
 sentum/
-├── include/
-│   ├── api.hpp
-│   ├── config.hpp
-│   ├── logger.hpp
-│   ├── risk.hpp
-│   └── strategy.hpp
-├── src/
-│   ├── api.cpp
-│   ├── logger.cpp
-│   ├── risk.cpp
-│   ├── strategy.cpp
-│   └── main.cpp
-├── lib/json.hpp
 |── build/
 |   ├── client
-|   ├── trades.csv
-└── secrets.conf
+│   └── trades.csv
+|── config/
+|   ├── risk.json
+│   └── secrets.json
+├── include/
+│   ├── api.hpp
+│   ├── chart.hpp
+│   ├── config.hpp
+│   ├── rsi.hpp
+│   ├── secrets.hpp
+│   ├── sma.hpp
+│   ├── strategy.hpp
+│   ├── trader.hpp
+│   └── wsclient.hpp
+├── lib/json.hpp
+├── src/
+│   ├── api.cpp
+│   ├── chart.cpp
+│   ├── config.cpp
+│   ├── main.cpp
+│   ├── rsi.cpp
+│   ├── secrets.cpp
+│   ├── sma.cpp
+│   ├── strategy.cpp
+│   ├── trader.cpp
+│   └── wsclient.cpp
+|── .gitignore
+|── clean.sh
+|── CMakeLists.txt
+|── DISCLAIMER.md
+|── LICENSE.md
+└── README.md
 
-/src           → Source code 
-/include       → Headers
-/lib           → External libraries (e.g. json)
-/build         → Build artifacts (ignored in Git)
-/secrets.conf
-
-[binance]
-api_key=your_binance_api_key
-secret_key=your_binance_api_secret
+/src			→ Source code 
+/include		→ Headers
+/lib			→ External libraries (e.g. json)
+/build			→ Build artifacts (ignored in Git)
+/config			→ Config files (e.g. risk.json, secrets.json)
 
 ```
 

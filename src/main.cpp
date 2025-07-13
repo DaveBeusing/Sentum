@@ -44,14 +44,14 @@ double last_price = 0.0;
 const int MAX_POINTS = 60;
 std::mutex mtx;
 
-// Terminal löschen (ANSI)
+// Clear Terminal (ANSI)
 void clear_terminal() {
 	std::cout << "\033[2J\033[1;1H";
 }
 
 int main() {
 
-	//zuerst secrets laden
+	//Load secrets
 	Secrets secrets = load_secrets("../config/secrets.json");
 	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
 		std::cerr << "❌ Secrets missing! please check config/secrets.json.\n";
@@ -62,10 +62,12 @@ int main() {
 	std::string symbol = "BTCUSDC";
 	std::vector<double> price_history;
 	std::vector<double> equity_history;
+
+	//Load Risk config
 	RiskConfig risk = load_risk_config("../config/risk.json");
-	//RiskConfig risk = {1000.0, 0.1, 0.03, 0.05};  // Max 1k USD, 10%, SL: 3%, TP: 5%
 	Trader trader(symbol, risk);
 
+	//Start Stream
 	start_ws_price_stream(symbol, [&](double price) {
 		std::lock_guard<std::mutex> lock(mtx);
 
