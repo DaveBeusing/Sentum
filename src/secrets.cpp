@@ -22,8 +22,25 @@
  * 
  */
 
-#pragma once
-#include "trader.hpp"
-#include <string>
+#include "../include/secrets.hpp"
+#include "../lib/json.hpp"
+#include <fstream>
+#include <iostream>
 
-RiskConfig load_risk_config(const std::string& path);
+Secrets load_secrets(const std::string& path) {
+	Secrets s;
+	std::ifstream file(path);
+	if (!file.is_open()) {
+		std::cerr << "⚠️ Error can't open secrets.json: " << path << std::endl;
+		return s;
+	}
+	try {
+		nlohmann::json json;
+		file >> json;
+		s.api_key = json.value("api_key", "");
+		s.api_secret = json.value("api_secret", "");
+	} catch (const std::exception& e) {
+		std::cerr << "⚠️ Error parsing secrets.json: " << e.what() << std::endl;
+	}
+	return s;
+}

@@ -13,6 +13,8 @@ add_executable(
 	client
 	src/main.cpp
 	src/wsclient.cpp
+	src/secrets.cpp
+	src/config.cpp
 	src/rsi.cpp
 	src/sma.cpp
 	src/strategy.cpp

@@ -23,7 +23,11 @@
  */
 
 #pragma once
-#include "trader.hpp"
 #include <string>
 
-RiskConfig load_risk_config(const std::string& path);
+struct Secrets {
+	std::string api_key;
+	std::string api_secret;
+};
+
+Secrets load_secrets(const std::string& path);

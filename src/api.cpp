@@ -12,8 +12,7 @@
 using json = nlohmann::json;
 
 std::string get_timestamp() {
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::system_clock::now().time_since_epoch()).count();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     return std::to_string(ms);
 }
 

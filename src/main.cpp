@@ -23,6 +23,8 @@
  */
 
 #include "../include/wsclient.hpp"
+#include "../include/config.hpp"
+#include "../include/secrets.hpp"
 #include "../include/rsi.hpp"
 #include "../include/sma.hpp"
 #include "../include/strategy.hpp"
@@ -48,10 +50,20 @@ void clear_terminal() {
 }
 
 int main() {
+
+	//zuerst secrets laden
+	Secrets secrets = load_secrets("../config/secrets.json");
+	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
+		std::cerr << "❌ Secrets missing! please check config/secrets.json.\n";
+		return 1;
+	}
+	std::cout << "🔑 API-Key: ✅ (" << secrets.api_key.substr(0, 6) << "****)\n";
+
 	std::string symbol = "BTCUSDC";
 	std::vector<double> price_history;
 	std::vector<double> equity_history;
-	RiskConfig risk = {1000.0, 0.1, 0.03, 0.05};  // Max 1k USD, 10%, SL: 3%, TP: 5%
+	RiskConfig risk = load_risk_config("../config/risk.json");
+	//RiskConfig risk = {1000.0, 0.1, 0.03, 0.05};  // Max 1k USD, 10%, SL: 3%, TP: 5%
 	Trader trader(symbol, risk);
 
 	start_ws_price_stream(symbol, [&](double price) {
