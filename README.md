@@ -35,18 +35,19 @@ sentum/
 |   ├── risk.json
 │   └── secrets.json
 ├── include/
-│   ├── api.hpp
+│   ├── binance.hpp
 │   ├── chart.hpp
 │   ├── config.hpp
 │   ├── rsi.hpp
 │   ├── secrets.hpp
 │   ├── sma.hpp
 │   ├── strategy.hpp
+│   ├── style.hpp
 │   ├── trader.hpp
 │   └── wsclient.hpp
 ├── lib/json.hpp
 ├── src/
-│   ├── api.cpp
+│   ├── binance.cpp
 │   ├── chart.cpp
 │   ├── config.cpp
 │   ├── main.cpp
@@ -68,6 +69,12 @@ sentum/
 /lib			→ External libraries (e.g. json)
 /build			→ Build artifacts (ignored in Git)
 /config			→ Config files (e.g. risk.json, secrets.json)
+
+example secrets.json
+{
+	"api_key": "your_binance_api_key",
+	"api_secret": "your_binance_api_secret"
+}
 
 ```
 
