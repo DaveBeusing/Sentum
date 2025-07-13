@@ -2,6 +2,6 @@
 	"max_total_usdt": 1000.0,
 	"risk_per_trade": 0.1,
 	"stop_loss_percent": 0.03,
-	"take_profit_percent": 0.05,
+	"take_profit_percent": 0.001,
 	"fee_percent": 0.001
 }

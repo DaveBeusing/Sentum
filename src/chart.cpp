@@ -35,7 +35,7 @@ void Chart::draw_price_chart(const std::vector<double>& prices, const std::strin
 	int height = 10;
 	int width = prices.size();
 
-	std::cout << "=== " << symbol << " Chart ===\n";
+	std::cout << "=== Chart ===\n";
 	std::cout << std::fixed << std::setprecision(2);
 	std::cout << "Current: $" << prices.back() << " | Min: $" << min << " | Max: $" << max << "\n\n";
 
@@ -72,11 +72,11 @@ void Chart::draw_price_chart(const std::vector<double>& prices, const std::strin
 
 	std::cout << std::string(width, '-') << "\n";
 	//std::cout << "↑ grün, ↓ rot — Ctrl+C zum Beenden\n";
-	std::cout << "█: Price | \033[31m-\033[0m: SL | \033[32m=\033[0m: TP | Ctrl+C to exit\n";
+	//std::cout << "█: Price | \033[31m-\033[0m: SL | \033[32m=\033[0m: TP | Ctrl+C to exit\n";
 }
 
 
-void Chart::draw_equity_chart(const std::vector<double>& equity_history) {
+void Chart::draw_equity_chart(const std::vector<double>& equity_history, int win_count, int lose_count, double winrate, int total_trades, double average_profit) {
 	if (equity_history.empty()) return;
 
 	double min = *std::min_element(equity_history.begin(), equity_history.end());
@@ -86,13 +86,14 @@ void Chart::draw_equity_chart(const std::vector<double>& equity_history) {
 	int width = equity_history.size();
 
 	std::cout << "\n=== Equity-Monitoring ===\n";
-	std::cout << "Total: " << equity_history.back() << " USDC | Min: " << min << " | Max: " << max << "\n\n";
+	std::cout << "Total: " << equity_history.back() << " USDC | Min: " << min << " | Max: " << max << "\n";
+	std::cout << "Trades: " << total_trades << " | Wins: " << win_count << " | Losses: " << lose_count << " | Winrate: " << winrate << "%\n";
+	std::cout << "Avg Profit: " << average_profit << "\n\n";
 
 	for (int row = height; row >= 0; --row) {
 		for (size_t i = 0; i < equity_history.size(); ++i) {
 			double scaled = (equity_history[i] - min) / (max - min + 0.0001);
 			int level = scaled * height;
-
 			if (level >= row) {
 				std::string color = "\033[0m";
 				if (i > 0 && equity_history[i] > equity_history[i - 1])

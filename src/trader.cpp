@@ -114,3 +114,19 @@ int Trader::get_win_count() const {
 int Trader::get_lose_count() const {
 	return lose_count;
 }
+
+double Trader::get_winrate_percent() const {
+	int total = win_count + lose_count;
+	if (total == 0) return 0.0;
+	return (static_cast<double>(win_count) / total) * 100.0;
+}
+
+int Trader::get_total_trades() const {
+	return win_count + lose_count;
+}
+
+double Trader::get_average_profit() const {
+	int total = get_total_trades();
+	if (total == 0) return 0.0;
+	return total_profit / static_cast<double>(total);
+}

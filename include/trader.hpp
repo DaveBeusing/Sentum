@@ -50,18 +50,19 @@ class Trader {
 	public:
 		Trader(std::string symbol, RiskConfig config);
 		TradeAction evaluate(double price, double sma5, double sma20, double rsi);
-		void log_trade(TradeAction action, double price);
 		const TradePosition& get_position() const;
-		// Performance
 		double get_total_profit() const;
 		int get_win_count() const;
 		int get_lose_count() const;
+		double get_winrate_percent() const;
+		int get_total_trades() const;
+		double get_average_profit() const;
 
 	private:
+		void log_trade(TradeAction action, double price);
 		std::string symbol;
 		RiskConfig risk;
 		TradePosition position;
-		// Performance
 		double total_profit;
 		int win_count;
 		int lose_count;

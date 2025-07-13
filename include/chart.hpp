@@ -29,5 +29,5 @@
 class Chart {
 public:
 	static void draw_price_chart(const std::vector<double>& prices, const std::string& symbol, const TradePosition& position);
-	static void draw_equity_chart(const std::vector<double>& equity_history);
+	static void draw_equity_chart(const std::vector<double>& equity_history, int win_count, int lose_count, double winrate, int total_trades, double average_profit);
 };
