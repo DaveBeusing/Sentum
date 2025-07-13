@@ -27,8 +27,8 @@
 struct RiskConfig {
 	double max_total_usdt = 1000.0;			// z. B. Gesamtbudget
 	double risk_per_trade = 0.1;			// z. B. 10 % pro Trade
-	double stop_loss_percent = 0.03;		// z. B. 3 % SL
-	double take_profit_percent = 0.05;		// z. B. 5 % TP (optional)
+	double stop_loss_percent = 0.02;		// z. B. 2 % SL
+	double take_profit_percent = 0.01;		// z. B. 1 % TP (optional)
 	double fee_percent = 0.001;				// 0.1% Standard Binance Fee (0.095% Taker 0.1% Maker)
 };
 

@@ -77,12 +77,12 @@ int main() {
 		std::string rsi_info;
 		if (rsi > 0) {
 			int rsi_val = static_cast<int>(rsi);
-		if (rsi_val > 70)
-			rsi_info = "\033[31mRSI: " + std::to_string(rsi_val) + "\033[0m"; // rot – überkauft
-		else if (rsi_val < 30)
-			rsi_info = "\033[32mRSI: " + std::to_string(rsi_val) + "\033[0m"; // grün – überverkauft
-		else
-			rsi_info = "RSI: " + std::to_string(rsi_val); // neutral
+			if (rsi_val > 70)
+				rsi_info = "\033[31mRSI: " + std::to_string(rsi_val) + "\033[0m"; // rot – überkauft
+			else if (rsi_val < 30)
+				rsi_info = "\033[32mRSI: " + std::to_string(rsi_val) + "\033[0m"; // grün – überverkauft
+			else
+				rsi_info = "RSI: " + std::to_string(rsi_val); // neutral
 		} else {
 			rsi_info = "RSI: --";
 		}
@@ -126,20 +126,32 @@ int main() {
 		std::string action_str;
 		switch (action) {
 			case TradeAction::BUY:
-				action_str = "\033[32mEXECUTED: BUY ✅\033[0m";
+				action_str = "\033[32mACTION: BUY ✅\033[0m";
 				break;
 			case TradeAction::SELL:
 				equity_history.push_back(trader.get_total_profit());
-				action_str = "\033[31mEXECUTED: SELL ❌\033[0m";
+				action_str = "\033[31mACTION: SELL ❌\033[0m";
 				break;
 			case TradeAction::NONE:
 			default:
-				action_str = "SIGNAL: HOLD";
+				action_str = "ACTION: HOLD";
 				break;
 		}
 
 		// Ausgabe oben
 		std::cout << color << direction << " Price: $" << price << " \033[0m | " << rsi_info << " | " << sma_info << " | " << signal_str << " | " << action_str << "\n\n";
+
+		const TradePosition& pos = trader.get_position();
+		if (pos.open) {
+			double price = price_history.back();
+			double sl_dist = price - pos.stop_loss_price;
+			double tp_dist = pos.take_profit_price - price;
+			double sl_pct = ((price - pos.stop_loss_price) / price) * 100.0;
+			double tp_pct = ((pos.take_profit_price - price) / price) * 100.0;
+			std::cout << std::fixed << std::setprecision(2);
+			std::cout << "\n Stop-Loss: \033[31m$" << pos.stop_loss_price << " (" << sl_dist << " USDC, " << sl_pct << "% below current Price)\033[0m\n";
+			std::cout << " Take-Profit: \033[32m$" << pos.take_profit_price << " (" << tp_dist << " USDC, " << tp_pct << "% above current Price)\033[0m\n\n";
+		}
 
 		// Charts aktualisieren
 		Chart::draw_price_chart(price_history, symbol, trader.get_position());
@@ -148,7 +160,7 @@ int main() {
 		std::cout << "🏁 Total: " << trader.get_total_profit() << " USDC | 🟢 Wins: " << trader.get_win_count() << " | 🔴 Losses: " << trader.get_lose_count() << "\n";
 	});
 
-	std::cout << "📡 WebSocket gestartet für " << symbol << "\n";
+	std::cout << "📡 WebSocket started → Symbol: " << symbol << "\n";
 
 	// Hauptthread läuft einfach weiter
 	while (true) {
