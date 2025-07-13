@@ -6,3 +6,4 @@ build/
 
 # === Secrets ===
 secrets.conf
+config/secrets.json
