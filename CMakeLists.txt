@@ -7,29 +7,27 @@ include_directories(
 	include
 	lib
 	/usr/include
+	${CURL_INCLUDE_DIR}
 )
+
+file(GLOB SOURCES "src/*.cpp")
 
 add_executable(
 	client
-	src/main.cpp
-	src/wsclient.cpp
-	src/secrets.cpp
-	src/config.cpp
-	src/rsi.cpp
-	src/sma.cpp
-	src/strategy.cpp
-	src/trader.cpp
-	src/chart.cpp
+	${SOURCES}
 )
 
-# Boost + OpenSSL
+# CURL + Boost + OpenSSL
+find_package(CURL REQUIRED)
 find_package(Boost REQUIRED system)
 find_package(OpenSSL REQUIRED)
 
-target_link_libraries(client
+target_link_libraries(
+	client
 	PRIVATE
 		Boost::system
 		OpenSSL::SSL
 		OpenSSL::Crypto
 		pthread
+		${CURL_LIBRARIES}
 )

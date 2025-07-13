@@ -25,6 +25,7 @@
 #include "../include/wsclient.hpp"
 #include "../include/config.hpp"
 #include "../include/secrets.hpp"
+#include "../include/binance.hpp"
 #include "../include/rsi.hpp"
 #include "../include/sma.hpp"
 #include "../include/strategy.hpp"
@@ -59,6 +60,11 @@ int main() {
 		return 1;
 	}
 	std::cout << "🔑 API-Key: ✅ (" << secrets.api_key.substr(0, 6) << "****)\n";
+
+	//Initialize Binance
+	Binance binance( secrets.api_key, secrets.api_secret );
+	//test
+	double usdc = binance.get_coin_balance("USDC");
 
 	std::string symbol = "BTCUSDC";
 	std::vector<double> price_history;
@@ -170,6 +176,8 @@ int main() {
 		std::cout << style::wrap("Sentum", style::bold()) << " - Intelligent Signals. Real-Time Decisions. Confident Trading.\n\n";
 		//std::cout << style::wrap( timestamp, style::bold()) << "\n\n";
 		std::cout << "\033[1m" << std::put_time(std::localtime(&now_c), "%d.%m.%Y %H:%M:%S") << "\033[0m\n\n";
+
+		std::cout << "USDC Balance: " << usdc << "\n\n";
 
 		std::cout << "Symbol: " << symbol << "\n";
 		std::cout << color << direction << " Price: $" << price << " \033[0m \n"

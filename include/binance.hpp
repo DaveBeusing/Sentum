@@ -21,8 +21,20 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
+
 #pragma once
 #include <string>
 
-std::string send_signed_order(const std::string& symbol, const std::string& quantity);
-double get_current_price(const std::string& symbol);
+class Binance {
+	public:
+		Binance(const std::string& api_key, const std::string& api_secret);
+		double get_current_price(const std::string& symbol);
+		std::string send_signed_order(const std::string& symbol, const std::string& quantity);
+		double get_coin_balance(const std::string& asset_symbol);
+
+	private:
+		std::string api_key_;
+		std::string api_secret_;
+		std::string get_timestamp() const;
+		std::string hmac_sha256(const std::string& data, const std::string& key) const;
+};

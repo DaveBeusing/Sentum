@@ -53,7 +53,8 @@ TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi
 		bool stop_loss_hit = price <= position.stop_loss_price;
 		bool take_profit_hit = price >= position.take_profit_price;
 		bool sell_signal = (sma5 < sma20 && rsi > 70);
-		if (stop_loss_hit || take_profit_hit || sell_signal) {
+		//if (stop_loss_hit || take_profit_hit || sell_signal) {
+		if (stop_loss_hit || take_profit_hit) {
 			log_trade(TradeAction::SELL, price);
 			// Profit/Verlust berechnen
 			double gross_profit = (price - position.entry_price) * position.quantity;
