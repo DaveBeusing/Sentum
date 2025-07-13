@@ -30,6 +30,7 @@
 #include "../include/strategy.hpp"
 #include "../include/trader.hpp"
 #include "../include/chart.hpp"
+#include "../include/style.hpp"
 
 #include <iostream>
 #include <vector>
@@ -82,6 +83,9 @@ int main() {
 		// Current time
 		std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
 		std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+		//std::ostringstream oss;
+		//oss << std::put_time(std::localtime(&now_c), "%d.%m.%Y %H:%M:%S");
+		//std::string timestamp = oss.str();
 
 		// Price changes
 		std::string direction = "→";
@@ -163,7 +167,8 @@ int main() {
 		}
 
 		// Top output
-		std::cout << "Sentum - Intelligent Signals. Real-Time Decisions. Confident Trading.\n\n";
+		std::cout << style::wrap("Sentum", style::bold()) << " - Intelligent Signals. Real-Time Decisions. Confident Trading.\n\n";
+		//std::cout << style::wrap( timestamp, style::bold()) << "\n\n";
 		std::cout << "\033[1m" << std::put_time(std::localtime(&now_c), "%d.%m.%Y %H:%M:%S") << "\033[0m\n\n";
 
 		std::cout << "Symbol: " << symbol << "\n";
