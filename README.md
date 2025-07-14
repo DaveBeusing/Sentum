@@ -28,47 +28,46 @@
 ## Project Structure
 ```
 sentum/
-|── build/
-|   ├── client
-│   └── trades.csv
-|── config/
-|   ├── risk.json
-│   └── secrets.json
-├── include/
-│   ├── binance.hpp
-│   ├── chart.hpp
-│   ├── config.hpp
-│   ├── rsi.hpp
-│   ├── secrets.hpp
-│   ├── sma.hpp
-│   ├── strategy.hpp
-│   ├── style.hpp
-│   ├── trader.hpp
-│   └── wsclient.hpp
-├── lib/json.hpp
+│── build/
+│── config/
+│	├── risk.json
+│	└── secrets.json
 ├── src/
-│   ├── binance.cpp
-│   ├── chart.cpp
-│   ├── config.cpp
-│   ├── main.cpp
-│   ├── rsi.cpp
-│   ├── secrets.cpp
-│   ├── sma.cpp
-│   ├── strategy.cpp
-│   ├── trader.cpp
-│   └── wsclient.cpp
+│	├── nlohmann/
+│	│	└── json.hpp
+│	├── sentum/
+│	│	├── api/
+│	│	│	├── binance.cpp
+│	│	│	└── binance.hpp
+│	│	├── chart/
+│	│	│	├── chart.cpp
+│	│	│	└── chart.hpp
+│	│	├── core/
+│	│	│	├── trader.cpp
+│	│	│	└── trader.hpp
+│	│	├── strategy/
+│	│	│	├── rsi.cpp
+│	│	│	├── rsi.hpp
+│	│	│	├── sma.cpp
+│	│	│	├── sma.hpp
+│	│	│	├── strategy.cpp
+│	│	│	└── strategy.hpp
+│	│	├── utils/
+│	│	│	├── config.cpp
+│	│	│	├── config.hpp
+│	│	│	├── secrets.cpp
+│	│	│	├── secrets.hpp
+│	│	│	└── style.hpp
+│	│	└── websocket/
+│	│		├── wsclient.cpp
+│	│		└── wsclient.hpp
+│	└── main.cpp
 |── .gitignore
 |── clean.sh
 |── CMakeLists.txt
 |── DISCLAIMER.md
 |── LICENSE.md
 └── README.md
-
-/src			→ Source code 
-/include		→ Headers
-/lib			→ External libraries (e.g. json)
-/build			→ Build artifacts (ignored in Git)
-/config			→ Config files (e.g. risk.json, secrets.json)
 
 example secrets.json
 {
