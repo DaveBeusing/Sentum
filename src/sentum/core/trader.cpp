@@ -21,7 +21,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
-#include "../include/trader.hpp"
+#include "trader.hpp"
 #include <iostream>
 #include <fstream>
 #include <chrono>

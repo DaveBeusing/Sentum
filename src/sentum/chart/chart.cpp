@@ -21,7 +21,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
-#include "../include/chart.hpp"
+#include "chart.hpp"
 #include <iostream>
 #include <iomanip>
 #include <algorithm>

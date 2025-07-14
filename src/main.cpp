@@ -22,16 +22,16 @@
  * 
  */
 
-#include "../include/wsclient.hpp"
-#include "../include/config.hpp"
-#include "../include/secrets.hpp"
-#include "../include/binance.hpp"
-#include "../include/rsi.hpp"
-#include "../include/sma.hpp"
-#include "../include/strategy.hpp"
-#include "../include/trader.hpp"
-#include "../include/chart.hpp"
-#include "../include/style.hpp"
+#include "sentum/websocket/wsclient.hpp"
+#include "sentum/utils/config.hpp"
+#include "sentum/utils/secrets.hpp"
+#include "sentum/api/binance.hpp"
+#include "sentum/strategy/rsi.hpp"
+#include "sentum/strategy/sma.hpp"
+#include "sentum/strategy/strategy.hpp"
+#include "sentum/core/trader.hpp"
+#include "sentum/chart/chart.hpp"
+#include "sentum/utils/style.hpp"
 
 #include <iostream>
 #include <vector>
@@ -54,7 +54,7 @@ void clear_terminal() {
 int main() {
 
 	//Load secrets
-	Secrets secrets = load_secrets("../config/secrets.json");
+	Secrets secrets = load_secrets("config/secrets.json");
 	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
 		std::cerr << "❌ Secrets missing! please check config/secrets.json.\n";
 		return 1;
@@ -71,7 +71,7 @@ int main() {
 	std::vector<double> equity_history;
 
 	//Load Risk config
-	RiskConfig risk = load_risk_config("../config/risk.json");
+	RiskConfig risk = load_risk_config("config/risk.json");
 	Trader trader(symbol, risk);
 
 	//Start Stream

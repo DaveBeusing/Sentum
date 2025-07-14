@@ -21,26 +21,26 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
+#include "strategy.hpp"
+#include "sma.hpp"
+#include "rsi.hpp"
+#include <numeric>
 
-#include "../include/secrets.hpp"
-#include "../lib/json.hpp"
-#include <fstream>
-#include <iostream>
+Signal sma_crossover_strategy(const std::vector<double>& prices, int short_p, int long_p) {
+	if (prices.size() < static_cast<std::size_t>(long_p)) return Signal::HOLD;
+	double short_sma = calculate_sma(prices, short_p);
+	double long_sma = calculate_sma(prices, long_p);
+	if (short_sma > long_sma) return Signal::BUY;
+	if (short_sma < long_sma) return Signal::SELL;
+	return Signal::HOLD;
+}
 
-Secrets load_secrets(const std::string& path) {
-	Secrets s;
-	std::ifstream file(path);
-	if (!file.is_open()) {
-		std::cerr << "⚠️ Error can't open secrets.json: " << path << std::endl;
-		return s;
-	}
-	try {
-		nlohmann::json json;
-		file >> json;
-		s.api_key = json.value("api_key", "");
-		s.api_secret = json.value("api_secret", "");
-	} catch (const std::exception& e) {
-		std::cerr << "⚠️ Error parsing secrets.json: " << e.what() << std::endl;
-	}
-	return s;
+TradeSignal combined_sma_rsi_strategy(const std::vector<double>& prices, int sma_short, int sma_long, int rsi_period) {
+	if (prices.size() < std::max(sma_long, rsi_period)) return TradeSignal::HOLD;
+	double sma_s = calculate_sma(prices, sma_short);
+	double sma_l = calculate_sma(prices, sma_long);
+	double rsi = calculate_rsi(prices, rsi_period);
+	if (sma_s > sma_l && rsi < 30) return TradeSignal::BUY;
+	if (sma_s < sma_l && rsi > 70) return TradeSignal::SELL;
+	return TradeSignal::HOLD;
 }

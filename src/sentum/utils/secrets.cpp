@@ -21,13 +21,26 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
-#pragma once
-#include <vector>
-#include <string>
-#include "../include/trader.hpp" // für TradePosition
 
-class Chart {
-public:
-	static void draw_price_chart(const std::vector<double>& prices, const std::string& symbol, const TradePosition& position);
-	static void draw_equity_chart(const std::vector<double>& equity_history, int win_count, int lose_count, double winrate, int total_trades, double average_profit);
-};
+#include "secrets.hpp"
+#include "nlohmann/json.hpp"
+#include <fstream>
+#include <iostream>
+
+Secrets load_secrets(const std::string& path) {
+	Secrets s;
+	std::ifstream file(path);
+	if (!file.is_open()) {
+		std::cerr << " ⚠️  Error can't open secrets.json: " << path << std::endl;
+		return s;
+	}
+	try {
+		nlohmann::json json;
+		file >> json;
+		s.api_key = json.value("api_key", "");
+		s.api_secret = json.value("api_secret", "");
+	} catch (const std::exception& e) {
+		std::cerr << " ⚠️  Error parsing secrets.json: " << e.what() << std::endl;
+	}
+	return s;
+}

@@ -3,18 +3,19 @@ project(sentum)
 
 set(CMAKE_CXX_STANDARD 17)
 
-include_directories(
-	include
-	lib
-	/usr/include
-	${CURL_INCLUDE_DIR}
-)
-
-file(GLOB SOURCES "src/*.cpp")
+file(GLOB_RECURSE SOURCES "src/*.cpp")
 
 add_executable(
 	client
 	${SOURCES}
+)
+
+target_include_directories(
+	client
+	PRIVATE
+		${CMAKE_SOURCE_DIR}/src
+		${CURL_INCLUDE_DIR}
+		/usr/include
 )
 
 # CURL + Boost + OpenSSL
@@ -30,4 +31,11 @@ target_link_libraries(
 		OpenSSL::Crypto
 		pthread
 		${CURL_LIBRARIES}
+)
+
+add_custom_command(
+	TARGET client POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:client> ${CMAKE_SOURCE_DIR}/client
+	COMMAND strip ${CMAKE_SOURCE_DIR}/client
+	COMMENT "Copy and optimize binary with strip"
 )

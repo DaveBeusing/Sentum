@@ -21,29 +21,11 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
+#include "sma.hpp"
+#include <numeric>
 
-#include "../include/config.hpp"
-#include "../lib/json.hpp"
-#include <fstream>
-#include <iostream>
-
-RiskConfig load_risk_config(const std::string& path) {
-	RiskConfig config;
-	std::ifstream file(path);
-	if (!file.is_open()) {
-		std::cerr << "⚠️ Error can't open risk.json : " << path << std::endl;
-		return config;
-	}
-	try {
-		nlohmann::json json;
-		file >> json;
-		config.max_total_usdt      = json.value("max_total_usdt", 1000.0);
-		config.risk_per_trade      = json.value("risk_per_trade", 0.1);
-		config.stop_loss_percent   = json.value("stop_loss_percent", 0.03);
-		config.take_profit_percent = json.value("take_profit_percent", 0.05);
-		config.fee_percent         = json.value("fee_percent", 0.001);
-	} catch (const std::exception& e) {
-		std::cerr << "⚠️ Error can't parse risk.json: " << e.what() << std::endl;
-	}
-	return config;
+double calculate_sma(const std::vector<double>& prices, int period) {
+	if (prices.size() < static_cast<std::size_t>(period)) return 0.0;
+	double sum = std::accumulate(prices.end() - period, prices.end(), 0.0);
+	return sum / period;
 }

@@ -1,9 +1,14 @@
-# === Build-Files ===
+# Build direcotry
 build/
 
-# === Compiled Binaries & Objects ===
+# Executable
+client
+
+# Logfiles
+*.csv
+
+# Objects 
 *.o
 
-# === Secrets ===
-secrets.conf
+# Secrets 
 config/secrets.json

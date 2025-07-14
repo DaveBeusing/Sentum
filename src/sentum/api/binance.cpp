@@ -22,8 +22,8 @@
  * 
  */
 
-#include "../include/binance.hpp"
-#include "../lib/json.hpp"
+#include "binance.hpp"
+#include "nlohmann/json.hpp"
 #include <curl/curl.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
