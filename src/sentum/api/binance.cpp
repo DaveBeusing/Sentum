@@ -127,7 +127,37 @@ double Binance::get_coin_balance(const std::string& asset_symbol) {
 			}
 		}
 	} catch (...) {
-		std::cerr << "Error parsing account response" << std::endl;
+		std::cerr << "Error parsing balance response" << std::endl;
 	}
 	return 0.0;
+}
+
+std::vector<Kline> Binance::get_historical_klines(const std::string& symbol, const std::string& interval, int limit) {
+	std::string url = "https://api.binance.com/api/v3/klines?symbol=" + symbol + "&interval=" + interval + "&limit=" + std::to_string(limit);
+	std::string response;
+	CURL* curl = curl_easy_init();
+	if (curl) {
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+	}
+	std::vector<Kline> klines;
+	try {
+		auto json_data = json::parse(response);
+		for (const auto& entry : json_data) {
+			Kline kline{
+				std::stod(entry[1].get<std::string>()), // open
+				std::stod(entry[2].get<std::string>()), // high
+				std::stod(entry[3].get<std::string>()), // low
+				std::stod(entry[4].get<std::string>()), // close
+				std::stod(entry[5].get<std::string>())  // volume
+			};
+			klines.push_back(kline);
+		}
+	} catch (const std::exception& e) {
+		std::cerr << "Error parsing Klines: " << e.what() << "\n";
+	}
+	return klines;
 }

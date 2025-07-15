@@ -24,6 +24,15 @@
 
 #pragma once
 #include <string>
+#include <vector>
+
+struct Kline {
+	double open;
+	double high;
+	double low;
+	double close;
+	double volume;
+};
 
 class Binance {
 	public:
@@ -31,6 +40,7 @@ class Binance {
 		double get_current_price(const std::string& symbol);
 		std::string send_signed_order(const std::string& symbol, const std::string& quantity);
 		double get_coin_balance(const std::string& asset_symbol);
+		std::vector<Kline> get_historical_klines(const std::string& symbol, const std::string& interval, int limit);
 
 	private:
 		std::string api_key_;
