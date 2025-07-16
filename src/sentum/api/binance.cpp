@@ -148,6 +148,7 @@ std::vector<Kline> Binance::get_historical_klines(const std::string& symbol, con
 		auto json_data = json::parse(response);
 		for (const auto& entry : json_data) {
 			Kline kline{
+				entry[0].get<int64_t>(),                // timestamp (Open Time)
 				std::stod(entry[1].get<std::string>()), // open
 				std::stod(entry[2].get<std::string>()), // high
 				std::stod(entry[3].get<std::string>()), // low
@@ -157,7 +158,7 @@ std::vector<Kline> Binance::get_historical_klines(const std::string& symbol, con
 			klines.push_back(kline);
 		}
 	} catch (const std::exception& e) {
-		std::cerr << "Error parsing Klines: " << e.what() << "\n";
+		std::cerr << "Error parsing klines: " << e.what() << "\n";
 	}
 	return klines;
 }

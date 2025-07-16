@@ -23,29 +23,21 @@
  */
 
 #pragma once
+
+#include "api/binance.hpp"
 #include <string>
 #include <vector>
+#include <sqlite3.h>
 
-struct Kline {
-	int64_t timestamp;
-	double open;
-	double high;
-	double low;
-	double close;
-	double volume;
-};
+class Database {
+public:
+	explicit Database(const std::string& db_path);
+	~Database();
 
-class Binance {
-	public:
-		Binance(const std::string& api_key, const std::string& api_secret);
-		double get_current_price(const std::string& symbol);
-		std::string send_signed_order(const std::string& symbol, const std::string& quantity);
-		double get_coin_balance(const std::string& asset_symbol);
-		std::vector<Kline> get_historical_klines(const std::string& symbol, const std::string& interval, int limit);
+	bool save_klines(const std::string& symbol, const std::vector<Kline>& klines);
+	std::vector<Kline> load_klines(const std::string& symbol, int limit = 100);
 
-	private:
-		std::string api_key_;
-		std::string api_secret_;
-		std::string get_timestamp() const;
-		std::string hmac_sha256(const std::string& data, const std::string& key) const;
+private:
+	bool ensure_table(const std::string& symbol);
+	sqlite3* db;
 };

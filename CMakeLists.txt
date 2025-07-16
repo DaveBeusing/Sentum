@@ -18,10 +18,11 @@ target_include_directories(
 		/usr/include
 )
 
-# CURL + Boost + OpenSSL
+# CURL + Boost + OpenSSL + SQLite3
 find_package(CURL REQUIRED)
 find_package(Boost REQUIRED system)
 find_package(OpenSSL REQUIRED)
+find_package(SQLite3 REQUIRED)
 
 target_link_libraries(
 	client
@@ -29,6 +30,7 @@ target_link_libraries(
 		Boost::system
 		OpenSSL::SSL
 		OpenSSL::Crypto
+		SQLite::SQLite3
 		pthread
 		${CURL_LIBRARIES}
 )
