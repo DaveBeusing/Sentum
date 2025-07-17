@@ -4,8 +4,8 @@ build/
 # Executable
 client
 
-# Logfiles
-*.csv
+# Logfiles & SQLite3 Database
+log/
 
 # Objects 
 *.o

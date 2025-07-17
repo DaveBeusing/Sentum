@@ -37,15 +37,15 @@ Database::~Database() {
 
 bool Database::ensure_table(const std::string& symbol) {
 	std::string table = "klines_" + symbol;
-	std::string sql = "CREATE TABLE IF NOT EXISTS " + table + " (
-		 id INTEGER PRIMARY KEY AUTOINCREMENT,
-		 timestamp INTEGER UNIQUE,
-		 open REAL,
-		 high REAL,
-		 low REAL,
-		 close REAL,
-		 volume REAL
-		);"
+	std::string sql = "CREATE TABLE IF NOT EXISTS " + table + " ("
+		"id INTEGER PRIMARY KEY AUTOINCREMENT, "
+		"timestamp INTEGER UNIQUE, "
+		"open REAL, "
+		"high REAL, "
+		"low REAL, "
+		"close REAL, "
+		" volume REAL"
+		");";
 	char* err = nullptr;
 	if (sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &err) != SQLITE_OK) {
 		std::cerr << " Database table error: " << err << "\n";
@@ -58,10 +58,10 @@ bool Database::ensure_table(const std::string& symbol) {
 bool Database::save_klines(const std::string& symbol, const std::vector<Kline>& klines) {
 	if (!ensure_table(symbol)) return false;
 	std::string table = "klines_" + symbol;
-	std::string insert = "INSERT OR IGNORE INTO " + table_name + " (timestamp, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?);";
+	std::string insert = "INSERT OR IGNORE INTO " + table + " (timestamp, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?);";
 	sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
 	sqlite3_stmt* stmt;
-	if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+	if (sqlite3_prepare_v2(db, insert.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
 		std::cerr << " Error prepare klines insert: " << sqlite3_errmsg(db) << "\n";
 		return false;
 	}

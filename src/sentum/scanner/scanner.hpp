@@ -24,22 +24,20 @@
 
 #pragma once
 
-#include "sentum/api/binance.hpp"
-#include <string>
+#include "sentum/utils/database.hpp"
 #include <vector>
-#include <sqlite3.h>
+#include <string>
 
-class Database {
-public:
-	explicit Database(const std::string& db_path);
-	~Database();
+struct SymbolPerformance {
+	std::string symbol;
+	double cum_return;
+};
 
-	bool save_klines(const std::string& symbol, const std::vector<Kline>& klines);
-	std::vector<Kline> load_klines(const std::string& symbol, int limit = 100);
+class SymbolScanner {
+	public:
+		explicit SymbolScanner(Database& db);
+		std::vector<SymbolPerformance> fetch_top_performers(int lookback = 2, int max_symbols = 5);
 
-	sqlite3* get_connection() const { return db; }
-
-private:
-	bool ensure_table(const std::string& symbol);
-	sqlite3* db;
+	private:
+		Database& database;
 };

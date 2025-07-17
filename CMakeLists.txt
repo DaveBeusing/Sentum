@@ -39,5 +39,5 @@ add_custom_command(
 	TARGET client POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:client> ${CMAKE_SOURCE_DIR}/client
 	COMMAND strip ${CMAKE_SOURCE_DIR}/client
-	COMMENT "Copy and optimize binary with strip"
+	COMMENT " ⇒ Strip optimize binary..."
 )
