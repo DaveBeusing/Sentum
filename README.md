@@ -90,9 +90,10 @@ cd sentum
 ```
 ### 3. Build
 ```bash
-mkdir build && cd build
+mkdir build 
+cd build
 cmake ..
-make
+make -j$(nproc)
 ```
 ### 4. Run
 ```bash
