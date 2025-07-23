@@ -22,26 +22,8 @@
  * 
  */
 
-#include <fstream>
-#include <iostream>
+#pragma once
+#include "sentum/trader/trader.hpp"
+#include <string>
 
-#include "sentum/utils/config.hpp"
-#include "nlohmann/json.hpp"
-
-
-Config load_config( const std::string& path ){
-	Config config;
-	std::ifstream file( path );
-	if( !file.is_open() ){
-		std::cerr << " |x|  Error can't open config.json: " << path << std::endl;
-		return config;
-	}
-	try {
-		nlohmann::json json;
-		file >> json;
-		config.quoteAsset = json.value( "quoteAsset", "USDC" );
-	} catch (const std::exception& e) {
-		std::cerr << " |x|  Error parsing config.json: " << e.what() << std::endl;
-	}
-	return config;
-}
+RiskConfig load_risk_config(const std::string& path);

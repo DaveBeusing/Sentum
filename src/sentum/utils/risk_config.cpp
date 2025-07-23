@@ -22,26 +22,28 @@
  * 
  */
 
+#include "sentum/utils/risk_config.hpp"
+#include "nlohmann/json.hpp"
 #include <fstream>
 #include <iostream>
 
-#include "sentum/utils/config.hpp"
-#include "nlohmann/json.hpp"
-
-
-Config load_config( const std::string& path ){
-	Config config;
-	std::ifstream file( path );
-	if( !file.is_open() ){
-		std::cerr << " |x|  Error can't open config.json: " << path << std::endl;
+RiskConfig load_risk_config(const std::string& path) {
+	RiskConfig config;
+	std::ifstream file(path);
+	if (!file.is_open()) {
+		std::cerr << " ⚠️  Error can't open risk.json : " << path << std::endl;
 		return config;
 	}
 	try {
 		nlohmann::json json;
 		file >> json;
-		config.quoteAsset = json.value( "quoteAsset", "USDC" );
+		config.max_total_usdt      = json.value("max_total_usdt", 1000.0);
+		config.risk_per_trade      = json.value("risk_per_trade", 0.1);
+		config.stop_loss_percent   = json.value("stop_loss_percent", 0.03);
+		config.take_profit_percent = json.value("take_profit_percent", 0.05);
+		config.fee_percent         = json.value("fee_percent", 0.001);
 	} catch (const std::exception& e) {
-		std::cerr << " |x|  Error parsing config.json: " << e.what() << std::endl;
+		std::cerr << " ⚠️  Error can't parse risk.json: " << e.what() << std::endl;
 	}
 	return config;
 }
