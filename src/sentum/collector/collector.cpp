@@ -22,17 +22,20 @@
  * 
  */
 
-#include "sentum/collector/collector.hpp"
-#include "sentum/utils/database.hpp"
-#include <websocketpp/config/asio_client.hpp>
-#include <websocketpp/client.hpp>
-#include <boost/asio/ssl/context.hpp>
-#include <nlohmann/json.hpp>
 #include <iostream>
 #include <fstream>
 #include <ctime>
 #include <iomanip>
 #include <thread>
+
+#include <websocketpp/config/asio_client.hpp>
+#include <websocketpp/client.hpp>
+#include <boost/asio/ssl/context.hpp>
+
+#include "nlohmann/json.hpp"
+#include "sentum/collector/collector.hpp"
+#include "sentum/utils/database.hpp"
+#include "sentum/utils/helper.hpp"
 
 using json = nlohmann::json;
 using client = websocketpp::client<websocketpp::config::asio_tls_client>;
@@ -89,7 +92,9 @@ void Collector::run() {
 			entry.low       = std::stod(k["l"].get<std::string>());
 			entry.close     = std::stod(k["c"].get<std::string>());
 			entry.volume    = std::stod(k["v"].get<std::string>());
-			db_ref.save_klines(symbol, {entry});
+			if (!db_ref.save_klines(symbol, {entry})) {
+				log_message(log, "save_klines() failed for " + symbol);
+			}
 			//std::cout << "[" << symbol << "] @ " << entry.timestamp << "\n";
 		} catch (const std::exception& e) {
 			std::string msg = std::string("Collector::run().set_message_handler parsing error: ") + e.what();
@@ -119,9 +124,9 @@ void Collector::run() {
 	});
 
 	// URL zusammenbauen
-	std::string url = "wss://stream.binance.com:9443/stream?streams=";
+	std::string url = "wss://stream.binance.com:443/stream?streams=";
 	for (size_t i = 0; i < symbols.size(); ++i) {
-		url += symbols[i] + "@kline_1m";
+		url += helper::to_lowercase( symbols[i] ) + "@kline_1m";
 		if (i < symbols.size() - 1) url += "/";
 	}
 	websocketpp::lib::error_code ec;

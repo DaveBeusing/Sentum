@@ -24,25 +24,25 @@
 
 #pragma once
 
-#include "sentum/utils/database.hpp"
 #include <string>
 #include <vector>
 #include <thread>
 #include <atomic>
 
-class Collector {
-public:
-	Collector(Database& db, const std::vector<std::string>& symbols);
-	~Collector();
+#include "sentum/utils/database.hpp"
 
-	void start();
-	void stop();
+class Collector {
+	public:
+		Collector(Database& db, const std::vector<std::string>& symbols);
+		~Collector();
+		void start();
+		void stop();
 
 private:
 	void run();
-
 	Database& db_ref;
 	std::vector<std::string> symbols;
 	std::thread ws_thread;
 	std::atomic<bool> running;
+
 };
