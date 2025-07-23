@@ -22,7 +22,7 @@
  * 
  */
 
-#include "config.hpp"
+#include "sentum/utils/config.hpp"
 #include "nlohmann/json.hpp"
 #include <fstream>
 #include <iostream>

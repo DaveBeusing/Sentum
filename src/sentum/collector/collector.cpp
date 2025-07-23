@@ -22,7 +22,7 @@
  * 
  */
 
-#include "collector.hpp"
+#include "sentum/collector/collector.hpp"
 #include "sentum/utils/database.hpp"
 #include <websocketpp/config/asio_client.hpp>
 #include <websocketpp/client.hpp>

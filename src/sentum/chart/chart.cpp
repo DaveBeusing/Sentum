@@ -21,10 +21,13 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
-#include "chart.hpp"
+
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+
+#include "sentum/chart/chart.hpp"
+
 
 void Chart::draw_price_chart(const std::vector<double>& prices, const std::string& symbol, const TradePosition& position) {
 	if (prices.empty()) return;

@@ -22,7 +22,7 @@
  * 
  */
 
-#include "scanner.hpp"
+#include "sentum/scanner/scanner.hpp"
 #include "sentum/utils/database.hpp"
 #include <sqlite3.h>
 #include <iostream>
