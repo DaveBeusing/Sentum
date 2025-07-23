@@ -81,7 +81,7 @@ example secrets.json
 ### 1. Prepare your system
 ```bash
 sudo apt update
-sudo apt install -y build-essential libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libssl-dev cmake git libwebsocketpp-dev
+sudo apt install -y build-essential libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libssl-dev cmake git libwebsocketpp-dev sqlite3 libsqlite3-dev
 ```
 ### 2. Clone the repository
 ```bash
