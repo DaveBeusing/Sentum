@@ -22,10 +22,16 @@
  * 
  */
 
-#include "database.hpp"
 #include <iostream>
+#include <filesystem>
+
+#include "sentum/utils/database.hpp"
+
 
 Database::Database(const std::string& db_path) : db(nullptr) {
+	if (std::filesystem::exists(db_path)) {
+		std::filesystem::remove(db_path);
+	}
 	if (sqlite3_open(db_path.c_str(), &db) != SQLITE_OK) {
 		std::cerr << " Error open database: " << sqlite3_errmsg(db) << "\n";
 	}
@@ -39,12 +45,12 @@ bool Database::ensure_table(const std::string& symbol) {
 	std::string table = "klines_" + symbol;
 	std::string sql = "CREATE TABLE IF NOT EXISTS " + table + " ("
 		"id INTEGER PRIMARY KEY AUTOINCREMENT, "
-		"timestamp INTEGER UNIQUE, "
+		"timestamp INTEGER NOT NULL UNIQUE, "
 		"open REAL, "
 		"high REAL, "
 		"low REAL, "
 		"close REAL, "
-		" volume REAL"
+		"volume REAL"
 		");";
 	char* err = nullptr;
 	if (sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &err) != SQLITE_OK) {
@@ -56,7 +62,8 @@ bool Database::ensure_table(const std::string& symbol) {
 }
 
 bool Database::save_klines(const std::string& symbol, const std::vector<Kline>& klines) {
-	if (!ensure_table(symbol)) return false;
+	if( klines.empty() ) return false;
+	if( !ensure_table( symbol ) ) return false;
 	std::string table = "klines_" + symbol;
 	std::string insert = "INSERT OR IGNORE INTO " + table + " (timestamp, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?);";
 	sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
