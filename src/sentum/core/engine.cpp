@@ -26,13 +26,9 @@
 #include <iostream>
 
 #include "sentum/core/engine.hpp"
-//#include "sentum/utils/config.hpp"
+#include "sentum/utils/config.hpp"
 #include "sentum/utils/secrets.hpp"
-
-
-std::vector<std::string> get_trading_symbols() {
-	return { "BTCUSDC", "ETHUSDC", "SHIBUSDC" };
-}
+#include "sentum/ui/ui.hpp"
 
 
 Engine::Engine() : running(false) {}
@@ -61,7 +57,7 @@ void Engine::stop() {
 void Engine::init() {
 
 	//Load global config
-	//TODO
+	Config config = load_config( "config/config.json" );
 
 	//Load secrets
 	Secrets secrets = load_secrets("config/secrets.json");
@@ -69,17 +65,21 @@ void Engine::init() {
 		std::cerr << "Secrets missing! please check config/secrets.json.\n";
 		//return 1;
 	}
-	std::cout << "API-Key: " << secrets.api_key.substr(0, 6) << "****\n";
 
 	//Initialize components
 	db = std::make_unique<Database>("log/klines.sqlite3");
 	binance = std::make_unique<Binance>( secrets.api_key, secrets.api_secret );
-	collector = std::make_unique<Collector>(*db, get_trading_symbols());
+	auto markets = binance->get_markets_by_quote( config.quoteAsset );
+	collector = std::make_unique<Collector>(*db, markets );
 	scanner = std::make_unique<SymbolScanner>(*db);
 	collector->start();
 
-	double balance = binance->get_coin_balance("USDC");
-	std::cout << "Current Wallet: " << balance << " USDC\n";
+	double balance = binance->get_coin_balance( config.quoteAsset );
+	//std::cout << ui::wrap("Sentum", ui::bold()) << " - Intelligent Signals. Real-Time Decisions. Confident Trading.\n\n";
+	std::cout << "API-Key: " << secrets.api_key.substr(0, 10) << "******\n";
+	//Show balance and num target markets
+	std::cout << "Available Balance: " << balance << " " << config.quoteAsset << "\n";
+	std::cout << markets.size() << " " << config.quoteAsset << " Markets \n";
 }
 
 void Engine::run_main_loop() {
