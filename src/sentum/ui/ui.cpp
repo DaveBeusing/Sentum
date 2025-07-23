@@ -47,6 +47,10 @@ namespace ui {
 		return style_code + text + reset();
 	}
 
+	void show_header(){
+		std::cout << wrap( "Sentum", bold() ) << " - Intelligent Signals. Real-Time Decisions. Confident Trading.\n\n";
+	}
+
 	void clear_terminal() {
 		std::cout << "\033[2J\033[1;1H";
 	}

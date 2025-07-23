@@ -23,11 +23,13 @@
  */
 
 #pragma once
+
 #include <string>
 #include <sstream>
 #include <iomanip>
 
 namespace ui {
+
 	std::string reset();
 	std::string bold();
 	std::string red();
@@ -54,6 +56,7 @@ namespace ui {
 		return style_code + oss.str() + reset();
 	}
 
+	void show_header();
 	void clear_terminal();
 	void countdown_progress(int seconds);
 }
