@@ -23,8 +23,12 @@
  */
 
 #pragma once
+
 #include <string>
 #include <vector>
+
+#include "nlohmann/json.hpp"
+
 
 struct Kline {
 	int64_t timestamp;
@@ -42,6 +46,8 @@ class Binance {
 		std::string send_signed_order(const std::string& symbol, const std::string& quantity);
 		double get_coin_balance(const std::string& asset_symbol);
 		std::vector<Kline> get_historical_klines(const std::string& symbol, const std::string& interval, int limit);
+		static nlohmann::json get_exchange_info();
+		static std::vector<std::string> get_markets_by_quote(const std::string& quote_asset);
 
 	private:
 		std::string api_key_;

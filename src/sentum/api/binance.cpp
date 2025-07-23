@@ -22,15 +22,16 @@
  * 
  */
 
-#include "binance.hpp"
-#include "nlohmann/json.hpp"
+#include <iostream>
+#include <sstream>
+#include <iomanip>
+#include <chrono>
 #include <curl/curl.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
-#include <chrono>
-#include <sstream>
-#include <iomanip>
-#include <iostream>
+
+#include "nlohmann/json.hpp"
+#include "sentum/api/binance.hpp"
 
 using json = nlohmann::json;
 
@@ -161,4 +162,40 @@ std::vector<Kline> Binance::get_historical_klines(const std::string& symbol, con
 		std::cerr << "Error parsing klines: " << e.what() << "\n";
 	}
 	return klines;
+}
+
+json Binance::get_exchange_info() {
+	std::string url = "https://api.binance.com/api/v3/exchangeInfo";
+	std::string response;
+	CURL* curl = curl_easy_init();
+	if (curl) {
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+	}
+	try {
+		return json::parse(response);
+	} catch (const std::exception& e) {
+		std::cerr << "Error parsing exchange info: " << e.what() << "\n";
+		return {};
+	}
+}
+
+std::vector<std::string> Binance::get_markets_by_quote(const std::string& quote_asset) {
+	std::vector<std::string> markets;
+	json info = get_exchange_info();
+	if (!info.contains("symbols")) {
+		std::cerr << "Exchange info response invalid.\n";
+		return markets;
+	}
+	for (const auto& symbol : info["symbols"]) {
+		if (symbol["status"] == "TRADING" &&
+			symbol["quoteAsset"] == quote_asset &&
+			symbol["isSpotTradingAllowed"].get<bool>()) {
+			markets.push_back(symbol["symbol"].get<std::string>());
+		}
+	}
+	return markets;
 }
