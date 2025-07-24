@@ -84,7 +84,7 @@ void Collector::run() {
 			auto payload = json::parse(msg->get_payload());
 			if (!payload.contains("data")) return;
 			auto k = payload["data"]["k"];
-			std::string symbol = k["s"];
+			std::string symbol = helper::to_lowercase(k["s"].get<std::string>());
 			Kline entry;
 			entry.timestamp = k["t"];
 			entry.open      = std::stod(k["o"].get<std::string>());
@@ -124,9 +124,11 @@ void Collector::run() {
 	});
 
 	// URL zusammenbauen
+	// https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams#klinecandlestick-streams-for-utc
+	// 1s 1m 3m 5m 15m 30m 1h
 	std::string url = "wss://stream.binance.com:443/stream?streams=";
 	for (size_t i = 0; i < symbols.size(); ++i) {
-		url += helper::to_lowercase( symbols[i] ) + "@kline_1m";
+		url += helper::to_lowercase( symbols[i] ) + "@kline_1s";//1m
 		if (i < symbols.size() - 1) url += "/";
 	}
 	websocketpp::lib::error_code ec;
