@@ -21,12 +21,15 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
-#include "sentum/trader/trader.hpp"
+
 #include <iostream>
 #include <fstream>
 #include <chrono>
 #include <iomanip>
 #include <thread>
+
+#include <sentum/trader/trader.hpp>
+
 
 Trader::Trader(const std::string& symbol_, Database& db_, Binance& api_) : symbol(symbol_), database(db_), api(api_), running(true) {}
 

@@ -21,47 +21,13 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
+
 #pragma once
 
-#include <atomic>
-#include <string>
-
-#include <sentum/trader/types/risk_config.hpp>
-#include <sentum/trader/types/trade_position.hpp>
-#include <sentum/trader/types/trade_action.hpp>
-#include <sentum/utils/database.hpp>
-#include <sentum/api/binance.hpp>
-
-
-class Trader {
-
-	public:
-
-		Trader(const std::string& symbol, Database& db, Binance& binance);
-		void run();
-		void stop();
-
-		//Trader(std::string symbol, RiskConfig config);
-		TradeAction evaluate(double price, double sma5, double sma20, double rsi);
-		const TradePosition& get_position() const;
-		double get_total_profit() const;
-		int get_win_count() const;
-		int get_lose_count() const;
-		double get_winrate_percent() const;
-		int get_total_trades() const;
-		double get_average_profit() const;
-
-	private:
-		std::string symbol;
-		Database& database;
-		Binance& api;
-		std::atomic<bool> running;
-
-		void log_trade(TradeAction action, double price);
-		RiskConfig risk;
-		TradePosition position;
-		double total_profit;
-		int win_count;
-		int lose_count;
-
+struct RiskConfig {
+	double max_total_usdt = 1000.0;			// z. B. Gesamtbudget
+	double risk_per_trade = 0.1;			// z. B. 10 % pro Trade
+	double stop_loss_percent = 0.02;		// z. B. 2 % SL
+	double take_profit_percent = 0.01;		// z. B. 1 % TP (optional)
+	double fee_percent = 0.001;				// 0.1% Standard Binance Fee (0.095% Taker 0.1% Maker)
 };

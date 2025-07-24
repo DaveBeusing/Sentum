@@ -21,47 +21,17 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
+
 #pragma once
 
-#include <atomic>
-#include <string>
+#include <chrono>
 
-#include <sentum/trader/types/risk_config.hpp>
-#include <sentum/trader/types/trade_position.hpp>
-#include <sentum/trader/types/trade_action.hpp>
-#include <sentum/utils/database.hpp>
-#include <sentum/api/binance.hpp>
-
-
-class Trader {
-
-	public:
-
-		Trader(const std::string& symbol, Database& db, Binance& binance);
-		void run();
-		void stop();
-
-		//Trader(std::string symbol, RiskConfig config);
-		TradeAction evaluate(double price, double sma5, double sma20, double rsi);
-		const TradePosition& get_position() const;
-		double get_total_profit() const;
-		int get_win_count() const;
-		int get_lose_count() const;
-		double get_winrate_percent() const;
-		int get_total_trades() const;
-		double get_average_profit() const;
-
-	private:
-		std::string symbol;
-		Database& database;
-		Binance& api;
-		std::atomic<bool> running;
-
-		void log_trade(TradeAction action, double price);
-		RiskConfig risk;
-		TradePosition position;
-		double total_profit;
-		int win_count;
-		int lose_count;
-
+struct TradePosition {
+	bool open = false;
+	double entry_price = 0.0;
+	double quantity = 0.0;
+	double highest_price = 0.0;
+	double stop_loss_price = 0.0;
+	double take_profit_price = 0.0;
+	std::chrono::system_clock::time_point entry_time;
 };
