@@ -22,36 +22,44 @@
  * 
  */
 
-#include "sentum/scanner/scanner.hpp"
-#include "sentum/utils/database.hpp"
-#include <sqlite3.h>
+
 #include <iostream>
 #include <cmath>
 #include <algorithm>
+#include <sqlite3.h>
 
-SymbolScanner::SymbolScanner(Database& db_) : database(db_) {}
+#include "sentum/scanner/scanner.hpp"
+#include "sentum/utils/database.hpp"
+
+SymbolScanner::SymbolScanner(Database& db_, double threshold) : database(db_), min_return_threshold(threshold) {}
 
 std::vector<SymbolPerformance> SymbolScanner::fetch_top_performers(int lookback, int max_symbols) {
 	std::vector<SymbolPerformance> result;
 	sqlite3* db = database.get_connection();
-	std::string sql = "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'klines_%';";
+
+	// fetch all unique symbols
+	const char* sql = "SELECT DISTINCT symbol FROM klines;";
 	sqlite3_stmt* stmt;
-	if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-		std::cerr << " Error SymbolScanner::fetch_top_performers: " << sqlite3_errmsg(db) << "\n";
+	if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+		std::cerr << "SymbolScanner::fetch_top_performers -> DB error: " << sqlite3_errmsg(db) << "\n";
 		return result;
 	}
 	std::vector<std::string> symbols;
 	while (sqlite3_step(stmt) == SQLITE_ROW) {
-		std::string table = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-		if (table.rfind("klines_", 0) == 0) {
-			symbols.push_back(table.substr(7)); // remove table prefix
+		const unsigned char* sym = sqlite3_column_text(stmt, 0);
+		if (sym) {
+			symbols.emplace_back(reinterpret_cast<const char*>(sym));
 		}
 	}
 	sqlite3_finalize(stmt);
+	std::cout << "[Scanner] Fetched symbols: " << symbols.size() << "\n";
+
+	// calculate cumulative return for each symbol
 	for (const auto& symbol : symbols) {
-		std::string table = "klines_" + symbol;
-		std::string query = "SELECT close FROM " + table + " ORDER BY timestamp DESC LIMIT " + std::to_string(lookback);		
+		std::string query = "SELECT close FROM ( SELECT close FROM klines WHERE symbol = ? ORDER BY timestamp ASC LIMIT ? ) ORDER BY rowid ASC;";
 		if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) != SQLITE_OK) continue;
+		sqlite3_bind_text(stmt, 1, symbol.c_str(), -1, SQLITE_STATIC);
+		sqlite3_bind_int(stmt, 2, lookback);
 		std::vector<double> closes;
 		while (sqlite3_step(stmt) == SQLITE_ROW) {
 			closes.push_back(sqlite3_column_double(stmt, 0));
@@ -66,10 +74,16 @@ std::vector<SymbolPerformance> SymbolScanner::fetch_top_performers(int lookback,
 			cum_return *= (1.0 + pct);
 		}
 		cum_return -= 1.0;
-		if (cum_return > 0.0) {
+
+		//debug
+		std::cout << "📈 " << symbol << " | Close-Count: " << closes.size() << " | Return: " << std::fixed << std::setprecision(6) << cum_return * 100 << " %\n";
+
+		if (cum_return > min_return_threshold) {
 			result.push_back({symbol, std::round(cum_return * 1e8) / 1e8});
 		}
 	}
+
+	//sort descending
 	std::sort(result.begin(), result.end(), [](const SymbolPerformance& a, const SymbolPerformance& b) {
 		return a.cum_return > b.cum_return;
 	});

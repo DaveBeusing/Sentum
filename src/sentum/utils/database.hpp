@@ -40,6 +40,6 @@ public:
 	sqlite3* get_connection() const { return db; }
 
 private:
-	bool ensure_table(const std::string& symbol);
+	bool ensure_table();
 	sqlite3* db;
 };

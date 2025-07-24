@@ -41,46 +41,41 @@ Database::~Database() {
 	if (db) sqlite3_close(db);
 }
 
-bool Database::ensure_table(const std::string& symbol) {
-	std::string table = "klines_" + symbol;
-	std::string sql = "CREATE TABLE IF NOT EXISTS " + table + " ("
-		"id INTEGER PRIMARY KEY AUTOINCREMENT, "
-		"timestamp INTEGER NOT NULL UNIQUE, "
-		"open REAL, "
-		"high REAL, "
-		"low REAL, "
-		"close REAL, "
-		"volume REAL"
+bool Database::ensure_table() {
+	const char* sql = "CREATE TABLE IF NOT EXISTS  klines ( symbol TEXT NOT NULL, timestamp INTEGER NOT NULL, "
+		"open REAL, high REAL, low REAL, close REAL, volume REAL, PRIMARY KEY (symbol, timestamp)"
 		");";
+	const char* index = "CREATE INDEX IF NOT EXISTS idx_klines_symbol_ts ON klines(symbol, timestamp DESC);";
 	char* err = nullptr;
-	if (sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &err) != SQLITE_OK) {
+	if (sqlite3_exec(db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
 		std::cerr << " Database table error: " << err << "\n";
 		sqlite3_free(err);
 		return false;
 	}
+	sqlite3_exec(db, index, nullptr, nullptr, nullptr);
 	return true;
 }
 
 bool Database::save_klines(const std::string& symbol, const std::vector<Kline>& klines) {
 	if( klines.empty() ) return false;
-	if( !ensure_table( symbol ) ) return false;
-	std::string table = "klines_" + symbol;
-	std::string insert = "INSERT OR IGNORE INTO " + table + " (timestamp, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?);";
+	if( !ensure_table() ) return false;
+	const char* insert = "INSERT OR IGNORE INTO klines (symbol, timestamp, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?);";
 	sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
 	sqlite3_stmt* stmt;
-	if (sqlite3_prepare_v2(db, insert.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-		std::cerr << " Error prepare klines insert: " << sqlite3_errmsg(db) << "\n";
+	if (sqlite3_prepare_v2(db, insert, -1, &stmt, nullptr) != SQLITE_OK) {
+		std::cerr << " Kline insert error: " << sqlite3_errmsg(db) << "\n";
 		return false;
 	}
 	for (const auto& k : klines) {
-		sqlite3_bind_int64(stmt, 1, k.timestamp);
-		sqlite3_bind_double(stmt, 2, k.open);
-		sqlite3_bind_double(stmt, 3, k.high);
-		sqlite3_bind_double(stmt, 4, k.low);
-		sqlite3_bind_double(stmt, 5, k.close);
-		sqlite3_bind_double(stmt, 6, k.volume);
+		sqlite3_bind_text(stmt, 1, symbol.c_str(), -1, SQLITE_STATIC);
+		sqlite3_bind_int64(stmt, 2, k.timestamp);
+		sqlite3_bind_double(stmt, 3, k.open);
+		sqlite3_bind_double(stmt, 4, k.high);
+		sqlite3_bind_double(stmt, 5, k.low);
+		sqlite3_bind_double(stmt, 6, k.close);
+		sqlite3_bind_double(stmt, 7, k.volume);
 		if (sqlite3_step(stmt) != SQLITE_DONE) {
-			std::cerr << " Error insert klines: " << sqlite3_errmsg(db) << "\n";
+			std::cerr << " Insert failed: " << sqlite3_errmsg(db) << "\n";
 		}
 		sqlite3_reset(stmt);
 	}
@@ -91,10 +86,11 @@ bool Database::save_klines(const std::string& symbol, const std::vector<Kline>& 
 
 std::vector<Kline> Database::load_klines(const std::string& symbol, int limit) {
 	std::vector<Kline> result;
-	std::string table = "klines_" + symbol;
-	std::string sql = "SELECT timestamp, open, high, low, close, volume FROM " + table + " ORDER BY timestamp DESC LIMIT " + std::to_string(limit);
+	std::string sql = "SELECT timestamp, open, high, low, close, volume FROM klines WHERE symbol = ? ORDER BY timestamp DESC LIMIT ?";
 	sqlite3_stmt* stmt;
 	if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+		sqlite3_bind_text(stmt, 1, symbol.c_str(), -1, SQLITE_STATIC);
+		sqlite3_bind_int(stmt, 2, limit);
 		while (sqlite3_step(stmt) == SQLITE_ROW) {
 			Kline kline;
 			kline.timestamp = sqlite3_column_int64(stmt, 0);
@@ -106,7 +102,7 @@ std::vector<Kline> Database::load_klines(const std::string& symbol, int limit) {
 			result.push_back(kline);
 		}
 	} else {
-		std::cerr << " Error load_klines: " << sqlite3_errmsg(db) << "\n";
+		std::cerr << "load_klines error: " << sqlite3_errmsg(db) << "\n";
 	}
 	sqlite3_finalize(stmt);
 	return result;

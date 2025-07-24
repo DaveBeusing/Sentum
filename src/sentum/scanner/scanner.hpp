@@ -24,9 +24,11 @@
 
 #pragma once
 
-#include "sentum/utils/database.hpp"
-#include <vector>
 #include <string>
+#include <vector>
+
+#include "sentum/utils/database.hpp"
+
 
 struct SymbolPerformance {
 	std::string symbol;
@@ -35,9 +37,10 @@ struct SymbolPerformance {
 
 class SymbolScanner {
 	public:
-		explicit SymbolScanner(Database& db);
+		explicit SymbolScanner(Database& db, double threshold = 0.0005);
 		std::vector<SymbolPerformance> fetch_top_performers(int lookback = 2, int max_symbols = 5);
 
 	private:
 		Database& database;
+		double min_return_threshold;
 };
