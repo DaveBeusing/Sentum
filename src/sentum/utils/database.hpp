@@ -24,10 +24,11 @@
 
 #pragma once
 
-#include "sentum/api/binance.hpp"
 #include <string>
 #include <vector>
 #include <sqlite3.h>
+
+#include <sentum/api/model/kline.hpp>
 
 class Database {
 public:

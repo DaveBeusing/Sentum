@@ -27,17 +27,8 @@
 #include <string>
 #include <vector>
 
-#include "nlohmann/json.hpp"
-
-
-struct Kline {
-	int64_t timestamp;
-	double open;
-	double high;
-	double low;
-	double close;
-	double volume;
-};
+#include <nlohmann/json.hpp>
+#include <sentum/api/model/kline.hpp>
 
 class Binance {
 	public:
