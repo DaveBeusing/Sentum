@@ -1,3 +1,4 @@
 {
-	"quoteAsset" : "USDC"
+	"quoteAsset" : "USDC",
+	"minCumulativeReturn" : 0.0
 }

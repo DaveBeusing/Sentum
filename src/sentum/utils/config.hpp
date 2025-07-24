@@ -29,7 +29,8 @@
 
 struct Config {
 
-	std::string quoteAsset; 
+	std::string quoteAsset;
+	double minCumulativeReturn;
 
 };
 

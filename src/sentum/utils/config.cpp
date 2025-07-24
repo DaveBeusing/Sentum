@@ -40,6 +40,7 @@ Config load_config( const std::string& path ){
 		nlohmann::json json;
 		file >> json;
 		config.quoteAsset = json.value( "quoteAsset", "USDC" );
+		config.minCumulativeReturn = json.value( "minCumulativeReturn", 0.0005 ); //Default: 0.05%
 	} catch (const std::exception& e) {
 		std::cerr << " |x|  Error parsing config.json: " << e.what() << std::endl;
 	}
