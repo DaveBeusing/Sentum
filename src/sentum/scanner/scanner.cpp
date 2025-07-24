@@ -24,12 +24,13 @@
 
 
 #include <iostream>
+#include <iomanip>
 #include <cmath>
 #include <algorithm>
 #include <sqlite3.h>
 
-#include "sentum/scanner/scanner.hpp"
-#include "sentum/utils/database.hpp"
+#include <sentum/scanner/scanner.hpp>
+#include <sentum/utils/database.hpp>
 
 SymbolScanner::SymbolScanner(Database& db_, double threshold) : database(db_), min_return_threshold(threshold) {}
 
