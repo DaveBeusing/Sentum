@@ -27,7 +27,9 @@
 #include <atomic>
 #include <thread>
 #include <memory>
+#include <string>
 
+#include "sentum/utils/config.hpp"
 #include "sentum/utils/database.hpp"
 #include "sentum/collector/collector.hpp"
 #include "sentum/scanner/scanner.hpp"
@@ -58,9 +60,14 @@ class Engine {
 		std::unique_ptr<Binance> binance;
 
 		std::atomic<bool> running;
+		std::atomic<bool> trader_active;
+
 		std::thread main_thread;
 		std::thread scanner_thread;
 		std::thread trader_thread;
+
 		std::string current_symbol;
+		std::vector<std::string> markets;
+		Config config;
 
 };

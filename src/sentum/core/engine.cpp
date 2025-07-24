@@ -29,9 +29,10 @@
 #include "sentum/utils/config.hpp"
 #include "sentum/utils/secrets.hpp"
 #include "sentum/ui/ui.hpp"
+#include "sentum/ui/panel.hpp"
 
 
-Engine::Engine() : running(false) {}
+Engine::Engine() : running(false), trader_active(false) {}
 
 Engine::~Engine() {
 	stop();
@@ -45,68 +46,101 @@ void Engine::start() {
 
 void Engine::stop() {
 	running = false;
-
 	if (main_thread.joinable()) main_thread.join();
 	if (scanner_thread.joinable()) scanner_thread.join();
 	if (trader_thread.joinable()) trader_thread.join();
-
 	if (collector) collector->stop();
 	if (trader) trader->stop();
 }
 
 void Engine::init() {
-
 	//Load global config
-	Config config = load_config( "config/config.json" );
-
+	config = load_config( "config/config.json" );
 	//Load secrets
 	Secrets secrets = load_secrets("config/secrets.json");
 	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
 		std::cerr << "Secrets missing! please check config/secrets.json.\n";
-		//return 1;
+		return;
 	}
-
 	//Initialize components
 	db = std::make_unique<Database>("log/klines.sqlite3");
 	binance = std::make_unique<Binance>( secrets.api_key, secrets.api_secret );
-	auto markets = binance->get_markets_by_quote( config.quoteAsset );
+	markets = binance->get_markets_by_quote( config.quoteAsset );
 	collector = std::make_unique<Collector>(*db, markets );
-	scanner = std::make_unique<SymbolScanner>(*db);
+	scanner = std::make_unique<SymbolScanner>(*db, config.minCumulativeReturn );
 	collector->start();
-
-	double balance = binance->get_coin_balance( config.quoteAsset );
-	//std::cout << ui::wrap("Sentum", ui::bold()) << " - Intelligent Signals. Real-Time Decisions. Confident Trading.\n\n";
 	std::cout << "API-Key: " << secrets.api_key.substr(0, 10) << "******\n";
-	//Show balance and num target markets
-	std::cout << "Available Balance: " << balance << " " << config.quoteAsset << "\n";
-	std::cout << markets.size() << " " << config.quoteAsset << " Markets \n";
 }
 
 void Engine::run_main_loop() {
+	auto start_time = std::chrono::system_clock::now();
+	int scanner_interval = 10;
+	int countdown = scanner_interval;
+
 	scanner_thread = std::thread(&Engine::monitor_scanner, this);
+
+	while (running) {
+		// Optional Top-Performer-Cache für Anzeige
+		std::string top_asset = "-";
+		double top_ret = 0.0;
+
+		if (scanner) {
+			auto top = scanner->fetch_top_performers(1, 1);
+			if (!top.empty()) {
+				top_asset = top[0].symbol;
+				top_ret = top[0].cum_return * 100.0;
+			}
+		}
+
+		double balance = binance->get_coin_balance( config.quoteAsset );
+		std::string db_path = "log/klines.sqlite3";
+		size_t db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
+
+		ui::draw_status_panel(
+			config.quoteAsset,
+			markets.size(),
+			current_symbol,
+			balance,
+			top_asset,
+			top_ret,
+			countdown,
+			db_path,
+			db_size,
+			start_time,
+			true,            // collector active
+			trader_active    // trader active
+		);
+
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+		if (--countdown <= 0) countdown = scanner_interval;
+	}
+
 }
 
 void Engine::monitor_scanner() {
 	using namespace std::chrono_literals;
 	while (running) {
-		auto top = scanner->fetch_top_performers(1, 1);
-		if (!top.empty()) {
-			const auto& symbol = top[0].symbol;
-			if (symbol != current_symbol) {
-				stop_trader();
-				start_trader_for(symbol);
-				current_symbol = symbol;
+		if (!trader_active) {
+			auto top = scanner->fetch_top_performers(10, 3);//fetch 3 top markets from last 10 seconds
+			if (!top.empty()) {
+				const auto& symbol = top[0].symbol;
+				if (symbol != current_symbol) {
+					start_trader_for(symbol);
+					current_symbol = symbol;
+				}
 			}
 		}
-		std::this_thread::sleep_for(5s); // Scanner-Takt
+		std::this_thread::sleep_for(5s); // scanner takt
 	}
 }
 
 void Engine::start_trader_for(const std::string& symbol) {
 	std::cout << "Start Trader -> Symbol: " << symbol << "\n";
+	trader_active = true;
 	trader = std::make_unique<Trader>(symbol, *db, *binance);
 	trader_thread = std::thread([this] {
 		trader->run();
+		trader_active = false;
 	});
 }
 
@@ -116,4 +150,5 @@ void Engine::stop_trader() {
 		if (trader_thread.joinable()) trader_thread.join();
 	}
 	trader.reset();
+	trader_active = false;
 }
