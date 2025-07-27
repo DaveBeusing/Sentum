@@ -38,13 +38,14 @@ void Trader::stop() {
 }
 
 void Trader::run() {
-	std::cout << "📈 Trader started → " << symbol << "\n";
+	//std::cout << "📈 Trader started → " << symbol << "\n";
 
 	using namespace std::chrono_literals;
 	while (running) {
 		// Hier Strategie + Tickdaten + Execution
 		// z.B. SMA/RSI prüfen → Entry/Exit → Order senden
-		std::cout << "🔁 Trader Tick...\n";
+		//DEBUG
+		//std::cout << "🔁 Trader Tick...\n";
 		std::this_thread::sleep_for(500ms);
 	}
 

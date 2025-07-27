@@ -42,7 +42,7 @@ std::vector<SymbolPerformance> SymbolScanner::fetch_top_performers(int lookback,
 	const char* sql = "SELECT DISTINCT symbol FROM klines;";
 	sqlite3_stmt* stmt;
 	if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-		std::cerr << "SymbolScanner::fetch_top_performers -> DB error: " << sqlite3_errmsg(db) << "\n";
+		//std::cerr << "SymbolScanner::fetch_top_performers -> DB error: " << sqlite3_errmsg(db) << "\n";
 		return result;
 	}
 	std::vector<std::string> symbols;
@@ -53,7 +53,9 @@ std::vector<SymbolPerformance> SymbolScanner::fetch_top_performers(int lookback,
 		}
 	}
 	sqlite3_finalize(stmt);
-	std::cout << "[Scanner] Fetched symbols: " << symbols.size() << "\n";
+
+	//DEBUG
+	//std::cout << "[Scanner] Fetched symbols: " << symbols.size() << "\n";
 
 	// calculate cumulative return for each symbol
 	for (const auto& symbol : symbols) {
@@ -76,8 +78,8 @@ std::vector<SymbolPerformance> SymbolScanner::fetch_top_performers(int lookback,
 		}
 		cum_return -= 1.0;
 
-		//debug
-		std::cout << "📈 " << symbol << " | Close-Count: " << closes.size() << " | Return: " << std::fixed << std::setprecision(6) << cum_return * 100 << " %\n";
+		//DEBUG
+		//std::cout << "📈 " << symbol << " | Close-Count: " << closes.size() << " | Return: " << std::fixed << std::setprecision(6) << cum_return * 100 << " %\n";
 
 		if (cum_return > min_return_threshold) {
 			result.push_back({symbol, std::round(cum_return * 1e8) / 1e8});
