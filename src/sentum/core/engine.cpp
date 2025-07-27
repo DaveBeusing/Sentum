@@ -25,22 +25,35 @@
 #include <chrono>
 #include <iostream>
 
-#include "sentum/core/engine.hpp"
-#include "sentum/utils/config.hpp"
-#include "sentum/utils/secrets.hpp"
-#include "sentum/ui/ui.hpp"
-#include "sentum/ui/panel.hpp"
+#include <sentum/core/engine.hpp>
+#include <sentum/utils/config.hpp>
+#include <sentum/utils/secrets.hpp>
+#include <sentum/ui/console.hpp>
 
 
-Engine::Engine() : running(false), trader_active(false) {}
+Engine::Engine() : running(false), collector_active(false), scanner_active(false), trader_active(false) {}
 
 Engine::~Engine() {
 	stop();
 }
 
+bool Engine::is_running() const {
+	return running.load();
+}
+
 void Engine::start() {
 		running = true;
 		init();
+		ui.on_exit = [this]() { stop(); };
+		ui.on_stop_trader = [this]() { stop_trader(); };
+		ui.on_restart_collector = [this]() {
+			if (collector) {
+				collector->stop();
+				collector->start();
+				ui.set_collector_active(true);
+			}
+		};
+		ui_thread = std::thread([this] { ui.start(); });
 		main_thread = std::thread(&Engine::run_main_loop, this);
 }
 
@@ -51,70 +64,74 @@ void Engine::stop() {
 	if (trader_thread.joinable()) trader_thread.join();
 	if (collector) collector->stop();
 	if (trader) trader->stop();
+	ui.stop();
+	if (ui_thread.joinable()) ui_thread.join();
 }
 
 void Engine::init() {
-	//Load global config
 	config = load_config( "config/config.json" );
-	//Load secrets
 	Secrets secrets = load_secrets("config/secrets.json");
 	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
 		std::cerr << "Secrets missing! please check config/secrets.json.\n";
 		return;
 	}
-	//Initialize components
-	db = std::make_unique<Database>("log/klines.sqlite3");
+	db_path = "log/klines.sqlite3";
+	db = std::make_unique<Database>( db_path );
 	binance = std::make_unique<Binance>( secrets.api_key, secrets.api_secret );
 	markets = binance->get_markets_by_quote( config.quoteAsset );
 	collector = std::make_unique<Collector>(*db, markets );
+	collector_active = true;
 	scanner = std::make_unique<SymbolScanner>(*db, config.minCumulativeReturn );
+	scanner_active = true;
 	collector->start();
+	start_time = std::chrono::system_clock::now();
+	quote_balance = binance->get_coin_balance(config.quoteAsset);
+	db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
+
 	std::cout << "API-Key: " << secrets.api_key.substr(0, 10) << "******\n";
+
+
+	start_time = std::chrono::system_clock::now();
+
+	ui.set_collector_active(collector_active);
+	ui.set_scanner_active(scanner_active);
+	ui.set_trader_active(trader_active);
+
+	ui.set_balance(quote_balance);
+	ui.set_quote_asset(config.quoteAsset);
+	ui.set_markets(markets.size());
+	ui.set_start_time(start_time);
+	ui.set_db_path( db_path );
+
 }
 
 void Engine::run_main_loop() {
-	auto start_time = std::chrono::system_clock::now();
+	scanner_thread = std::thread(&Engine::monitor_scanner, this);
 	int scanner_interval = 10;
 	int countdown = scanner_interval;
-
-	scanner_thread = std::thread(&Engine::monitor_scanner, this);
-
 	while (running) {
-		// Optional Top-Performer-Cache für Anzeige
 		std::string top_asset = "-";
 		double top_ret = 0.0;
-
 		if (scanner) {
-			auto top = scanner->fetch_top_performers(1, 1);
+			auto top = scanner->fetch_top_performers(10, 3);
 			if (!top.empty()) {
 				top_asset = top[0].symbol;
 				top_ret = top[0].cum_return * 100.0;
 			}
 		}
+		db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
 
-		double balance = binance->get_coin_balance( config.quoteAsset );
-		std::string db_path = "log/klines.sqlite3";
-		size_t db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
-
-		ui::draw_status_panel(
-			config.quoteAsset,
-			markets.size(),
-			current_symbol,
-			balance,
-			top_asset,
-			top_ret,
-			countdown,
-			db_path,
-			db_size,
-			start_time,
-			true,            // collector active
-			trader_active    // trader active
-		);
+		ui.set_top_performer(top_asset, top_ret);
+		ui.set_countdown(countdown);
+		ui.set_db_size(db_size);
+		ui.set_collector_active(collector_active);
+		ui.set_scanner_active(scanner_active);
+		ui.set_trader_active(trader_active);
+		ui.set_current_symbol(current_symbol);
 
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 		if (--countdown <= 0) countdown = scanner_interval;
 	}
-
 }
 
 void Engine::monitor_scanner() {
@@ -126,7 +143,8 @@ void Engine::monitor_scanner() {
 				const auto& symbol = top[0].symbol;
 				if (symbol != current_symbol) {
 					start_trader_for(symbol);
-					current_symbol = symbol;
+					current_symbol = symbol; //???
+					ui.set_current_symbol(symbol);
 				}
 			}
 		}
@@ -135,7 +153,6 @@ void Engine::monitor_scanner() {
 }
 
 void Engine::start_trader_for(const std::string& symbol) {
-	std::cout << "Start Trader -> Symbol: " << symbol << "\n";
 	trader_active = true;
 	trader = std::make_unique<Trader>(symbol, *db, *binance);
 	trader_thread = std::thread([this] {

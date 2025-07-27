@@ -24,60 +24,61 @@
 
 #pragma once
 
-#include <atomic>
-#include <thread>
-#include <memory>
 #include <string>
+#include <thread>
+#include <atomic>
 #include <chrono>
+#include <functional>
 
-#include <sentum/utils/config.hpp>
-#include <sentum/utils/database.hpp>
-#include <sentum/ui/console.hpp>
-#include <sentum/api/binance.hpp>
-#include <sentum/collector/collector.hpp>
-#include <sentum/scanner/scanner.hpp>
-#include <sentum/trader/trader.hpp>
 
-class Engine {
+class UiConsole {
 
 	public:
-		Engine();
-		~Engine();
-		bool is_running() const;
+		UiConsole();
+		~UiConsole();
+
 		void start();
 		void stop();
 
+		void set_quote_asset(const std::string&);
+		void set_markets(size_t);
+		void set_current_symbol(const std::string&);
+		void set_balance(double);
+		void set_top_performer(const std::string&, double);
+		void set_countdown(int);
+		void set_db_path(const std::string&);
+		void set_db_size(size_t);
+		void set_start_time(const std::chrono::system_clock::time_point&);
+		void set_collector_active(bool);
+		void set_scanner_active(bool);
+		void set_trader_active(bool);
+
+		std::function<void()> on_stop_trader;
+		std::function<void()> on_restart_collector;
+		std::function<void()> on_exit;
 
 	private:
-		void init();
-		void run_main_loop();
-		void monitor_scanner();
-		void start_trader_for( const std::string& symbol );
-		void stop_trader();
-
 		std::atomic<bool> running;
-		std::atomic<bool> collector_active;
-		std::atomic<bool> scanner_active;
-		std::atomic<bool> trader_active;
-
-		std::thread main_thread;
 		std::thread ui_thread;
-		std::thread scanner_thread;
-		std::thread trader_thread;
+		std::thread input_thread;
 
-		std::unique_ptr<Database> db;
-		std::unique_ptr<Binance> binance;
-		std::unique_ptr<Collector> collector;
-		std::unique_ptr<SymbolScanner> scanner;
-		std::unique_ptr<Trader> trader;
-
+		// Statuswerte
+		std::string quote_asset;
+		size_t markets = 0;
 		std::string current_symbol;
-		std::vector<std::string> markets;
-		double quote_balance;
-		std::chrono::system_clock::time_point start_time;
+		double balance = 0.0;
+		std::string top_performer;
+		double top_return = 0.0;
+		int countdown = 0;
 		std::string db_path;
-		size_t db_size;
+		size_t db_size = 0;
+		std::chrono::system_clock::time_point start_time;
+		bool collector_active = false;
+		bool scanner_active = false;
+		bool trader_active = false;
 
-		Config config;
-		UiConsole ui;
+		void ui_loop();
+		void input_loop();
+		void draw();
+
 };

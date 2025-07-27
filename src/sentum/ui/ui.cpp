@@ -22,10 +22,12 @@
  * 
  */
 
-#include "ui.hpp"
 #include <iostream>
 #include <chrono>
 #include <thread>
+
+#include <sentum/ui/ui.hpp>
+
 
 namespace ui {
 
@@ -45,6 +47,25 @@ namespace ui {
 
 	std::string wrap(const std::string& text, const std::string& style_code) {
 		return style_code + text + reset();
+	}
+
+	std::string format_duration(std::chrono::seconds s) {
+		int h = s.count() / 3600;
+		int m = (s.count() % 3600) / 60;
+		int sec = s.count() % 60;
+		std::ostringstream oss;
+		if (h > 0) oss << h << "h ";
+		if (m > 0 || h > 0) oss << m << "m ";
+		oss << sec << "s";
+		return oss.str();
+	}
+
+	std::string format_datetime(const std::chrono::system_clock::time_point& tp) {
+		std::time_t time = std::chrono::system_clock::to_time_t(tp);
+		std::tm* tm_ptr = std::localtime(&time);
+		char buffer[20];
+		std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm_ptr);
+		return std::string(buffer);
 	}
 
 	void show_header(){

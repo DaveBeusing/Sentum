@@ -27,6 +27,7 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <chrono>
 
 namespace ui {
 
@@ -55,6 +56,9 @@ namespace ui {
 		oss << std::fixed << std::setprecision(precision) << value;
 		return style_code + oss.str() + reset();
 	}
+
+	std::string format_duration(std::chrono::seconds s);
+	std::string format_datetime(const std::chrono::system_clock::time_point& tp);
 
 	void show_header();
 	void clear_terminal();

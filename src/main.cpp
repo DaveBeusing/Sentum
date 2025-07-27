@@ -30,19 +30,12 @@
 #include "sentum/core/engine.hpp"
 #include "sentum/ui/ui.hpp"
 
-
-Engine engine;
-
-void handle_sigint(int) {
-	std::cout << "\n Ctrl+C Stop Engine...\n";
-	engine.stop();
-	exit(0);
-}
-
-int main(){
-	std::signal(SIGINT, handle_sigint);
-	ui::show_header();
+int main() {
+	Engine engine;
 	engine.start();
-	while (true) std::this_thread::sleep_for(std::chrono::seconds(1));
+	while (engine.is_running()) {
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+	}
+	engine.stop();
 	return 0;
 }
