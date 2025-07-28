@@ -22,20 +22,16 @@
  * 
  */
 
-#include "wsclient.hpp"
-#include "nlohmann/json.hpp"
-#include <websocketpp/config/asio_client.hpp>
 #include <websocketpp/client.hpp>
+#include <websocketpp/config/asio_client.hpp>
 #include <boost/asio/ssl/context.hpp>
-#include <iostream>
-#include <thread>
-#include <algorithm>
+#include <nlohmann/json.hpp>
+
+#include <sentum/api/websocket.hpp>
 
 using json = nlohmann::json;
+using tls_client = websocketpp::client<websocketpp::config::asio_tls_client>;
 
-typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
-
-// TLS-Konfiguration
 std::shared_ptr<boost::asio::ssl::context> on_tls_init() {
 	auto ctx = std::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::tlsv12_client);
 	try {
@@ -49,40 +45,56 @@ std::shared_ptr<boost::asio::ssl::context> on_tls_init() {
 	return ctx;
 }
 
-void start_ws_price_stream(const std::string& symbol, std::function<void(double)> on_price) {
-	std::thread([symbol, on_price]() {
-		std::string lower = symbol;
-		std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-		std::string uri = "wss://stream.binance.com:9443/ws/" + lower + "@trade";
+Websocket::Websocket(const std::string& sym) : symbol(sym), running(false) {}
 
-		client c;
-		c.init_asio();
+Websocket::~Websocket(){
+	stop();
+}
 
-		// TLS Handler setzen
-		c.set_tls_init_handler([&](websocketpp::connection_hdl) {
-			return on_tls_init();
-		});
+void Websocket::set_on_price(const std::function<void(double)>& cb) {
+	on_price = cb;
+}
 
-		// Nachrichtenhandler
-		c.set_message_handler([&on_price](websocketpp::connection_hdl, client::message_ptr msg) {
-			try {
-				json data = json::parse(msg->get_payload());
-				double price = std::stod(data["p"].get<std::string>());
+void Websocket::start() {
+	if (running) return;
+	running = true;
+	ws_thread = std::thread(&Websocket::run, this);
+}
+
+void Websocket::stop() {
+	running = false;
+	if (ws_thread.joinable()) ws_thread.join();
+}
+
+void Websocket::run() {
+	tls_client client;
+	client.init_asio();
+	client.set_tls_init_handler([](websocketpp::connection_hdl) {
+		return websocketpp::lib::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::sslv23);
+	});
+
+	client.clear_access_channels(websocketpp::log::alevel::all);
+	client.clear_error_channels(websocketpp::log::elevel::all);
+
+	std::string lower = symbol;
+	std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+	std::string url = "wss://stream.binance.com:9443/ws/" + lower + "@trade";
+
+	client.set_message_handler([this](websocketpp::connection_hdl, tls_client::message_ptr msg) {
+		try {
+			auto j = json::parse(msg->get_payload());
+			if (j.contains("p") && on_price) {
+				double price = std::stod(j["p"].get<std::string>());
 				on_price(price);
-			} catch (...) {
-				std::cerr << "[WebSocket] Error parsing\n";
 			}
-		});
-
-		// Verbindung aufbauen
-		websocketpp::lib::error_code ec;
-		client::connection_ptr con = c.get_connection(uri, ec);
-		if (ec) {
-			std::cerr << "Connection error: " << ec.message() << std::endl;
-			return;
+		} catch (...) {
+			// ignore parse errors
 		}
+	});
 
-		c.connect(con);
-		c.run();
-	}).detach();  // eigener Thread
+	websocketpp::lib::error_code ec;
+	auto con = client.get_connection(url, ec);
+	if (ec) return;
+	client.connect(con);
+	client.run();
 }

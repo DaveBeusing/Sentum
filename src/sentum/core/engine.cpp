@@ -131,6 +131,35 @@ void Engine::run_main_loop() {
 		ui->set_trader_active(trader_active);
 		ui->set_current_symbol(current_symbol);
 
+		if (trader) {
+			ui->set_trader_metrics(
+				trader->get_total_profit(),
+				trader->get_win_count(),
+				trader->get_lose_count(),
+				trader->get_total_trades(),
+				trader->get_winrate_percent(),
+				trader->get_average_profit()
+			);
+		}
+
+		if (trader && trader->get_position().open) {
+			const auto& pos = trader->get_position();
+			double price = 1.0;//binance->get_price(pos.symbol);  // Preis-Update
+			double profit = (price - pos.entry_price) * pos.quantity;
+
+			ui->set_active_trade(
+				pos.open,
+				pos.entry_price,
+				pos.quantity,
+				pos.stop_loss_price,
+				pos.take_profit_price,
+				price,
+				profit
+			);
+		} else {
+			ui->set_active_trade(false, 0, 0, 0, 0, 0, 0);
+		}
+
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 		if (--countdown <= 0) countdown = scanner_interval;
 	}
@@ -145,8 +174,8 @@ void Engine::monitor_scanner() {
 				const auto& symbol = top[0].symbol;
 				if (symbol != current_symbol) {
 					start_trader_for(symbol);
-					current_symbol = symbol; //???
-					ui->set_current_symbol(symbol);
+					current_symbol = symbol; // is it safe???
+					ui->set_current_symbol(current_symbol);
 				}
 			}
 		}
@@ -156,7 +185,7 @@ void Engine::monitor_scanner() {
 
 void Engine::start_trader_for(const std::string& symbol) {
 	trader_active = true;
-	trader = std::make_unique<Trader>(symbol, *db, *binance);
+	trader = std::make_unique<Trader>(symbol, *binance);
 	trader_thread = std::thread([this] {
 		trader->run();
 		trader_active = false;

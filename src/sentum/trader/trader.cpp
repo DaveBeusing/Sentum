@@ -31,25 +31,27 @@
 #include <sentum/trader/trader.hpp>
 
 
-Trader::Trader(const std::string& symbol_, Database& db_, Binance& api_) : symbol(symbol_), database(db_), api(api_), running(true) {}
+Trader::Trader(const std::string& symbol_, Binance& api_) : symbol(symbol_), api(api_), running(true) {}
 
 void Trader::stop() {
 	running = false;
+	if (price_stream) price_stream->stop();
 }
 
 void Trader::run() {
-	//std::cout << "📈 Trader started → " << symbol << "\n";
-
 	using namespace std::chrono_literals;
+
+	price_stream = std::make_unique<Websocket>(symbol);
+	price_stream->set_on_price([this](double price) {
+		this->latest_price.store(price);
+		// double sma5 = ..., sma20 = ..., rsi = ...;
+		// evaluate(price, sma5, sma20, rsi);
+	});
+	price_stream->start();
 	while (running) {
-		// Hier Strategie + Tickdaten + Execution
-		// z.B. SMA/RSI prüfen → Entry/Exit → Order senden
-		//DEBUG
-		//std::cout << "🔁 Trader Tick...\n";
 		std::this_thread::sleep_for(500ms);
 	}
-
-	std::cout << "🛑 Trader stopped → " << symbol << "\n";
+	//std::cout << "Trader stopped → " << symbol << "\n";
 }
 
 
@@ -129,6 +131,14 @@ void Trader::log_trade(TradeAction action, double price) {
 
 const TradePosition& Trader::get_position() const {
 	return position;
+}
+
+TradePosition Trader::get_current_position() const {
+	return position;
+}
+
+double Trader::get_latest_price() const {
+	return latest_price.load();
 }
 
 double Trader::get_total_profit() const {
