@@ -98,6 +98,26 @@ void UiConsole::set_trader_active(bool val) {
 	trader_active = val;
 }
 
+void UiConsole::set_trader_metrics(double profit, int wins, int losses, int total, double winrate, double avg_profit) {
+	trader_total_profit = profit;
+	trader_win_count = wins;
+	trader_lose_count = losses;
+	trader_total_trades = total;
+	trader_winrate = winrate;
+	trader_avg_profit = avg_profit;
+}
+
+void UiConsole::set_active_trade(bool is_open, double entry, double qty, double sl, double tp, double current, double profit){
+	trade_open = is_open;
+	entry_price = entry;
+	quantity = qty;
+	stop_loss = sl;
+	take_profit = tp;
+	current_price = current;
+	current_profit = profit;
+}
+
+
 void UiConsole::ui_loop() {
 	using namespace std::chrono_literals;
 	while (running) {
@@ -151,7 +171,25 @@ void UiConsole::draw(){
 	std::cout << " └ Next Scan in:     " << countdown << "s\n";
 	std::cout << ui::wrap( "Trader",ui::bold()) << "\n";
 	std::cout << " ├ Trader:           " << (trader_active ? ui::wrap("RUNNING", ui::green()) : ui::wrap("IDLE", ui::red())) << "\n";
-	std::cout << " └ Symbol:           " << ui::wrap(current_symbol.empty() ? "-" : ui::to_upper(current_symbol), ui::bold()) << "\n";
+	std::cout << " ├ Current Symbol:   " << ui::wrap(current_symbol.empty() ? "-" : ui::to_upper(current_symbol), ui::bold()) << "\n";
+	std::cout << " ├ Total Trades:     " << trader_total_trades << "\n";
+	std::cout << " ├ Win/Lose:         " << trader_win_count << "/" << trader_lose_count << "\n";
+	std::cout << " ├ Winrate:          " << std::fixed << std::setprecision(2) << trader_winrate << " %\n";
+	std::cout << " ├ Avg Profit:       " << trader_avg_profit << "\n";
+	std::cout << " └ Total Profit:     " << trader_total_profit << "\n";
+
+	if (trade_open) {
+		std::string profit_str = current_profit >= 0 ? ui::wrap_value_fixed(current_profit, ui::bold_green(), 2) : ui::wrap_value_fixed(current_profit, ui::bold_red(), 2);
+		std::cout << ui::bold() << "\nActive Trade\n" << ui::reset();
+		std::cout << " ├ Entry Price:      " << entry_price << "\n";
+		std::cout << " ├ Quantity:         " << quantity << "\n";
+		std::cout << " ├ Current Price:    " << current_price << "\n";
+		std::cout << " ├ Profit:           " << profit_str << "\n";
+		std::cout << " ├ Stop Loss:        " << stop_loss << "\n";
+		std::cout << " └ Take Profit:      " << take_profit << "\n";
+	}
+
+
 	std::cout << "\n[q] Quit  [s] Stop Trader  [r] Restart Collector\n> ";
 	std::cout << std::flush;
 }

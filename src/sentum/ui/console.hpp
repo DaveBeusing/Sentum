@@ -53,6 +53,9 @@ class UiConsole {
 		void set_scanner_active(bool);
 		void set_trader_active(bool);
 
+		void set_trader_metrics(double profit, int wins, int losses, int total, double winrate, double avg_profit);
+		void set_active_trade(bool is_open, double entry, double qty, double sl, double tp, double current, double profit);
+
 		std::function<void()> on_stop_trader;
 		std::function<void()> on_restart_collector;
 		std::function<void()> on_exit;
@@ -76,6 +79,23 @@ class UiConsole {
 		bool collector_active = false;
 		bool scanner_active = false;
 		bool trader_active = false;
+
+		//Trader Metrics
+		double trader_total_profit = 0.0;
+		int trader_win_count = 0;
+		int trader_lose_count = 0;
+		int trader_total_trades = 0;
+		double trader_winrate = 0.0;
+		double trader_avg_profit = 0.0;
+		//active trade metrics
+		bool trade_open = false;
+		double entry_price = 0.0;
+		double quantity = 0.0;
+		double stop_loss = 0.0;
+		double take_profit = 0.0;
+		double current_price = 0.0;
+		double current_profit = 0.0;
+
 
 		void ui_loop();
 		void input_loop();

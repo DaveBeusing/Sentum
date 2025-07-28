@@ -25,25 +25,30 @@
 
 #include <atomic>
 #include <string>
+#include <chrono>
+#include <thread>
 
 #include <sentum/trader/types/risk_config.hpp>
 #include <sentum/trader/types/trade_position.hpp>
 #include <sentum/trader/types/trade_action.hpp>
-#include <sentum/utils/database.hpp>
 #include <sentum/api/binance.hpp>
+#include <sentum/api/websocket.hpp>
 
 
 class Trader {
 
 	public:
 
-		Trader(const std::string& symbol, Database& db, Binance& binance);
+		Trader(const std::string& symbol, Binance& binance);
 		void run();
 		void stop();
 
 		//Trader(std::string symbol, RiskConfig config);
 		TradeAction evaluate(double price, double sma5, double sma20, double rsi);
-		const TradePosition& get_position() const;
+		const TradePosition& get_position() const;//??
+		TradePosition get_current_position() const;
+		double get_latest_price() const;
+
 		double get_total_profit() const;
 		int get_win_count() const;
 		int get_lose_count() const;
@@ -53,15 +58,19 @@ class Trader {
 
 	private:
 		std::string symbol;
-		Database& database;
 		Binance& api;
 		std::atomic<bool> running;
 
-		void log_trade(TradeAction action, double price);
 		RiskConfig risk;
 		TradePosition position;
-		double total_profit;
-		int win_count;
-		int lose_count;
+
+		double total_profit = 0.0;
+		int win_count = 0;
+		int lose_count = 0;
+
+		std::unique_ptr<Websocket> price_stream;
+		std::atomic<double> latest_price = 0.0;
+
+		void log_trade(TradeAction action, double price);
 
 };
