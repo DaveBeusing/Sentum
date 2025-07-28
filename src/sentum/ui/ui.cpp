@@ -50,6 +50,10 @@ namespace ui {
 		return style_code + text + reset();
 	}
 
+	std::string wrap_percent(double val) {
+		return wrap_value_fixed(val * 100.0, "", 2) + " %";
+	}
+
 	std::string format_duration(std::chrono::seconds s) {
 		int h = s.count() / 3600;
 		int m = (s.count() % 3600) / 60;
