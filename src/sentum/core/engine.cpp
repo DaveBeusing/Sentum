@@ -89,7 +89,6 @@ void Engine::init() {
 	start_time = std::chrono::system_clock::now();
 	quote_balance = binance->get_coin_balance(config.quoteAsset);
 	db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
-
 	std::cout << "API-Key: " << secrets.api_key.substr(0, 10) << "******\n";
 
 
@@ -115,7 +114,7 @@ void Engine::run_main_loop() {
 		std::string top_asset = "-";
 		double top_ret = 0.0;
 		if (scanner) {
-			auto top = scanner->fetch_top_performers(10, 3);
+			auto top = scanner->fetch_top_performers(60, 3);
 			if (!top.empty()) {
 				top_asset = top[0].symbol;
 				top_ret = top[0].cum_return * 100.0;
@@ -144,7 +143,7 @@ void Engine::run_main_loop() {
 
 		if (trader && trader->get_position().open) {
 			const auto& pos = trader->get_position();
-			double price = 1.0;//binance->get_price(pos.symbol);  // Preis-Update
+			double price = trader->get_latest_price();
 			double profit = (price - pos.entry_price) * pos.quantity;
 
 			ui->set_active_trade(

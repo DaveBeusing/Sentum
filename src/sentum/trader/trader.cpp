@@ -40,52 +40,45 @@ void Trader::stop() {
 
 void Trader::run() {
 	using namespace std::chrono_literals;
-
 	price_stream = std::make_unique<Websocket>(symbol);
 	price_stream->set_on_price([this](double price) {
 		this->latest_price.store(price);
-		// double sma5 = ..., sma20 = ..., rsi = ...;
-		// evaluate(price, sma5, sma20, rsi);
+		evaluate(price);
 	});
 	price_stream->start();
 	while (running) {
 		std::this_thread::sleep_for(500ms);
 	}
-	//std::cout << "Trader stopped → " << symbol << "\n";
 }
 
-
-
-//Trader::Trader(std::string symbol, RiskConfig config) : symbol(std::move(symbol)), risk(config), total_profit(0.0), win_count(0), lose_count(0) {}
-
-TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi) {
+TradeAction Trader::evaluate(double price) {
 	if (!position.open) {
-		if (sma5 > sma20 && rsi < 30) {
-			// BUY
-			position.open = true;
-			position.entry_price = price;
-			position.quantity = (risk.max_total_usdt * risk.risk_per_trade) / price;
-			position.highest_price = price;
-			position.stop_loss_price = price * (1.0 - risk.stop_loss_percent);
-			position.take_profit_price = price * (1.0 + risk.take_profit_percent);
-			position.entry_time = std::chrono::system_clock::now();
-			log_trade(TradeAction::BUY, price);
-			return TradeAction::BUY;
-		}
+
+		// BUY
+		position.open = true;
+		position.entry_price = price;
+		position.quantity = (risk.max_total_usdt * risk.risk_per_trade) / price;
+		position.highest_price = price;
+		position.stop_loss_price = price * (1.0 - risk.stop_loss_percent);
+		position.take_profit_price = price * (1.0 + risk.take_profit_percent);
+		position.entry_time = std::chrono::system_clock::now();
+		log_trade(TradeAction::BUY, price);
+		return TradeAction::BUY;
+
 	} else {
-		// Trailing Stop-Loss nachziehen
+
+		// Update Trailing Stop-Loss & TP
 		if (price > position.highest_price) {
 			position.highest_price = price;
 			position.stop_loss_price = price * (1.0 - risk.stop_loss_percent);
+			position.take_profit_price = price * (1.0 + risk.take_profit_percent);
 		}
-		// Bedingungen für Exit
-		bool stop_loss_hit = price <= position.stop_loss_price;
-		bool take_profit_hit = price >= position.take_profit_price;
-		bool sell_signal = (sma5 < sma20 && rsi > 70);
-		//if (stop_loss_hit || take_profit_hit || sell_signal) {
-		if (stop_loss_hit || take_profit_hit) {
+
+		// SELL
+		if (price <= position.stop_loss_price || price >= position.take_profit_price) {
 			log_trade(TradeAction::SELL, price);
-			// Profit/Verlust berechnen
+
+			// PnL
 			double gross_profit = (price - position.entry_price) * position.quantity;
 			double buy_fee = position.entry_price * position.quantity * risk.fee_percent;
 			double sell_fee = price * position.quantity * risk.fee_percent;
@@ -97,12 +90,6 @@ TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi
 				lose_count++;
 			}
 
-			std::cout << "[RESULT] Trade Result: "
-						<< (net_profit >= 0 ? "\033[32m" : "\033[31m")
-						<< (net_profit >= 0 ? "+" : "") << net_profit << " USDT"
-						<< "\033[0m | Total: " << total_profit << " USDT"
-						<< " | Wins: " << win_count << " | Losses: " << lose_count << "\n";
-
 			position = TradePosition(); // Reset
 			return TradeAction::SELL;
 		}
@@ -111,7 +98,7 @@ TradeAction Trader::evaluate(double price, double sma5, double sma20, double rsi
 }
 
 void Trader::log_trade(TradeAction action, double price) {
-	std::ofstream file("trades.csv", std::ios::app);
+	std::ofstream file("log/trader.log", std::ios::app);
 	auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 	std::stringstream timestamp;
 	timestamp << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S");

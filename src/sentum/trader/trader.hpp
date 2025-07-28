@@ -43,8 +43,7 @@ class Trader {
 		void run();
 		void stop();
 
-		//Trader(std::string symbol, RiskConfig config);
-		TradeAction evaluate(double price, double sma5, double sma20, double rsi);
+		TradeAction evaluate(double price);
 		const TradePosition& get_position() const;//??
 		TradePosition get_current_position() const;
 		double get_latest_price() const;

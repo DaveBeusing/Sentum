@@ -181,12 +181,12 @@ void UiConsole::draw(){
 	if (trade_open) {
 		std::string profit_str = current_profit >= 0 ? ui::wrap_value_fixed(current_profit, ui::bold_green(), 2) : ui::wrap_value_fixed(current_profit, ui::bold_red(), 2);
 		std::cout << ui::bold() << "\nActive Trade\n" << ui::reset();
-		std::cout << " ├ Entry Price:      " << entry_price << "\n";
+		std::cout << " ├ Entry Price:      " << ui::wrap_value_fixed(entry_price, "", 4) << "\n";
 		std::cout << " ├ Quantity:         " << quantity << "\n";
-		std::cout << " ├ Current Price:    " << current_price << "\n";
+		std::cout << " ├ Current Price:    " << ui::wrap_value_fixed(current_price, "", 4) << "\n";
 		std::cout << " ├ Profit:           " << profit_str << "\n";
-		std::cout << " ├ Stop Loss:        " << stop_loss << "\n";
-		std::cout << " └ Take Profit:      " << take_profit << "\n";
+		std::cout << " ├ Stop Loss:        " << ui::wrap_value_fixed(stop_loss, "", 4) << "\n";
+		std::cout << " └ Take Profit:      " << ui::wrap_value_fixed(take_profit, "", 4) << "\n";
 	}
 
 
