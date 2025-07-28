@@ -81,6 +81,17 @@ namespace ui {
 		return result;
 	}
 
+	std::string price_direction(double current, double previous) {
+		if (previous <= 0.0) return "→";
+		if (current > previous) {
+			return "\033[32m↑\033[0m";  // green
+		} else if (current < previous) {
+			return "\033[31m↓\033[0m";  // red
+		} else {
+			return "→";  // neutral
+		}
+	}
+
 	void show_header(){
 		std::cout << wrap( "Sentum", bold() ) << " - Intelligent Signals. Real-Time Decisions. Confident Trading.\n\n";
 	}

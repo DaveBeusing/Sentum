@@ -63,6 +63,8 @@ namespace ui {
 	std::string to_upper(const std::string& input);
 	std::string to_lower(const std::string& input);
 
+	std::string price_direction(double current, double previous);
+
 	void show_header();
 	void clear_terminal();
 	void countdown_progress(int seconds);
