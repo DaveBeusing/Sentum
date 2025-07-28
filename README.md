@@ -57,11 +57,11 @@ EOF
 ```
 
 ## Roadmap
-- [✓] WebSocket auto-reconnect logic
-- [ ] Configurable strategies via JSON
-- [ ] Historical backtesting module
-- [ ] REST order execution support
-- [ ] Dashboard UI for live strategy monitoring
+[✓] WebSocket auto-reconnect logic \
+[ ] Configurable strategies via JSON \
+[ ] Historical backtesting module \
+[ ] REST order execution support \
+[ ] Dashboard UI for live strategy monitoring 
 
 ## Contributing
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change or propose.
