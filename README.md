@@ -8,7 +8,7 @@
 
 ## Key Features
 - 🔌 Real-time data via Binance WebSocket API
-- 📊 Technical indicators (e.g., SMA crossover) built in
+- 📊 Technical indicators (e.g. RSI, SMA crossover) built in
 - 🧠 Strategy modules are modular and easily extendable
 - 🔐 TLS-secured communication using OpenSSL
 - ⚡ Optimized for speed and reliability with C++17
@@ -25,58 +25,6 @@
 | Build System      | CMake & Make                 |
 | Exchange          | Binance (Spot Market)        |
 
-## Project Structure
-```
-sentum/
-│── build/
-│── config/
-│	├── risk.json
-│	└── secrets.json
-├── src/
-│	├── nlohmann/
-│	│	└── json.hpp
-│	├── sentum/
-│	│	├── api/
-│	│	│	├── binance.cpp
-│	│	│	└── binance.hpp
-│	│	├── chart/
-│	│	│	├── chart.cpp
-│	│	│	└── chart.hpp
-│	│	├── core/
-│	│	│	├── trader.cpp
-│	│	│	└── trader.hpp
-│	│	├── strategy/
-│	│	│	├── rsi.cpp
-│	│	│	├── rsi.hpp
-│	│	│	├── sma.cpp
-│	│	│	├── sma.hpp
-│	│	│	├── strategy.cpp
-│	│	│	└── strategy.hpp
-│	│	├── utils/
-│	│	│	├── config.cpp
-│	│	│	├── config.hpp
-│	│	│	├── secrets.cpp
-│	│	│	├── secrets.hpp
-│	│	│	└── style.hpp
-│	│	└── websocket/
-│	│		├── wsclient.cpp
-│	│		└── wsclient.hpp
-│	└── main.cpp
-|── .gitignore
-|── clean.sh
-|── CMakeLists.txt
-|── DISCLAIMER.md
-|── LICENSE.md
-└── README.md
-
-example secrets.json
-{
-	"api_key": "your_binance_api_key",
-	"api_secret": "your_binance_api_secret"
-}
-
-```
-
 ## Quick Start
 ### 1. Prepare your system
 ```bash
@@ -91,18 +39,26 @@ cd sentum
 ### 3. Build
 ```bash
 mkdir build 
-cd build
-cmake ..
-make -j$(nproc)
+cd build && cmake .. && make -j$(nproc)
+cd ..
 ```
-### 4. Run
+### 4. Create secrets.json
+```bash
+cat > config/secrets.json <<EOF
+{
+  "api_key": "your_binance_api_key",
+  "api_secret": "your_binance_api_secret"
+}
+EOF
+```
+### 5. Run
 ```bash
 ./client
 ```
 
 ## Roadmap
-- [ ] WebSocket auto-reconnect logic
-- [ ] Configurable strategies (via JSON/YAML)
+- [✓] WebSocket auto-reconnect logic
+- [ ] Configurable strategies via JSON
 - [ ] Historical backtesting module
 - [ ] REST order execution support
 - [ ] Dashboard UI for live strategy monitoring
