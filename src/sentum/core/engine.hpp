@@ -24,52 +24,50 @@
 
 #pragma once
 
-#include <atomic>
-#include <thread>
 #include <memory>
 #include <string>
+#include <vector>
+#include <atomic>
+#include <thread>
 #include <chrono>
 
 #include <sentum/utils/config.hpp>
 #include <sentum/utils/database.hpp>
-#include <sentum/ui/console.hpp>
 #include <sentum/api/binance.hpp>
 #include <sentum/collector/collector.hpp>
 #include <sentum/scanner/scanner.hpp>
 #include <sentum/trader/trader.hpp>
+#include <sentum/ui/console.hpp>
+
 
 class Engine {
 
 	public:
 		Engine();
 		~Engine();
-		bool is_running() const;
+
 		void start();
 		void stop();
 
+		bool is_running() const;
 
 	private:
-		void init();
-		void run_main_loop();
-		void monitor_scanner();
-		void start_trader_for( const std::string& symbol );
-		void stop_trader();
+		std::thread main_thread;
+		std::thread ui_thread;
+		std::thread scanner_thread;
+		std::thread trader_thread;
 
 		std::atomic<bool> running;
 		std::atomic<bool> collector_active;
 		std::atomic<bool> scanner_active;
 		std::atomic<bool> trader_active;
 
-		std::thread main_thread;
-		std::thread ui_thread;
-		std::thread scanner_thread;
-		std::thread trader_thread;
-
 		std::unique_ptr<Database> db;
 		std::unique_ptr<Binance> binance;
 		std::unique_ptr<Collector> collector;
 		std::unique_ptr<SymbolScanner> scanner;
 		std::unique_ptr<Trader> trader;
+		std::unique_ptr<UiConsole> ui;
 
 		std::string current_symbol;
 		std::vector<std::string> markets;
@@ -79,5 +77,10 @@ class Engine {
 		size_t db_size;
 
 		Config config;
-		UiConsole ui;
+
+		void init();
+		void run_main_loop();
+		void monitor_scanner();
+		void start_trader_for( const std::string& symbol );
+		void stop_trader();
 };

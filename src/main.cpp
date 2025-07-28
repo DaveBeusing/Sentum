@@ -24,18 +24,26 @@
 
 #include <csignal>
 #include <iostream>
-#include <chrono>
 #include <thread>
+#include <chrono>
 
-#include "sentum/core/engine.hpp"
-#include "sentum/ui/ui.hpp"
+#include <sentum/core/engine.hpp>
+
+std::unique_ptr<Engine> engine_ptr;
+
+void handle_sigint(int) {
+	if( engine_ptr ){
+		engine_ptr->stop();
+	}
+}
 
 int main() {
-	Engine engine;
-	engine.start();
-	while (engine.is_running()) {
+	std::signal(SIGINT, handle_sigint);
+	engine_ptr = std::make_unique<Engine>();
+	engine_ptr->start();
+	while (engine_ptr->is_running()) {
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
-	engine.stop();
+	//engine.stop();
 	return 0;
 }

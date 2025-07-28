@@ -44,16 +44,16 @@ bool Engine::is_running() const {
 void Engine::start() {
 		running = true;
 		init();
-		ui.on_exit = [this]() { stop(); };
-		ui.on_stop_trader = [this]() { stop_trader(); };
-		ui.on_restart_collector = [this]() {
+		ui->on_exit = [this]() { stop(); };
+		ui->on_stop_trader = [this]() { stop_trader(); };
+		ui->on_restart_collector = [this]() {
 			if (collector) {
 				collector->stop();
 				collector->start();
-				ui.set_collector_active(true);
+				ui->set_collector_active(true);
 			}
 		};
-		ui_thread = std::thread([this] { ui.start(); });
+		ui_thread = std::thread([this] { ui->start(); });
 		main_thread = std::thread(&Engine::run_main_loop, this);
 }
 
@@ -64,8 +64,9 @@ void Engine::stop() {
 	if (trader_thread.joinable()) trader_thread.join();
 	if (collector) collector->stop();
 	if (trader) trader->stop();
-	ui.stop();
+	if (ui) ui->stop();
 	if (ui_thread.joinable()) ui_thread.join();
+	ui.reset(); //??? clean
 }
 
 void Engine::init() {
@@ -75,6 +76,7 @@ void Engine::init() {
 		std::cerr << "Secrets missing! please check config/secrets.json.\n";
 		return;
 	}
+	ui = std::make_unique<UiConsole>();
 	db_path = "log/klines.sqlite3";
 	db = std::make_unique<Database>( db_path );
 	binance = std::make_unique<Binance>( secrets.api_key, secrets.api_secret );
@@ -93,15 +95,15 @@ void Engine::init() {
 
 	start_time = std::chrono::system_clock::now();
 
-	ui.set_collector_active(collector_active);
-	ui.set_scanner_active(scanner_active);
-	ui.set_trader_active(trader_active);
+	ui->set_collector_active(collector_active);
+	ui->set_scanner_active(scanner_active);
+	ui->set_trader_active(trader_active);
 
-	ui.set_balance(quote_balance);
-	ui.set_quote_asset(config.quoteAsset);
-	ui.set_markets(markets.size());
-	ui.set_start_time(start_time);
-	ui.set_db_path( db_path );
+	ui->set_balance(quote_balance);
+	ui->set_quote_asset(config.quoteAsset);
+	ui->set_markets(markets.size());
+	ui->set_start_time(start_time);
+	ui->set_db_path( db_path );
 
 }
 
@@ -121,13 +123,13 @@ void Engine::run_main_loop() {
 		}
 		db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
 
-		ui.set_top_performer(top_asset, top_ret);
-		ui.set_countdown(countdown);
-		ui.set_db_size(db_size);
-		ui.set_collector_active(collector_active);
-		ui.set_scanner_active(scanner_active);
-		ui.set_trader_active(trader_active);
-		ui.set_current_symbol(current_symbol);
+		ui->set_top_performer(top_asset, top_ret);
+		ui->set_countdown(countdown);
+		ui->set_db_size(db_size);
+		ui->set_collector_active(collector_active);
+		ui->set_scanner_active(scanner_active);
+		ui->set_trader_active(trader_active);
+		ui->set_current_symbol(current_symbol);
 
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 		if (--countdown <= 0) countdown = scanner_interval;
@@ -144,7 +146,7 @@ void Engine::monitor_scanner() {
 				if (symbol != current_symbol) {
 					start_trader_for(symbol);
 					current_symbol = symbol; //???
-					ui.set_current_symbol(symbol);
+					ui->set_current_symbol(symbol);
 				}
 			}
 		}
