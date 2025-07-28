@@ -25,6 +25,7 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <algorithm>
 
 #include <sentum/ui/ui.hpp>
 
@@ -66,6 +67,18 @@ namespace ui {
 		char buffer[20];
 		std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm_ptr);
 		return std::string(buffer);
+	}
+
+	std::string to_upper(const std::string& input) {
+		std::string result = input;
+		std::transform(result.begin(), result.end(), result.begin(), ::toupper);
+		return result;
+	}
+
+	std::string to_lower(const std::string& input) {
+		std::string result = input;
+		std::transform(result.begin(), result.end(), result.begin(), ::tolower);
+		return result;
 	}
 
 	void show_header(){

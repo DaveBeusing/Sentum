@@ -60,6 +60,9 @@ namespace ui {
 	std::string format_duration(std::chrono::seconds s);
 	std::string format_datetime(const std::chrono::system_clock::time_point& tp);
 
+	std::string to_upper(const std::string& input);
+	std::string to_lower(const std::string& input);
+
 	void show_header();
 	void clear_terminal();
 	void countdown_progress(int seconds);
