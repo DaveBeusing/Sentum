@@ -67,34 +67,45 @@ void Websocket::stop() {
 }
 
 void Websocket::run() {
-	tls_client client;
-	client.init_asio();
-	client.set_tls_init_handler([](websocketpp::connection_hdl) {
-		return websocketpp::lib::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::sslv23);
-	});
-
-	client.clear_access_channels(websocketpp::log::alevel::all);
-	client.clear_error_channels(websocketpp::log::elevel::all);
-
-	std::string lower = symbol;
-	std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-	std::string url = "wss://stream.binance.com:9443/ws/" + lower + "@trade";
-
-	client.set_message_handler([this](websocketpp::connection_hdl, tls_client::message_ptr msg) {
+	while (running) {
 		try {
-			auto j = json::parse(msg->get_payload());
-			if (j.contains("p") && on_price) {
-				double price = std::stod(j["p"].get<std::string>());
-				on_price(price);
+			tls_client client;
+			client.init_asio();
+			client.set_tls_init_handler([](websocketpp::connection_hdl) {
+				return websocketpp::lib::make_shared<boost::asio::ssl::context>(
+					boost::asio::ssl::context::sslv23);
+			});
+			client.clear_access_channels(websocketpp::log::alevel::all);
+			client.clear_error_channels(websocketpp::log::elevel::all);
+			std::string lower = symbol;
+			std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+			std::string url = "wss://stream.binance.com:9443/ws/" + lower + "@trade";
+			client.set_message_handler([this](websocketpp::connection_hdl, tls_client::message_ptr msg) {
+				try {
+					auto j = json::parse(msg->get_payload());
+					if (j.contains("p") && on_price) {
+						double price = std::stod(j["p"].get<std::string>());
+						on_price(price);
+					}
+				} catch (...) {
+					std::cerr << "[WS] Error parsing message\n";
+				}
+			});
+			websocketpp::lib::error_code ec;
+			auto con = client.get_connection(url, ec);
+			if (ec) {
+				std::cerr << "[WS] Connection failed: " << ec.message() << "\n";
+				std::this_thread::sleep_for(std::chrono::seconds(5));
+				continue;
 			}
-		} catch (...) {
-			// ignore parse errors
+			client.connect(con);
+			client.run();  // Blockiert bis zum Verbindungsende
+		} catch (const std::exception& e) {
+			std::cerr << "[WS] Connection error: " << e.what() << "\n";
 		}
-	});
-
-	websocketpp::lib::error_code ec;
-	auto con = client.get_connection(url, ec);
-	if (ec) return;
-	client.connect(con);
-	client.run();
+		if (running) {
+			std::cerr << "[WS] Try reconnect in 5 seconds...\n";
+			std::this_thread::sleep_for(std::chrono::seconds(5));
+		}
+	}
 }
