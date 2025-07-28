@@ -21,26 +21,40 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
-#include "strategy.hpp"
-#include "sma.hpp"
-#include "rsi.hpp"
-#include <numeric>
 
-Signal sma_crossover_strategy(const std::vector<double>& prices, int short_p, int long_p) {
-	if (prices.size() < static_cast<std::size_t>(long_p)) return Signal::HOLD;
-	double short_sma = calculate_sma(prices, short_p);
-	double long_sma = calculate_sma(prices, long_p);
-	if (short_sma > long_sma) return Signal::BUY;
-	if (short_sma < long_sma) return Signal::SELL;
-	return Signal::HOLD;
-}
+#pragma once
 
-TradeSignal combined_sma_rsi_strategy(const std::vector<double>& prices, int sma_short, int sma_long, int rsi_period) {
-	if (prices.size() < std::max(sma_long, rsi_period)) return TradeSignal::HOLD;
-	double sma_s = calculate_sma(prices, sma_short);
-	double sma_l = calculate_sma(prices, sma_long);
-	double rsi = calculate_rsi(prices, rsi_period);
-	if (sma_s > sma_l && rsi < 30) return TradeSignal::BUY;
-	if (sma_s < sma_l && rsi > 70) return TradeSignal::SELL;
-	return TradeSignal::HOLD;
-}
+#include <memory>
+#include <string>
+#include <vector>
+#include <algorithm>
+
+#include <sentum/strategy/IStrategy.hpp>
+#include <sentum/strategy/SmaStrategy.hpp>
+#include <sentum/strategy/RsiStrategy.hpp>
+
+class StrategyFactory {
+
+	public:
+		static std::unique_ptr<IStrategy> create(const std::string& type, const std::vector<int>& params = {}) {
+			std::string t = to_lower(type);
+			if (t == "sma") {
+				int short_p = params.size() > 0 ? params[0] : 5;
+				int long_p  = params.size() > 1 ? params[1] : 20;
+				return std::make_unique<SmaStrategy>(short_p, long_p);
+			}
+			if (t == "rsi") {
+				int period = params.size() > 0 ? params[0] : 14;
+				return std::make_unique<RsiStrategy>(period);
+			}
+			return nullptr; // fallback
+		}
+
+	private:
+		static std::string to_lower(const std::string& str) {
+			std::string result = str;
+			std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::tolower(c); });
+			return result;
+		}
+
+};

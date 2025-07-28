@@ -21,19 +21,37 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
-#include "rsi.hpp"
-#include <numeric>
-#include <cmath>
 
-double calculate_rsi(const std::vector<double>& prices, int period) {
-	if (prices.size() <= period) return -1;
-	double gain = 0.0, loss = 0.0;
-	for (int i = prices.size() - period; i < static_cast<int>(prices.size()) - 1; ++i) {
-		double change = prices[i + 1] - prices[i];
-		if (change > 0) gain += change;
-		else loss -= change;
+#pragma once
+
+#include <vector>
+#include <string>
+
+#include <sentum/strategy/IStrategy.hpp>
+
+class RsiStrategy : public IStrategy {
+	int period;
+	double calculate_rsi(const std::vector<double>& prices) const {
+		if (prices.size() <= period) return 50.0;
+		double gain = 0, loss = 0;
+		for (size_t i = 1; i <= period; ++i) {
+			double change = prices[prices.size() - i] - prices[prices.size() - i - 1];
+			if (change > 0) gain += change;
+			else loss -= change;
+		}
+		if (gain + loss == 0) return 50.0;
+		double rs = gain / loss;
+		return 100.0 - (100.0 / (1.0 + rs));
 	}
-	if (gain + loss == 0) return 50.0;
-	double rs = gain / (loss == 0 ? 1 : loss);
-	return 100.0 - (100.0 / (1.0 + rs));
-}
+
+	public:
+		RsiStrategy(int p = 14) : period(p) {}
+		std::string name() const override { return "RSI"; }
+		Signal generate_signal(const std::vector<double>& prices) const override {
+			if (prices.size() < static_cast<size_t>(period + 1)) return Signal::HOLD;
+			double rsi = calculate_rsi(prices);
+			if (rsi < 30) return Signal::BUY;
+			if (rsi > 70) return Signal::SELL;
+			return Signal::HOLD;
+		}
+};

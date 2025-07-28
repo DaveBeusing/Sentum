@@ -21,11 +21,16 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
-#include "sma.hpp"
-#include <numeric>
+#pragma once
 
-double calculate_sma(const std::vector<double>& prices, int period) {
-	if (prices.size() < static_cast<std::size_t>(period)) return 0.0;
-	double sum = std::accumulate(prices.end() - period, prices.end(), 0.0);
-	return sum / period;
-}
+#include <vector>
+#include <string>
+
+enum class Signal { HOLD, BUY, SELL };
+
+class IStrategy {
+	public:
+		virtual ~IStrategy() = default;
+		virtual std::string name() const = 0;
+		virtual Signal generate_signal(const std::vector<double>& prices) const = 0;
+};
