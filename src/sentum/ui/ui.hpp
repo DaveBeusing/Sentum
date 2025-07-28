@@ -57,6 +57,10 @@ namespace ui {
 		return style_code + oss.str() + reset();
 	}
 
+	std::string wrap_percent(double val) {
+		return wrap_value_fixed(val * 100.0, "", 2) + " %";
+	}
+
 	std::string format_duration(std::chrono::seconds s);
 	std::string format_datetime(const std::chrono::system_clock::time_point& tp);
 
