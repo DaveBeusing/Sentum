@@ -30,6 +30,7 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <mutex>
 
 #include <sentum/utils/config.hpp>
 #include <sentum/utils/database.hpp>
@@ -52,16 +53,16 @@ class Engine {
 		bool is_running() const;
 
 	private:
-		std::thread main_thread;
-		std::thread ui_thread;
-		std::thread scanner_thread;
-		std::thread trader_thread;
+		// Threads 
+		std::thread main_thread, ui_thread, scanner_thread, trader_thread;
 
-		std::atomic<bool> running;
-		std::atomic<bool> collector_active;
-		std::atomic<bool> scanner_active;
-		std::atomic<bool> trader_active;
+		// Status flags
+		std::atomic<bool> running, collector_active, scanner_active, trader_active;
 
+		// Synchronisation
+		std::mutex symbol_mutex;
+
+		// Components
 		std::unique_ptr<Database> db;
 		std::unique_ptr<Binance> binance;
 		std::unique_ptr<Collector> collector;
@@ -69,16 +70,20 @@ class Engine {
 		std::unique_ptr<Trader> trader;
 		std::unique_ptr<UiConsole> ui;
 
+		// State
 		std::string current_symbol;
 		std::vector<std::string> markets;
 		double quote_balance;
-		std::chrono::system_clock::time_point start_time;
 		std::string db_path;
 		size_t db_size;
 
+		std::chrono::system_clock::time_point start_time;
 		Config config;
 
+		//Methods
 		void init();
+		void init_config();
+		void init_components();
 		void run_main_loop();
 		void monitor_scanner();
 		void start_trader_for( const std::string& symbol );

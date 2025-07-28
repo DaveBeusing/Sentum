@@ -66,10 +66,35 @@ void Engine::stop() {
 	if (trader) trader->stop();
 	if (ui) ui->stop();
 	if (ui_thread.joinable()) ui_thread.join();
-	ui.reset(); //??? clean
+	ui.reset();
+}
+
+void Engine::init_config() {
+	config = load_config("config/config.json");
+	Secrets secrets = load_secrets("config/secrets.json");
+	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
+		throw std::runtime_error("Missing API keys in secrets.json!");
+	}
+	binance = std::make_unique<Binance>(secrets.api_key, secrets.api_secret);
+	markets = binance->get_markets_by_quote(config.quoteAsset);
+	quote_balance = binance->get_coin_balance(config.quoteAsset);
+}
+
+void Engine::init_components() {
+	db_path = "log/klines.sqlite3";
+	db = std::make_unique<Database>(db_path);
+	collector = std::make_unique<Collector>(*db, markets);
+	collector_active = true;
+	collector->start();
+	scanner = std::make_unique<SymbolScanner>(*db, config.minCumulativeReturn);
+	scanner_active = true;
+	ui = std::make_unique<UiConsole>();
 }
 
 void Engine::init() {
+	init_config();
+	init_components();
+	/*
 	config = load_config( "config/config.json" );
 	Secrets secrets = load_secrets("config/secrets.json");
 	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
@@ -86,12 +111,9 @@ void Engine::init() {
 	scanner = std::make_unique<SymbolScanner>(*db, config.minCumulativeReturn );
 	scanner_active = true;
 	collector->start();
-	start_time = std::chrono::system_clock::now();
 	quote_balance = binance->get_coin_balance(config.quoteAsset);
 	db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
-	std::cout << "API-Key: " << secrets.api_key.substr(0, 10) << "******\n";
-
-
+	*/
 	start_time = std::chrono::system_clock::now();
 
 	ui->set_collector_active(collector_active);
@@ -170,10 +192,11 @@ void Engine::monitor_scanner() {
 		if (!trader_active) {
 			auto top = scanner->fetch_top_performers(10, 3);//fetch 3 top markets from last 10 seconds
 			if (!top.empty()) {
+				std::lock_guard<std::mutex> lock(symbol_mutex);
 				const auto& symbol = top[0].symbol;
 				if (symbol != current_symbol) {
+					current_symbol = symbol;
 					start_trader_for(symbol);
-					current_symbol = symbol; // is it safe???
 					ui->set_current_symbol(current_symbol);
 				}
 			}
