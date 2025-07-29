@@ -25,9 +25,17 @@
 #pragma once
 
 struct RiskConfig {
-	double max_total_usdt = 1000.0;			// z. B. Gesamtbudget
+
+	double max_total_capital = 1000.0;		// z. B. Gesamtbudget
 	double risk_per_trade = 0.1;			// z. B. 10 % pro Trade
 	double stop_loss_percent = 0.02;		// z. B. 2 % SL
-	double take_profit_percent = 0.01;		// z. B. 1 % TP (optional)
-	double fee_percent = 0.001;				// 0.1% Standard Binance Fee (0.095% Taker 0.1% Maker)
+	double take_profit_percent = 0.04;		// z. B. 4 % TP 
+	bool trailing_sl_enabled = false;		// activate trailing SL
+	double trailing_sl_percent = 0.01;		// +1%
+	bool trailing_tp_enabled = false;		// activate trailing TP
+	double trailing_tp_percent = 0.02;		// +2%
+	double buy_fee_percent = 0.001;			// 0.1 % Binance standard
+	double sell_fee_percent = 0.001;		// 0.1 % Binance standard
+	double leverage = 1.0;
+	
 };
