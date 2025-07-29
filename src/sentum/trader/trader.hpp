@@ -31,6 +31,7 @@
 #include <sentum/trader/types/RiskConfig.hpp>
 #include <sentum/trader/types/TradePosition.hpp>
 #include <sentum/trader/types/TradeAction.hpp>
+#include <sentum/trader/utils/RiskConfigLoader.hpp>
 #include <sentum/trader/TradeLogger.hpp>
 #include <sentum/api/binance.hpp>
 #include <sentum/api/websocket.hpp>

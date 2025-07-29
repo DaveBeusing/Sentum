@@ -40,6 +40,8 @@ void Trader::stop() {
 
 void Trader::run() {
 	using namespace std::chrono_literals;
+	//load current version of risk.json
+	risk = load_risk_config("config/risk.json");
 	price_stream = std::make_unique<Websocket>(symbol);
 	price_stream->set_on_price([this](double price) {
 		this->latest_price.store(price);
