@@ -23,7 +23,8 @@
  */
 
 #pragma once
-#include "sentum/trader/trader.hpp"
+
 #include <string>
+#include <sentum/trader/trader.hpp>
 
 RiskConfig load_risk_config(const std::string& path);
