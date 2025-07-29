@@ -27,7 +27,7 @@
 #include <sstream>
 #include <iostream>
 
-#include <sentum/trader/TradeLogger.hpp>
+#include <sentum/trader/utils/TradeLogger.hpp>
 
 using json = nlohmann::json;
 
