@@ -25,24 +25,29 @@
 #pragma once
 
 #include <string>
-#include <vector>
+#include <queue>
+#include <mutex>
 #include <thread>
+#include <fstream>
 #include <atomic>
+#include <condition_variable>
 
-#include "sentum/utils/database.hpp"
-
-class Collector {
+class CollectorLogger {
 	public:
-		Collector(Database& db, const std::vector<std::string>& symbols);
-		~Collector();
+		explicit CollectorLogger(const std::string& path = "log/collector.log");
+		~CollectorLogger();
+
 		void start();
 		void stop();
+		void log(const std::string& message);
 
-private:
-	void run();
-	Database& db_ref;
-	std::vector<std::string> symbols;
-	std::thread ws_thread;
-	std::atomic<bool> running;
+	private:
+		void run();
 
+		std::string file_path;
+		std::queue<std::string> messages;
+		std::mutex mtx;
+		std::condition_variable cv;
+		std::thread worker;
+		std::atomic<bool> running;
 };
