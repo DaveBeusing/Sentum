@@ -26,7 +26,7 @@
 #include <iostream>
 
 #include <nlohmann/json.hpp>
-#include <sentum/utils/RiskConfigLoader.hpp>
+#include <sentum/trader/utils/RiskConfigLoader.hpp>
 
 RiskConfig load_risk_config(const std::string& path) {
 	RiskConfig config;
