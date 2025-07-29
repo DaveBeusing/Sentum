@@ -32,10 +32,10 @@
 #include <chrono>
 #include <mutex>
 
-#include <sentum/utils/config.hpp>
+#include <sentum/utils/ConfigLoader.hpp>
 #include <sentum/utils/database.hpp>
 #include <sentum/api/binance.hpp>
-#include <sentum/collector/collector.hpp>
+#include <sentum/collector/Collector.hpp>
 #include <sentum/scanner/scanner.hpp>
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/ui/console.hpp>

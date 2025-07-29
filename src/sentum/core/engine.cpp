@@ -26,8 +26,8 @@
 #include <iostream>
 
 #include <sentum/core/engine.hpp>
-#include <sentum/utils/config.hpp>
-#include <sentum/utils/secrets.hpp>
+#include <sentum/utils/ConfigLoader.hpp>
+#include <sentum/utils/SecretsLoader.hpp>
 #include <sentum/ui/console.hpp>
 
 
