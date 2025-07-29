@@ -30,7 +30,7 @@
 #include <chrono>
 #include <functional>
 
-#include <sentum/trader/trader.hpp>
+#include <sentum/trader/TradeEngine.hpp>
 
 
 class UiConsole {

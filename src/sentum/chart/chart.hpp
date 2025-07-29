@@ -26,7 +26,7 @@
 #include <vector>
 #include <string>
 
-#include "sentum/trader/trader.hpp" // für TradePosition
+#include "sentum/trader/TradeEngine.hpp" // für TradePosition
 
 
 class Chart {

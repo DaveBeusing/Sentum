@@ -94,26 +94,7 @@ void Engine::init_components() {
 void Engine::init() {
 	init_config();
 	init_components();
-	/*
-	config = load_config( "config/config.json" );
-	Secrets secrets = load_secrets("config/secrets.json");
-	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
-		std::cerr << "Secrets missing! please check config/secrets.json.\n";
-		return;
-	}
-	ui = std::make_unique<UiConsole>();
-	db_path = "log/klines.sqlite3";
-	db = std::make_unique<Database>( db_path );
-	binance = std::make_unique<Binance>( secrets.api_key, secrets.api_secret );
-	markets = binance->get_markets_by_quote( config.quoteAsset );
-	collector = std::make_unique<Collector>(*db, markets );
-	collector_active = true;
-	scanner = std::make_unique<SymbolScanner>(*db, config.minCumulativeReturn );
-	scanner_active = true;
-	collector->start();
-	quote_balance = binance->get_coin_balance(config.quoteAsset);
-	db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
-	*/
+
 	start_time = std::chrono::system_clock::now();
 
 	ui->set_collector_active(collector_active);
@@ -207,7 +188,7 @@ void Engine::monitor_scanner() {
 
 void Engine::start_trader_for(const std::string& symbol) {
 	trader_active = true;
-	trader = std::make_unique<Trader>(symbol, *binance);
+	trader = std::make_unique<TradeEngine>(symbol, *binance);
 	trader_thread = std::thread([this] {
 		trader->run();
 		trader_active = false;

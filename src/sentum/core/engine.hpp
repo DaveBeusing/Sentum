@@ -37,7 +37,7 @@
 #include <sentum/api/binance.hpp>
 #include <sentum/collector/collector.hpp>
 #include <sentum/scanner/scanner.hpp>
-#include <sentum/trader/trader.hpp>
+#include <sentum/trader/TradeEngine.hpp>
 #include <sentum/ui/console.hpp>
 
 
@@ -67,7 +67,7 @@ class Engine {
 		std::unique_ptr<Binance> binance;
 		std::unique_ptr<Collector> collector;
 		std::unique_ptr<SymbolScanner> scanner;
-		std::unique_ptr<Trader> trader;
+		std::unique_ptr<TradeEngine> trader;
 		std::unique_ptr<UiConsole> ui;
 
 		// State
