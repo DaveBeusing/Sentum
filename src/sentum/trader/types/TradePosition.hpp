@@ -72,6 +72,17 @@ struct TradePosition {
 
 	// Risk
 	double leverage = 1.0;
+	double risk_per_trade = 0.0;
+	double stop_loss_percent = 0.0;
+	bool trailing_sl_enabled = false;
+	double trailing_sl_percent = 0.0;
+	double take_profit_percent = 0.0;
+	bool trailing_tp_enabled = false;
+	double trailing_tp_percent = 0.0;
+
+	// Fees
+	double buy_fee_percent = 0.0;
+	double sell_fee_percent = 0.0;
 
 	// Conditions
 	std::string close_reason;
