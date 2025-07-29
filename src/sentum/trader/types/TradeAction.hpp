@@ -27,5 +27,6 @@
 enum class TradeAction {
 	NONE,
 	BUY,
-	SELL
+	SELL,
+	HOLD
 };
