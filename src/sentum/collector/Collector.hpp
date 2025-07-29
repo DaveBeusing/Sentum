@@ -30,7 +30,7 @@
 #include <atomic>
 
 #include <sentum/utils/database.hpp>
-#include <sentum/collector/utils/CollectorLogger.hpp>
+#include <sentum/utils/AsyncLogger.hpp>
 
 class Collector {
 
@@ -47,6 +47,6 @@ class Collector {
 		std::thread ws_thread;
 		std::atomic<bool> running;
 
-		CollectorLogger logger;
+		AsyncLogger logger;
 
 };
