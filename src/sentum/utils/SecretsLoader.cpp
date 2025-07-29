@@ -22,16 +22,17 @@
  * 
  */
 
-#include "secrets.hpp"
-#include "nlohmann/json.hpp"
 #include <fstream>
 #include <iostream>
+
+#include <nlohmann/json.hpp>
+#include <sentum/utils/SecretsLoader.hpp>
 
 Secrets load_secrets(const std::string& path) {
 	Secrets s;
 	std::ifstream file(path);
 	if (!file.is_open()) {
-		std::cerr << " ⚠️  Error can't open secrets.json: " << path << std::endl;
+		std::cerr << "Error can't open secrets.json: " << path << std::endl;
 		return s;
 	}
 	try {
@@ -40,7 +41,7 @@ Secrets load_secrets(const std::string& path) {
 		s.api_key = json.value("api_key", "");
 		s.api_secret = json.value("api_secret", "");
 	} catch (const std::exception& e) {
-		std::cerr << " ⚠️  Error parsing secrets.json: " << e.what() << std::endl;
+		std::cerr << "Error parsing secrets.json: " << e.what() << std::endl;
 	}
 	return s;
 }
