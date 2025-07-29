@@ -38,8 +38,9 @@
 
 #include <sentum/utils/database.hpp>
 #include <sentum/utils/helper.hpp>
-#include <sentum/collector/Collector.hpp>
 #include <sentum/utils/AsyncLogger.hpp>
+#include <sentum/collector/Collector.hpp>
+
 
 using json = nlohmann::json;
 using client = websocketpp::client<websocketpp::config::asio_tls_client>;
