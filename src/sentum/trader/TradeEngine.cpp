@@ -28,17 +28,17 @@
 #include <iomanip>
 #include <thread>
 
-#include <sentum/trader/trader.hpp>
+#include <sentum/trader/TradeEngine.hpp>
 
 
-Trader::Trader(const std::string& symbol_, Binance& api_) : symbol(symbol_), api(api_), running(true) {}
+TradeEngine::TradeEngine(const std::string& symbol_, Binance& api_) : symbol(symbol_), api(api_), running(true) {}
 
-void Trader::stop() {
+void TradeEngine::stop() {
 	running = false;
 	if (price_stream) price_stream->stop();
 }
 
-void Trader::run() {
+void TradeEngine::run() {
 	using namespace std::chrono_literals;
 	//load current version of risk.json
 	risk = load_risk_config("config/risk.json");
@@ -53,7 +53,7 @@ void Trader::run() {
 	}
 }
 
-TradeAction Trader::evaluate(double price) {
+TradeAction TradeEngine::evaluate(double price) {
 
 	if (!position.open) {
 
@@ -127,41 +127,41 @@ TradeAction Trader::evaluate(double price) {
 	return TradeAction::NONE;
 }
 
-const TradePosition& Trader::get_position() const {
+const TradePosition& TradeEngine::get_position() const {
 	return position;
 }
 
-TradePosition Trader::get_current_position() const {
+TradePosition TradeEngine::get_current_position() const {
 	return position;
 }
 
-double Trader::get_latest_price() const {
+double TradeEngine::get_latest_price() const {
 	return latest_price.load();
 }
 
-double Trader::get_total_profit() const {
+double TradeEngine::get_total_profit() const {
 	return total_profit;
 }
 
-int Trader::get_win_count() const {
+int TradeEngine::get_win_count() const {
 	return win_count;
 }
 
-int Trader::get_lose_count() const {
+int TradeEngine::get_lose_count() const {
 	return lose_count;
 }
 
-double Trader::get_winrate_percent() const {
+double TradeEngine::get_winrate_percent() const {
 	int total = win_count + lose_count;
 	if (total == 0) return 0.0;
 	return (static_cast<double>(win_count) / total) * 100.0;
 }
 
-int Trader::get_total_trades() const {
+int TradeEngine::get_total_trades() const {
 	return win_count + lose_count;
 }
 
-double Trader::get_average_profit() const {
+double TradeEngine::get_average_profit() const {
 	int total = get_total_trades();
 	if (total == 0) return 0.0;
 	return total_profit / static_cast<double>(total);

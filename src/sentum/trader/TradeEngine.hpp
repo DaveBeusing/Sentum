@@ -32,16 +32,16 @@
 #include <sentum/trader/types/TradePosition.hpp>
 #include <sentum/trader/types/TradeAction.hpp>
 #include <sentum/trader/utils/RiskConfigLoader.hpp>
-#include <sentum/trader/TradeLogger.hpp>
+#include <sentum/trader/utils/TradeLogger.hpp>
 #include <sentum/api/binance.hpp>
 #include <sentum/api/websocket.hpp>
 
 
-class Trader {
+class TradeEngine {
 
 	public:
 
-		Trader(const std::string& symbol, Binance& binance);
+		TradeEngine(const std::string& symbol, Binance& binance);
 		void run();
 		void stop();
 
