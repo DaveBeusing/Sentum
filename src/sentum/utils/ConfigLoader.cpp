@@ -25,8 +25,8 @@
 #include <fstream>
 #include <iostream>
 
-#include "sentum/utils/config.hpp"
-#include "nlohmann/json.hpp"
+#include <nlohmann/json.hpp>
+#include <sentum/utils/ConfigLoader.hpp>
 
 
 Config load_config( const std::string& path ){
