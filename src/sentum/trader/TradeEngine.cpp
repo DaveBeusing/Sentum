@@ -27,29 +27,38 @@
 #include <chrono>
 #include <iomanip>
 #include <thread>
+#include <future>
 
 #include <sentum/trader/TradeEngine.hpp>
 
 
-TradeEngine::TradeEngine(const std::string& symbol_, Binance& api_) : symbol(symbol_), api(api_), running(true) {}
+TradeEngine::TradeEngine(const std::string& symbol_, Binance& api_) : symbol(symbol_), api(api_), running(true), engine_logger("log/engine.log") {}
 
 void TradeEngine::stop() {
 	running = false;
 	if (price_stream) price_stream->stop();
+	engine_logger.stop();
 }
 
 void TradeEngine::run() {
-	using namespace std::chrono_literals;
-	//load current version of risk.json
+	engine_logger.start();
 	risk = load_risk_config("config/risk.json");
 	price_stream = std::make_unique<Websocket>(symbol);
 	price_stream->set_on_price([this](double price) {
 		this->latest_price.store(price);
-		evaluate(price);
+		std::thread([this, price] {
+			auto start = std::chrono::high_resolution_clock::now();
+			TradeAction action = evaluate(price);
+			auto end = std::chrono::high_resolution_clock::now();
+			auto latency = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+			if (latency > 500) {
+				engine_logger.log("High latency: " + std::to_string(latency) + " µs");
+			}
+		}).detach();
 	});
 	price_stream->start();
 	while (running) {
-		std::this_thread::sleep_for(500ms);
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));//kürzerer intervall less blocking
 	}
 }
 

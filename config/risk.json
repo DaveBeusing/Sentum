@@ -1,12 +1,12 @@
 {
 	"max_total_capital": 1000.0,
 	"risk_per_trade": 0.1,
-	"stop_loss_percent": 0.03,
-	"take_profit_percent": 0.05,
+	"stop_loss_percent": 0.01,
+	"take_profit_percent": 0.03,
 	"buy_fee_percent": 0.001,
 	"sell_fee_percent": 0.001,
 	"trailing_sl_enabled": true,
 	"trailing_sl_percent": 0.01,
-	"trailing_tp_enabled": false,
+	"trailing_tp_enabled": true,
 	"trailing_tp_percent": 0.02
 }

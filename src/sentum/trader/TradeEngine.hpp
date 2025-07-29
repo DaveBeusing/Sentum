@@ -33,6 +33,7 @@
 #include <sentum/trader/types/TradeAction.hpp>
 #include <sentum/trader/utils/RiskConfigLoader.hpp>
 #include <sentum/trader/utils/TradeLogger.hpp>
+#include <sentum/utils/AsyncLogger.hpp>
 #include <sentum/api/binance.hpp>
 #include <sentum/api/websocket.hpp>
 
@@ -66,6 +67,7 @@ class TradeEngine {
 		TradePosition position;
 
 		TradeLogger logger;
+		AsyncLogger engine_logger;
 
 		double total_profit = 0.0;
 		int win_count = 0;
