@@ -28,9 +28,10 @@
 #include <chrono>
 #include <thread>
 
-#include <sentum/trader/types/risk_config.hpp>
-#include <sentum/trader/types/trade_position.hpp>
-#include <sentum/trader/types/trade_action.hpp>
+#include <sentum/trader/types/RiskConfig.hpp>
+#include <sentum/trader/types/TradePosition.hpp>
+#include <sentum/trader/types/TradeAction.hpp>
+#include <sentum/trader/TradeLogger.hpp>
 #include <sentum/api/binance.hpp>
 #include <sentum/api/websocket.hpp>
 
@@ -63,13 +64,13 @@ class Trader {
 		RiskConfig risk;
 		TradePosition position;
 
+		TradeLogger logger;
+
 		double total_profit = 0.0;
 		int win_count = 0;
 		int lose_count = 0;
 
 		std::unique_ptr<Websocket> price_stream;
 		std::atomic<double> latest_price = 0.0;
-
-		void log_trade(TradeAction action, double price);
 
 };

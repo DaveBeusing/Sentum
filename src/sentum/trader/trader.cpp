@@ -52,17 +52,33 @@ void Trader::run() {
 }
 
 TradeAction Trader::evaluate(double price) {
+
 	if (!position.open) {
 
 		// BUY
 		position.open = true;
+		position.symbol = symbol;
 		position.entry_price = price;
-		position.quantity = (risk.max_total_usdt * risk.risk_per_trade) / price;
+		position.executed_price = price; //TODO: update with real Data from Order
+		position.entry_time = std::chrono::system_clock::now();
+		position.signal_time = std::chrono::system_clock::now();
+		position.quantity = (risk.max_total_capital * risk.risk_per_trade) / price;
 		position.highest_price = price;
+		position.lowest_price = price;
 		position.stop_loss_price = price * (1.0 - risk.stop_loss_percent);
 		position.take_profit_price = price * (1.0 + risk.take_profit_percent);
-		position.entry_time = std::chrono::system_clock::now();
-		log_trade(TradeAction::BUY, price);
+		// Risikokonfiguration
+		position.risk_per_trade = risk.risk_per_trade;
+		position.stop_loss_percent = risk.stop_loss_percent;
+		position.take_profit_percent = risk.take_profit_percent;
+		position.trailing_sl_enabled = risk.trailing_sl_enabled;
+		position.trailing_sl_percent = risk.trailing_sl_percent;
+		position.trailing_tp_enabled = risk.trailing_tp_enabled;
+		position.trailing_tp_percent = risk.trailing_tp_percent;
+		// Gebührenkonfiguration
+		position.buy_fee_percent = risk.buy_fee_percent;
+		position.sell_fee_percent = risk.sell_fee_percent;
+		logger.log(position, TradeAction::BUY);
 		return TradeAction::BUY;
 
 	} else {
@@ -70,50 +86,43 @@ TradeAction Trader::evaluate(double price) {
 		// Update Trailing Stop-Loss & TP
 		if (price > position.highest_price) {
 			position.highest_price = price;
-			position.stop_loss_price = price * (1.0 - risk.stop_loss_percent);
-			position.take_profit_price = price * (1.0 + risk.take_profit_percent);
+			if (position.trailing_sl_enabled){
+				position.stop_loss_price = price * (1.0 - position.trailing_sl_percent);
+			}
+			if (position.trailing_tp_enabled){
+				position.take_profit_price = price * (1.0 - position.trailing_tp_percent);
+			}
+		}
+
+		// set lowest price seen
+		if (price < position.lowest_price) {
+			position.lowest_price = price;
 		}
 
 		// SELL
 		if (price <= position.stop_loss_price || price >= position.take_profit_price) {
-			log_trade(TradeAction::SELL, price);
-
-			// PnL
-			double gross_profit = (price - position.entry_price) * position.quantity;
-			double buy_fee = position.entry_price * position.quantity * risk.fee_percent;
-			double sell_fee = price * position.quantity * risk.fee_percent;
-			double net_profit = gross_profit - buy_fee - sell_fee;
-			total_profit += net_profit;
-			if (net_profit >= 0.0) {
+			position.exit_price = price;
+			position.exit_time = std::chrono::system_clock::now();
+			position.stop_loss_triggered = (price <= position.stop_loss_price);
+			position.take_profit_triggered = (price >= position.take_profit_price);
+			position.gross_profit = (price - position.entry_price) * position.quantity;
+			position.fee_entry = position.entry_price * position.quantity * position.buy_fee_percent;
+			position.fee_exit = price * position.quantity * position.sell_fee_percent;
+			position.net_profit = position.gross_profit - position.fee_entry - position.fee_exit;
+			total_profit += position.net_profit;
+			if (position.net_profit >= 0.0){
 				win_count++;
-			} else {
+			}
+			else {
 				lose_count++;
 			}
-
+			//TODO: implement -> trade_history.push_back(position);
+			logger.log(position, TradeAction::SELL);
 			position = TradePosition(); // Reset
 			return TradeAction::SELL;
 		}
 	}
 	return TradeAction::NONE;
-}
-
-void Trader::log_trade(TradeAction action, double price) {
-	std::ofstream file("log/trader.log", std::ios::app);
-	auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-	std::stringstream timestamp;
-	timestamp << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S");
-	std::string action_str = (action == TradeAction::BUY ? "BUY" : "SELL");
-	file << timestamp.str() << "," << action_str << "," << symbol << "," << price << "," << position.quantity;
-	if (action == TradeAction::SELL) {
-		double gross_profit = (price - position.entry_price) * position.quantity;
-		double buy_fee = position.entry_price * position.quantity * risk.fee_percent;
-		double sell_fee = price * position.quantity * risk.fee_percent;
-		double net_profit = gross_profit - buy_fee - sell_fee;
-		file << "," << net_profit;
-	}
-	file << "\n";
-	file.close();
-	std::cout << "[TRADE] " << action_str << " " << position.quantity << " " << symbol << " @ $" << price << std::endl;
 }
 
 const TradePosition& Trader::get_position() const {
