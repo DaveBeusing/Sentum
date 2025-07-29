@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-#include "sentum/utils/database.hpp"
+#include <sentum/utils/database.hpp>
 
 
 struct SymbolPerformance {
@@ -38,7 +38,7 @@ struct SymbolPerformance {
 class SymbolScanner {
 	public:
 		explicit SymbolScanner(Database& db, double threshold = 0.0005);
-		std::vector<SymbolPerformance> fetch_top_performers(int lookback = 2, int max_symbols = 5);
+		std::vector<SymbolPerformance> fetch_top_performers(int lookback = 60, int max_symbols = 5);
 
 	private:
 		Database& database;

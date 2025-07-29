@@ -36,7 +36,7 @@
 #include <sentum/utils/database.hpp>
 #include <sentum/api/binance.hpp>
 #include <sentum/collector/Collector.hpp>
-#include <sentum/scanner/scanner.hpp>
+#include <sentum/scanner/SymbolScanner.hpp>
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/ui/console.hpp>
 

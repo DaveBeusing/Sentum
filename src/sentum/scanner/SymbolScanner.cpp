@@ -29,20 +29,20 @@
 #include <algorithm>
 #include <sqlite3.h>
 
-#include <sentum/scanner/scanner.hpp>
+#include <sentum/scanner/SymbolScanner.hpp>
 #include <sentum/utils/database.hpp>
+
+constexpr double ROUND_FACTOR = 1e8;
 
 SymbolScanner::SymbolScanner(Database& db_, double threshold) : database(db_), min_return_threshold(threshold) {}
 
 std::vector<SymbolPerformance> SymbolScanner::fetch_top_performers(int lookback, int max_symbols) {
 	std::vector<SymbolPerformance> result;
 	sqlite3* db = database.get_connection();
-
-	// fetch all unique symbols
 	const char* sql = "SELECT DISTINCT symbol FROM klines;";
 	sqlite3_stmt* stmt;
 	if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-		//std::cerr << "SymbolScanner::fetch_top_performers -> DB error: " << sqlite3_errmsg(db) << "\n";
+		//TODO: logging
 		return result;
 	}
 	std::vector<std::string> symbols;
@@ -53,41 +53,31 @@ std::vector<SymbolPerformance> SymbolScanner::fetch_top_performers(int lookback,
 		}
 	}
 	sqlite3_finalize(stmt);
-
-	//DEBUG
-	//std::cout << "[Scanner] Fetched symbols: " << symbols.size() << "\n";
-
 	// calculate cumulative return for each symbol
+	const std::string query = "SELECT close FROM ( SELECT close FROM klines WHERE symbol = ? ORDER BY timestamp ASC LIMIT ? );";
 	for (const auto& symbol : symbols) {
-		std::string query = "SELECT close FROM ( SELECT close FROM klines WHERE symbol = ? ORDER BY timestamp ASC LIMIT ? ) ORDER BY rowid ASC;";
-		if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) != SQLITE_OK) continue;
+		if (sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr) != SQLITE_OK){
+			//TODO: logging
+			continue;
+		}
 		sqlite3_bind_text(stmt, 1, symbol.c_str(), -1, SQLITE_STATIC);
 		sqlite3_bind_int(stmt, 2, lookback);
-		std::vector<double> closes;
+		double first = -1.0, last = -1.0;
+		int count = 0;
 		while (sqlite3_step(stmt) == SQLITE_ROW) {
-			closes.push_back(sqlite3_column_double(stmt, 0));
+			double close = sqlite3_column_double(stmt, 0);
+			if (count == 0) first = close;
+			last = close;
+			count++;
 		}
 		sqlite3_finalize(stmt);
-		if (closes.size() < 2) continue;
-		double cum_return = 1.0;
-		for (size_t i = 1; i < closes.size(); ++i) {
-			double prev = closes[i - 1];
-			if (prev == 0.0) continue;
-			double pct = (closes[i] - prev) / prev;
-			cum_return *= (1.0 + pct);
-		}
-		cum_return -= 1.0;
-
-		//DEBUG
-		//std::cout << "📈 " << symbol << " | Close-Count: " << closes.size() << " | Return: " << std::fixed << std::setprecision(6) << cum_return * 100 << " %\n";
-
+		if (count < 2 || first <= 0.0) continue;
+		double cum_return = (last - first) / first;
 		if (cum_return > min_return_threshold) {
-			result.push_back({symbol, std::round(cum_return * 1e8) / 1e8});
+			result.push_back({symbol, std::round(cum_return * ROUND_FACTOR) / ROUND_FACTOR});
 		}
 	}
-
-	//sort descending
-	std::sort(result.begin(), result.end(), [](const SymbolPerformance& a, const SymbolPerformance& b) {
+	std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
 		return a.cum_return > b.cum_return;
 	});
 	if (max_symbols > 0 && static_cast<int>(result.size()) > max_symbols) {
