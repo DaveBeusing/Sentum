@@ -25,6 +25,9 @@
 #pragma once
 
 #include <string>
+#include <vector>
+#include <optional>
+#include <algorithm>
 
 struct MarketInfo {
 	std::string symbol;
@@ -32,4 +35,21 @@ struct MarketInfo {
 	int base_asset_precision;
 	std::string quote_asset;
 	int quote_asset_precision;
+
+	static std::optional<MarketInfo> find_by_symbol(const std::vector<MarketInfo>& markets, const std::string& target_symbol) {
+		auto it = std::find_if(markets.begin(), markets.end(), [&target_symbol](const MarketInfo& m) {
+			return m.symbol == target_symbol;
+		});
+		if (it != markets.end()) return *it;
+		return std::nullopt;
+	}
+
+	static std::vector<std::string> get_symbol_list(const std::vector<MarketInfo>& markets) {
+		std::vector<std::string> symbols;
+		symbols.reserve(markets.size());
+		for (const auto& m : markets) {
+			symbols.push_back(m.symbol);
+		}
+		return symbols;
+	}
 };
