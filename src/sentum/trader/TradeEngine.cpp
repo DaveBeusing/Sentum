@@ -32,7 +32,7 @@
 #include <sentum/trader/TradeEngine.hpp>
 
 
-TradeEngine::TradeEngine(const std::string& symbol_, Binance& api_) : symbol(symbol_), api(api_), running(true), engine_logger("log/engine.log") {}
+TradeEngine::TradeEngine(const std::string& symbol_, BinanceRestClient& api_) : symbol(symbol_), api(api_), running(true), engine_logger("log/engine.log") {}
 
 void TradeEngine::stop() {
 	running = false;
@@ -43,7 +43,7 @@ void TradeEngine::stop() {
 void TradeEngine::run() {
 	engine_logger.start();
 	risk = load_risk_config("config/risk.json");
-	price_stream = std::make_unique<Websocket>(symbol);
+	price_stream = std::make_unique<BinanceWebsocketClient>(symbol);
 	price_stream->set_on_price([this](double price) {
 		this->latest_price.store(price);
 		std::thread([this, price] {

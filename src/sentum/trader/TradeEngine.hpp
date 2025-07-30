@@ -34,15 +34,15 @@
 #include <sentum/trader/utils/RiskConfigLoader.hpp>
 #include <sentum/trader/utils/TradeLogger.hpp>
 #include <sentum/utils/AsyncLogger.hpp>
-#include <sentum/api/binance.hpp>
-#include <sentum/api/websocket.hpp>
+#include <sentum/api/BinanceRestClient.hpp>
+#include <sentum/api/BinanceWebsocketClient.hpp>
 
 
 class TradeEngine {
 
 	public:
 
-		TradeEngine(const std::string& symbol, Binance& binance);
+		TradeEngine(const std::string& symbol, BinanceRestClient& binance);
 		void run();
 		void stop();
 
@@ -60,7 +60,7 @@ class TradeEngine {
 
 	private:
 		std::string symbol;
-		Binance& api;
+		BinanceRestClient& api;
 		std::atomic<bool> running;
 
 		RiskConfig risk;
@@ -73,7 +73,7 @@ class TradeEngine {
 		int win_count = 0;
 		int lose_count = 0;
 
-		std::unique_ptr<Websocket> price_stream;
+		std::unique_ptr<BinanceWebsocketClient> price_stream;
 		std::atomic<double> latest_price = 0.0;
 
 };
