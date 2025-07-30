@@ -29,11 +29,11 @@
 #include <atomic>
 
 
-class Websocket {
+class BinanceWebsocketClient {
 
 	public:
-		explicit Websocket(const std::string& symbol);
-		~Websocket();
+		explicit BinanceWebsocketClient(const std::string& symbol);
+		~BinanceWebsocketClient();
 
 		void start();
 		void stop();

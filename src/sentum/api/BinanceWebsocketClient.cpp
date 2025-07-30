@@ -27,7 +27,7 @@
 #include <boost/asio/ssl/context.hpp>
 #include <nlohmann/json.hpp>
 
-#include <sentum/api/websocket.hpp>
+#include <sentum/api/BinanceWebsocketClient.hpp>
 
 using json = nlohmann::json;
 using tls_client = websocketpp::client<websocketpp::config::asio_tls_client>;
@@ -45,28 +45,28 @@ std::shared_ptr<boost::asio::ssl::context> on_tls_init() {
 	return ctx;
 }
 
-Websocket::Websocket(const std::string& sym) : symbol(sym), running(false) {}
+BinanceWebsocketClient::BinanceWebsocketClient(const std::string& sym) : symbol(sym), running(false) {}
 
-Websocket::~Websocket(){
+BinanceWebsocketClient::~BinanceWebsocketClient(){
 	stop();
 }
 
-void Websocket::set_on_price(const std::function<void(double)>& cb) {
+void BinanceWebsocketClient::set_on_price(const std::function<void(double)>& cb) {
 	on_price = cb;
 }
 
-void Websocket::start() {
+void BinanceWebsocketClient::start() {
 	if (running) return;
 	running = true;
-	ws_thread = std::thread(&Websocket::run, this);
+	ws_thread = std::thread(&BinanceWebsocketClient::run, this);
 }
 
-void Websocket::stop() {
+void BinanceWebsocketClient::stop() {
 	running = false;
 	if (ws_thread.joinable()) ws_thread.join();
 }
 
-void Websocket::run() {
+void BinanceWebsocketClient::run() {
 	while (running) {
 		try {
 			tls_client client;
