@@ -34,18 +34,18 @@
 
 #include <sentum/utils/ConfigLoader.hpp>
 #include <sentum/utils/database.hpp>
-#include <sentum/api/binance.hpp>
+#include <sentum/api/BinanceRestClient.hpp>
 #include <sentum/collector/Collector.hpp>
 #include <sentum/scanner/SymbolScanner.hpp>
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/ui/console.hpp>
 
 
-class Engine {
+class ExecutionEngine {
 
 	public:
-		Engine();
-		~Engine();
+		ExecutionEngine();
+		~ExecutionEngine();
 
 		void start();
 		void stop();
@@ -64,7 +64,7 @@ class Engine {
 
 		// Components
 		std::unique_ptr<Database> db;
-		std::unique_ptr<Binance> binance;
+		std::unique_ptr<BinanceRestClient> binance;
 		std::unique_ptr<Collector> collector;
 		std::unique_ptr<SymbolScanner> scanner;
 		std::unique_ptr<TradeEngine> trader;
@@ -72,7 +72,7 @@ class Engine {
 
 		// State
 		std::string current_symbol;
-		std::vector<std::string> markets;
+		std::vector<MarketInfo> markets;
 		double quote_balance;
 		std::string db_path;
 		size_t db_size;

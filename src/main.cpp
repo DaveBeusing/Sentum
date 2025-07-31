@@ -25,11 +25,12 @@
 #include <csignal>
 #include <iostream>
 #include <thread>
+#include <atomic>
 #include <chrono>
 
-#include <sentum/core/engine.hpp>
+#include <sentum/core/ExecutionEngine.hpp>
 
-std::unique_ptr<Engine> engine_ptr;
+std::unique_ptr<ExecutionEngine> engine_ptr;
 
 void handle_sigint(int) {
 	if( engine_ptr ){
@@ -39,11 +40,10 @@ void handle_sigint(int) {
 
 int main() {
 	std::signal(SIGINT, handle_sigint);
-	engine_ptr = std::make_unique<Engine>();
+	engine_ptr = std::make_unique<ExecutionEngine>();
 	engine_ptr->start();
 	while (engine_ptr->is_running()) {
-		std::this_thread::sleep_for(std::chrono::seconds(1));
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
-	//engine.stop();
 	return 0;
 }

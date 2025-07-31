@@ -25,23 +25,23 @@
 #include <chrono>
 #include <iostream>
 
-#include <sentum/core/engine.hpp>
+#include <sentum/core/ExecutionEngine.hpp>
 #include <sentum/utils/ConfigLoader.hpp>
 #include <sentum/utils/SecretsLoader.hpp>
 #include <sentum/ui/console.hpp>
 
 
-Engine::Engine() : running(false), collector_active(false), scanner_active(false), trader_active(false) {}
+ExecutionEngine::ExecutionEngine() : running(false), collector_active(false), scanner_active(false), trader_active(false) {}
 
-Engine::~Engine() {
+ExecutionEngine::~ExecutionEngine() {
 	stop();
 }
 
-bool Engine::is_running() const {
+bool ExecutionEngine::is_running() const {
 	return running.load();
 }
 
-void Engine::start() {
+void ExecutionEngine::start() {
 		running = true;
 		init();
 		ui->on_exit = [this]() { stop(); };
@@ -54,10 +54,11 @@ void Engine::start() {
 			}
 		};
 		ui_thread = std::thread([this] { ui->start(); });
-		main_thread = std::thread(&Engine::run_main_loop, this);
+		main_thread = std::thread(&ExecutionEngine::run_main_loop, this);
 }
 
-void Engine::stop() {
+void ExecutionEngine::stop() {
+	std::cout << "[Engine] stop() aufgerufen\n";
 	running = false;
 	if (main_thread.joinable()) main_thread.join();
 	if (scanner_thread.joinable()) scanner_thread.join();
@@ -69,18 +70,18 @@ void Engine::stop() {
 	ui.reset();
 }
 
-void Engine::init_config() {
+void ExecutionEngine::init_config() {
 	config = load_config("config/config.json");
 	Secrets secrets = load_secrets("config/secrets.json");
 	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
 		throw std::runtime_error("Missing API keys in secrets.json!");
 	}
-	binance = std::make_unique<Binance>(secrets.api_key, secrets.api_secret);
+	binance = std::make_unique<BinanceRestClient>(secrets.api_key, secrets.api_secret);
 	markets = binance->get_markets_by_quote(config.quoteAsset);
 	quote_balance = binance->get_coin_balance(config.quoteAsset);
 }
 
-void Engine::init_components() {
+void ExecutionEngine::init_components() {
 	db_path = "log/klines.sqlite3";
 	db = std::make_unique<Database>(db_path);
 	collector = std::make_unique<Collector>(*db, markets);
@@ -91,7 +92,7 @@ void Engine::init_components() {
 	ui = std::make_unique<UiConsole>();
 }
 
-void Engine::init() {
+void ExecutionEngine::init() {
 	init_config();
 	init_components();
 
@@ -109,8 +110,8 @@ void Engine::init() {
 
 }
 
-void Engine::run_main_loop() {
-	scanner_thread = std::thread(&Engine::monitor_scanner, this);
+void ExecutionEngine::run_main_loop() {
+	scanner_thread = std::thread(&ExecutionEngine::monitor_scanner, this);
 	int scanner_interval = 10;
 	int countdown = scanner_interval;
 	while (running) {
@@ -167,7 +168,7 @@ void Engine::run_main_loop() {
 	}
 }
 
-void Engine::monitor_scanner() {
+void ExecutionEngine::monitor_scanner() {
 	using namespace std::chrono_literals;
 	while (running) {
 		if (!trader_active) {
@@ -186,7 +187,7 @@ void Engine::monitor_scanner() {
 	}
 }
 
-void Engine::start_trader_for(const std::string& symbol) {
+void ExecutionEngine::start_trader_for(const std::string& symbol) {
 	trader_active = true;
 	trader = std::make_unique<TradeEngine>(symbol, *binance);
 	trader_thread = std::thread([this] {
@@ -195,7 +196,7 @@ void Engine::start_trader_for(const std::string& symbol) {
 	});
 }
 
-void Engine::stop_trader() {
+void ExecutionEngine::stop_trader() {
 	if (trader) {
 		trader->stop();
 		if (trader_thread.joinable()) trader_thread.join();

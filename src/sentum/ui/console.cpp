@@ -40,13 +40,13 @@ UiConsole::~UiConsole() {
 void UiConsole::start() {
 	running = true;
 	ui_thread = std::thread(&UiConsole::ui_loop, this);
-	input_thread = std::thread(&UiConsole::input_loop, this);
+	//input_thread = std::thread(&UiConsole::input_loop, this);
 }
 
 void UiConsole::stop() {
 	running = false;
 	if (ui_thread.joinable()) ui_thread.join();
-	if (input_thread.joinable()) input_thread.join();
+	//if (input_thread.joinable()) input_thread.join();
 }
 
 void UiConsole::set_quote_asset(const std::string& val) {
@@ -152,7 +152,6 @@ void UiConsole::draw(){
 	auto uptime = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
 	ui::clear_terminal();
 	ui::show_header();
-	//std::cout << ui::bold() << "Engine\n" << ui::reset();
 	std::cout << ui::wrap( "Engine",ui::bold()) << "\n";
 	std::cout << " ├ Started:          " << ui::format_datetime(start_time) << "\n";
 	std::cout << " ├ Current:          " << ui::format_datetime(now) << "\n";
@@ -189,7 +188,6 @@ void UiConsole::draw(){
 		std::cout << " └ Take Profit:      " << ui::wrap_value_fixed(take_profit, "", 4) << "\n";
 	}
 
-
-	std::cout << "\n[q] Quit  [s] Stop Trader  [r] Restart Collector\n> ";
+	//std::cout << "\n[q] Quit  [s] Stop Trader  [r] Restart Collector\n> ";
 	std::cout << std::flush;
 }
