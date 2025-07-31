@@ -33,6 +33,8 @@
 #include <mutex>
 
 #include <sentum/utils/ConfigLoader.hpp>
+#include <sentum/utils/SecretsLoader.hpp>
+#include <sentum/utils/AsyncLogger.hpp> 
 #include <sentum/utils/database.hpp>
 #include <sentum/api/BinanceRestClient.hpp>
 #include <sentum/collector/Collector.hpp>
@@ -79,6 +81,8 @@ class ExecutionEngine {
 
 		std::chrono::system_clock::time_point start_time;
 		Config config;
+		Secrets secrets;
+		AsyncLogger logger;
 
 		//Methods
 		void init();

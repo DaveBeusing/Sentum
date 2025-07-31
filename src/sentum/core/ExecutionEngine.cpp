@@ -26,15 +26,16 @@
 #include <iostream>
 
 #include <sentum/core/ExecutionEngine.hpp>
-#include <sentum/utils/ConfigLoader.hpp>
-#include <sentum/utils/SecretsLoader.hpp>
 #include <sentum/ui/console.hpp>
 
 
-ExecutionEngine::ExecutionEngine() : running(false), collector_active(false), scanner_active(false), trader_active(false) {}
+ExecutionEngine::ExecutionEngine() : running(false), collector_active(false), scanner_active(false), trader_active(false), logger("log/core.log") {
+	logger.start();
+}
 
 ExecutionEngine::~ExecutionEngine() {
 	stop();
+	logger.stop();
 }
 
 bool ExecutionEngine::is_running() const {
@@ -71,25 +72,69 @@ void ExecutionEngine::stop() {
 }
 
 void ExecutionEngine::init_config() {
-	config = load_config("config/config.json");
-	Secrets secrets = load_secrets("config/secrets.json");
-	if (secrets.api_key.empty() || secrets.api_secret.empty()) {
-		throw std::runtime_error("Missing API keys in secrets.json!");
+
+	try{
+		config = load_config("config/config.json");
+	} catch(const std::exception& e) {
+		logger.log("[ERROR] Failed to load config/config.json: " + std::string(e.what()));
+		throw std::runtime_error("Failed to load config/config.json!");
 	}
-	binance = std::make_unique<BinanceRestClient>(secrets.api_key, secrets.api_secret);
-	markets = binance->get_markets_by_quote(config.quoteAsset);
-	quote_balance = binance->get_coin_balance(config.quoteAsset);
+
+	try{
+		secrets = load_secrets("config/secrets.json");
+		if (secrets.api_key.empty() || secrets.api_secret.empty()) {
+			throw std::runtime_error("Missing API keys in secrets.json!");
+		}
+	} catch(const std::exception& e) {
+		logger.log("[ERROR] Failed to load secrets.json: " + std::string(e.what()));
+		throw std::runtime_error("Failed to load secrets.json!");
+	}
+
 }
 
 void ExecutionEngine::init_components() {
 	db_path = "log/klines.sqlite3";
-	db = std::make_unique<Database>(db_path);
-	collector = std::make_unique<Collector>(*db, markets);
-	collector_active = true;
-	collector->start();
-	scanner = std::make_unique<SymbolScanner>(*db, config.minCumulativeReturn);
-	scanner_active = true;
-	ui = std::make_unique<UiConsole>();
+
+	try {
+		binance = std::make_unique<BinanceRestClient>(secrets.api_key, secrets.api_secret);
+		markets = binance->get_markets_by_quote(config.quoteAsset);
+		quote_balance = binance->get_coin_balance(config.quoteAsset);
+	} catch(const std::exception& e) {
+		logger.log("[ERROR] Failed to initialize BinanceRestClient or dependencies: " + std::string(e.what()));
+		throw std::runtime_error("Failed to initialize BinanceRestClient or dependencies of it!");
+	}
+
+	try {
+		db = std::make_unique<Database>(db_path);
+	} catch(const std::exception& e) {
+		logger.log("[ERROR] Failed to initialize Database: " + std::string(e.what()));
+		throw std::runtime_error("Failed to initialize Database!");
+	}
+
+	try {
+		collector = std::make_unique<Collector>(*db, markets);
+		collector_active = true;
+		collector->start();
+	} catch(const std::exception& e) {
+		logger.log("[ERROR] Failed to initialize or start Collector: " + std::string(e.what()));
+		throw std::runtime_error("Failed to initialize or start Collector!");
+	}
+
+	try {
+		scanner = std::make_unique<SymbolScanner>(*db, config.minCumulativeReturn);
+		scanner_active = true;
+	} catch(const std::exception& e) {
+		logger.log("[ERROR] Failed to initialize SymbolScanner: " + std::string(e.what()));
+		throw std::runtime_error("Failed to initialize SymbolScanner!");
+	}
+
+	try {
+		ui = std::make_unique<UiConsole>();
+	} catch(const std::exception& e) {
+		logger.log("[ERROR] Failed to initialize UiConsole: " + std::string(e.what()));
+		throw std::runtime_error("Failed to initialize UiConsole!");
+	}
+
 }
 
 void ExecutionEngine::init() {
@@ -114,76 +159,84 @@ void ExecutionEngine::run_main_loop() {
 	scanner_thread = std::thread(&ExecutionEngine::monitor_scanner, this);
 	int scanner_interval = 10;
 	int countdown = scanner_interval;
-	while (running) {
-		std::string top_asset = "-";
-		double top_ret = 0.0;
-		if (scanner) {
-			auto top = scanner->fetch_top_performers(60, 3);
-			if (!top.empty()) {
-				top_asset = top[0].symbol;
-				top_ret = top[0].cum_return * 100.0;
+	try {
+		while (running) {
+			std::string top_asset = "-";
+			double top_ret = 0.0;
+			if (scanner) {
+				auto top = scanner->fetch_top_performers(60, 3);
+				if (!top.empty()) {
+					top_asset = top[0].symbol;
+					top_ret = top[0].cum_return * 100.0;
+				}
 			}
+			db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
+
+			ui->set_top_performer(top_asset, top_ret);
+			ui->set_countdown(countdown);
+			ui->set_db_size(db_size);
+			ui->set_collector_active(collector_active);
+			ui->set_scanner_active(scanner_active);
+			ui->set_trader_active(trader_active);
+			ui->set_current_symbol(current_symbol);
+
+			if (trader) {
+				ui->set_trader_metrics(
+					trader->get_total_profit(),
+					trader->get_win_count(),
+					trader->get_lose_count(),
+					trader->get_total_trades(),
+					trader->get_winrate_percent(),
+					trader->get_average_profit()
+				);
+			}
+
+			if (trader && trader->get_position().open) {
+				const auto& pos = trader->get_position();
+				double price = trader->get_latest_price();
+				double profit = (price - pos.entry_price) * pos.quantity;
+
+				ui->set_active_trade(
+					pos.open,
+					pos.entry_price,
+					pos.quantity,
+					pos.stop_loss_price,
+					pos.take_profit_price,
+					price,
+					profit
+				);
+			} else {
+				ui->set_active_trade(false, 0, 0, 0, 0, 0, 0);
+			}
+
+			std::this_thread::sleep_for(std::chrono::seconds(1));
+			if (--countdown <= 0) countdown = scanner_interval;
 		}
-		db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
-
-		ui->set_top_performer(top_asset, top_ret);
-		ui->set_countdown(countdown);
-		ui->set_db_size(db_size);
-		ui->set_collector_active(collector_active);
-		ui->set_scanner_active(scanner_active);
-		ui->set_trader_active(trader_active);
-		ui->set_current_symbol(current_symbol);
-
-		if (trader) {
-			ui->set_trader_metrics(
-				trader->get_total_profit(),
-				trader->get_win_count(),
-				trader->get_lose_count(),
-				trader->get_total_trades(),
-				trader->get_winrate_percent(),
-				trader->get_average_profit()
-			);
-		}
-
-		if (trader && trader->get_position().open) {
-			const auto& pos = trader->get_position();
-			double price = trader->get_latest_price();
-			double profit = (price - pos.entry_price) * pos.quantity;
-
-			ui->set_active_trade(
-				pos.open,
-				pos.entry_price,
-				pos.quantity,
-				pos.stop_loss_price,
-				pos.take_profit_price,
-				price,
-				profit
-			);
-		} else {
-			ui->set_active_trade(false, 0, 0, 0, 0, 0, 0);
-		}
-
-		std::this_thread::sleep_for(std::chrono::seconds(1));
-		if (--countdown <= 0) countdown = scanner_interval;
+	} catch( const std::exception& e ) {
+		logger.log("[ERROR] ExecutionEngine::run_main_loop: " + std::string(e.what()));
 	}
 }
 
 void ExecutionEngine::monitor_scanner() {
 	using namespace std::chrono_literals;
-	while (running) {
-		if (!trader_active) {
-			auto top = scanner->fetch_top_performers(10, 3);//fetch 3 top markets from last 10 seconds
-			if (!top.empty()) {
-				std::lock_guard<std::mutex> lock(symbol_mutex);
-				const auto& symbol = top[0].symbol;
-				if (symbol != current_symbol) {
-					current_symbol = symbol;
-					start_trader_for(symbol);
-					ui->set_current_symbol(current_symbol);
+	try {
+		while (running) {
+			if (!trader_active) {
+				auto top = scanner->fetch_top_performers(30, 3);//fetch 3 top markets from last 30 seconds
+				if (!top.empty()) {
+					std::lock_guard<std::mutex> lock(symbol_mutex);
+					const auto& symbol = top[0].symbol;
+					if (symbol != current_symbol) {
+						current_symbol = symbol;
+						start_trader_for(symbol);
+						ui->set_current_symbol(current_symbol);
+					}
 				}
 			}
+			std::this_thread::sleep_for(5s); // scanner takt
 		}
-		std::this_thread::sleep_for(5s); // scanner takt
+	} catch(const std::exception& e){
+		logger.log("[ERROR] ExecutionEngine::monitor_scanner: " + std::string(e.what()));
 	}
 }
 
@@ -191,7 +244,11 @@ void ExecutionEngine::start_trader_for(const std::string& symbol) {
 	trader_active = true;
 	trader = std::make_unique<TradeEngine>(symbol, *binance);
 	trader_thread = std::thread([this] {
-		trader->run();
+		try{
+			trader->run();
+		} catch(const std::exception& e){
+			logger.log("[ERROR] ExecutionEngine::start_trader_for: " + std::string(e.what()));
+		}
 		trader_active = false;
 	});
 }
