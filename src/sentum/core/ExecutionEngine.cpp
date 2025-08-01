@@ -90,6 +90,12 @@ void ExecutionEngine::init_config() {
 		throw std::runtime_error("Failed to load secrets.json!");
 	}
 
+	if( config.paperTrading ){
+		logger.log("[INFO] Running in PAPER TRADING mode");
+	} else {
+		logger.log("[INFO] Running in LIVE mode");
+	}
+
 }
 
 void ExecutionEngine::init_components() {
@@ -242,7 +248,7 @@ void ExecutionEngine::monitor_scanner() {
 
 void ExecutionEngine::start_trader_for(const std::string& symbol) {
 	trader_active = true;
-	trader = std::make_unique<TradeEngine>(symbol, *binance);
+	trader = std::make_unique<TradeEngine>(symbol, *binance, config.paperTrading );
 	trader_thread = std::thread([this] {
 		try{
 			trader->run();

@@ -32,7 +32,7 @@
 #include <sentum/trader/TradeEngine.hpp>
 
 
-TradeEngine::TradeEngine(const std::string& symbol_, BinanceRestClient& api_) : symbol(symbol_), api(api_), running(true), engine_logger("log/engine.log") {}
+TradeEngine::TradeEngine(const std::string& symbol_, BinanceRestClient& api_, bool paper_) : symbol(symbol_), api(api_), isPaperTrading(paper_), running(true), engine_logger("log/engine.log") {}
 
 void TradeEngine::stop() {
 	running = false;
@@ -52,7 +52,7 @@ void TradeEngine::run() {
 			auto end = std::chrono::high_resolution_clock::now();
 			auto latency = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 			if (latency > 500) {
-				engine_logger.log("High latency: " + std::to_string(latency) + " µs");
+				engine_logger.log("[WARNING] High latency: " + std::to_string(latency) + " µs");
 			}
 		}).detach();
 	});
@@ -67,7 +67,9 @@ TradeAction TradeEngine::evaluate(double price) {
 	if (!position.open) {
 
 		// BUY
+		// TODO: implement place buy order
 		position.open = true;
+		position.simulated = isPaperTrading;
 		position.symbol = symbol;
 		position.entry_price = price;
 		position.executed_price = price; //TODO: update with real Data from Order
@@ -112,6 +114,7 @@ TradeAction TradeEngine::evaluate(double price) {
 
 		// SELL
 		if (price <= position.stop_loss_price || price >= position.take_profit_price) {
+			// TODO: implement place sell order
 			position.exit_price = price;
 			position.exit_time = std::chrono::system_clock::now();
 			position.stop_loss_triggered = (price <= position.stop_loss_price);

@@ -41,6 +41,8 @@ Config load_config( const std::string& path ){
 		file >> json;
 		config.quoteAsset = json.value( "quoteAsset", "USDC" );
 		config.minCumulativeReturn = json.value( "minCumulativeReturn", 0.0005 ); //Default: 0.05%
+		config.databasePath = json.value( "databasePath", "log/sentum.sqlite3" );
+		config.paperTrading = json.value("paperTrading", false);
 	} catch (const std::exception& e) {
 		std::cerr << " |x|  Error parsing config.json: " << e.what() << std::endl;
 	}

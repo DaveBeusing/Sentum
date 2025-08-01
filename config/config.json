@@ -1,4 +1,6 @@
 {
 	"quoteAsset" : "USDC",
-	"minCumulativeReturn" : 0.0
+	"minCumulativeReturn" : 0.0,
+	"databasePath" : "log/sentum.sqlite3",
+	"paperTrading" : true
 }

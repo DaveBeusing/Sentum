@@ -30,8 +30,9 @@
 struct Config {
 
 	std::string quoteAsset;
+	std::string databasePath;
 	double minCumulativeReturn;
-
+	bool paperTrading;
 };
 
 Config load_config(const std::string& path);

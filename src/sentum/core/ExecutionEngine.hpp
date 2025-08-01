@@ -92,4 +92,5 @@ class ExecutionEngine {
 		void monitor_scanner();
 		void start_trader_for( const std::string& symbol );
 		void stop_trader();
+
 };

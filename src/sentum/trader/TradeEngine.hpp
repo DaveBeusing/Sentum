@@ -42,7 +42,7 @@ class TradeEngine {
 
 	public:
 
-		TradeEngine(const std::string& symbol, BinanceRestClient& binance);
+		TradeEngine(const std::string& symbol, BinanceRestClient& binance, bool paper_trading );
 		void run();
 		void stop();
 
@@ -62,6 +62,7 @@ class TradeEngine {
 		std::string symbol;
 		BinanceRestClient& api;
 		std::atomic<bool> running;
+		bool isPaperTrading;
 
 		RiskConfig risk;
 		TradePosition position;
