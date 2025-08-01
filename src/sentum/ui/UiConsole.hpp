@@ -54,6 +54,7 @@ class UiConsole {
 		void set_collector_active(bool);
 		void set_scanner_active(bool);
 		void set_trader_active(bool);
+		void set_mode(const std::string&);
 
 		void set_trader_metrics(double profit, int wins, int losses, int total, double winrate, double avg_profit);
 		void set_active_trade(bool is_open, double entry, double qty, double sl, double tp, double current, double profit);
@@ -68,6 +69,7 @@ class UiConsole {
 		std::thread input_thread;
 
 		// Statuswerte
+		std::string mode;
 		std::string quote_asset;
 		size_t markets = 0;
 		std::string current_symbol;

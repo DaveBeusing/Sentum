@@ -26,8 +26,6 @@
 #include <iostream>
 
 #include <sentum/core/ExecutionEngine.hpp>
-#include <sentum/ui/console.hpp>
-
 
 ExecutionEngine::ExecutionEngine() : running(false), collector_active(false), scanner_active(false), trader_active(false), logger("log/core.log") {
 	logger.start();
@@ -148,6 +146,8 @@ void ExecutionEngine::init() {
 	init_components();
 
 	start_time = std::chrono::system_clock::now();
+
+	ui->set_mode( config.paperTrading ? "PAPER TRADING" : "LIVE" );
 
 	ui->set_collector_active(collector_active);
 	ui->set_scanner_active(scanner_active);

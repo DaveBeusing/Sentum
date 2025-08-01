@@ -28,7 +28,7 @@
 #include <chrono>
 
 #include <sentum/ui/ui.hpp>
-#include <sentum/ui/console.hpp>
+#include <sentum/ui/UiConsole.hpp>
 
 
 UiConsole::UiConsole() : running(false) {}
@@ -98,6 +98,10 @@ void UiConsole::set_trader_active(bool val) {
 	trader_active = val;
 }
 
+void UiConsole::set_mode(const std::string& val) {
+	mode = val;
+}
+
 void UiConsole::set_trader_metrics(double profit, int wins, int losses, int total, double winrate, double avg_profit) {
 	trader_total_profit = profit;
 	trader_win_count = wins;
@@ -158,6 +162,7 @@ void UiConsole::draw(){
 	std::cout << " ├ Uptime:           " << ui::format_duration(uptime) << "\n";
 	std::cout << " ├ Quote Asset:      " << ui::wrap(quote_asset, ui::bold()) << "\n";
 	std::cout << " ├ Quote Balance:    " << ui::wrap_value_fixed(balance, ui::bold(), 4) << " " << ui::wrap(quote_asset, ui::bold()) << "\n";
+	std::cout << " ├ Mode:             " << (mode = "PAPER TRADING" ? ui::wrap("PAPER TRADING", ui::green()) : ui::wrap("LIVE", ui::red())) << "\n";
 	std::cout << " └ Collector:        " << (collector_active ? ui::wrap("CONNECTED", ui::green()) : ui::wrap("STOPPED", ui::red())) << "\n";
 	std::cout << ui::wrap( "Database",ui::bold()) << "\n";
 	std::cout << " ├ Database:         " << ui::wrap("ACTIVE", ui::green()) << "\n";

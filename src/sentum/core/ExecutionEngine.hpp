@@ -40,7 +40,7 @@
 #include <sentum/collector/Collector.hpp>
 #include <sentum/scanner/SymbolScanner.hpp>
 #include <sentum/trader/TradeEngine.hpp>
-#include <sentum/ui/console.hpp>
+#include <sentum/ui/UiConsole.hpp>
 
 
 class ExecutionEngine {
