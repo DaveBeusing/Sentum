@@ -29,7 +29,7 @@
 #include <thread>
 #include <atomic>
 
-#include <sentum/utils/database.hpp>
+#include <sentum/utils/Database.hpp>
 #include <sentum/utils/AsyncLogger.hpp>
 #include <sentum/api/model/MarketInfo.hpp>
 

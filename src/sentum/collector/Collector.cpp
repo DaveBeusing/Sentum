@@ -36,7 +36,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include <sentum/utils/database.hpp>
+#include <sentum/utils/Database.hpp>
 #include <sentum/utils/helper.hpp>
 #include <sentum/utils/AsyncLogger.hpp>
 #include <sentum/collector/Collector.hpp>

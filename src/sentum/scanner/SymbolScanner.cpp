@@ -30,7 +30,7 @@
 #include <sqlite3.h>
 
 #include <sentum/scanner/SymbolScanner.hpp>
-#include <sentum/utils/database.hpp>
+#include <sentum/utils/Database.hpp>
 
 constexpr double ROUND_FACTOR = 1e8;
 

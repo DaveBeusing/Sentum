@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-#include <sentum/utils/database.hpp>
+#include <sentum/utils/Database.hpp>
 
 
 struct SymbolPerformance {
