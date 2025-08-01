@@ -25,7 +25,7 @@
 #include <iostream>
 #include <filesystem>
 
-#include "sentum/utils/database.hpp"
+#include "sentum/utils/Database.hpp"
 
 
 Database::Database(const std::string& db_path) : db(nullptr) {

@@ -28,7 +28,7 @@
 #include <vector>
 #include <sqlite3.h>
 
-#include <sentum/api/model/kline.hpp>
+#include <sentum/api/model/Kline.hpp>
 
 class Database {
 public:

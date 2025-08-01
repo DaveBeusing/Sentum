@@ -28,7 +28,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <sentum/api/model/kline.hpp>
+#include <sentum/api/model/Kline.hpp>
 #include <sentum/api/model/MarketInfo.hpp>
 
 class BinanceRestClient {
