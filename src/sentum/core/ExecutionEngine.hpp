@@ -34,7 +34,7 @@
 
 #include <sentum/utils/ConfigLoader.hpp>
 #include <sentum/utils/SecretsLoader.hpp>
-#include <sentum/utils/AsyncLogger.hpp> 
+#include <sentum/utils/AsyncLogger.hpp>
 #include <sentum/utils/Database.hpp>
 #include <sentum/api/BinanceRestClient.hpp>
 #include <sentum/collector/Collector.hpp>
