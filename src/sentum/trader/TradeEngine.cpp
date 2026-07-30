@@ -5,16 +5,37 @@
 #include <sentum/trader/strategy/MomentumStrategy.hpp>
 
 TradeEngine::TradeEngine(const std::string& symbol_, BinanceRestClient& api_, bool paper_)
-    : symbol(symbol_), api(api_), running(false), isPaperTrading(paper_), engine_logger("log/engine.log") {}
+    : symbol(symbol_), api(&api_), isPaperTrading(paper_), engine_logger("log/engine.log"),
+      clock(std::make_shared<SystemClock>()) {}
+
+TradeEngine::TradeEngine(const std::string& symbol_, RiskConfig config, std::shared_ptr<IClock> clock_,
+                         std::unique_ptr<IStrategy> strategy_, const std::string& history_path_)
+    : symbol(symbol_), isPaperTrading(true), risk(std::move(config)), engine_logger("log/replay-engine.log"),
+      strategy(std::move(strategy_)), clock(std::move(clock_)), history_path(history_path_) {
+    if (!clock || !strategy) throw std::invalid_argument("Replay engine requires clock and strategy");
+    initialize_components();
+}
 
 TradeEngine::~TradeEngine() { stop(); }
 
+void TradeEngine::initialize_components() {
+    if (!strategy) strategy = std::make_unique<MomentumStrategy>();
+    risk_manager = std::make_unique<RiskManager>(risk);
+    history = std::make_unique<TradeHistoryRepository>(history_path);
+}
+
 void TradeEngine::enqueue_price(double price) {
     latest_price.store(price, std::memory_order_relaxed);
+    MarketEvent event;
+    event.type = MarketEvent::Type::Trade;
+    event.symbol = symbol;
+    event.timestamp = clock->now();
+    event.price = price;
+    event.close = price;
     {
         std::lock_guard<std::mutex> lock(queue_mutex);
         if (price_queue.size() >= max_queue_size) price_queue.pop_front();
-        price_queue.push_back({price, std::chrono::system_clock::now()});
+        price_queue.push_back(event);
     }
     queue_cv.notify_one();
 }
@@ -27,19 +48,17 @@ void TradeEngine::stop() {
 
 void TradeEngine::run() {
     if (!isPaperTrading) throw std::runtime_error("Live trading is disabled until order execution is production-ready");
+    if (!api) throw std::runtime_error("Network run requires BinanceRestClient");
     if (running.exchange(true)) return;
     engine_logger.start();
     try {
         risk = load_risk_config("config/risk.json");
-        strategy = std::make_unique<MomentumStrategy>();
-        risk_manager = std::make_unique<RiskManager>(risk);
-        history = std::make_unique<TradeHistoryRepository>("log/klines.sqlite3");
+        initialize_components();
         price_stream = std::make_unique<BinanceWebsocketClient>(symbol);
         price_stream->set_on_price([this](double price) { enqueue_price(price); });
         price_stream->start();
-
         while (running.load()) {
-            PriceEvent event{};
+            MarketEvent event;
             {
                 std::unique_lock<std::mutex> lock(queue_mutex);
                 queue_cv.wait(lock, [this] { return !running.load() || !price_queue.empty(); });
@@ -47,12 +66,7 @@ void TradeEngine::run() {
                 event = price_queue.front();
                 price_queue.pop_front();
             }
-            const auto age = std::chrono::system_clock::now() - event.observed_at;
-            if (age > std::chrono::milliseconds(risk.max_data_age_ms)) {
-                engine_logger.log("[RISK] stale price event rejected");
-                continue;
-            }
-            evaluate(event.price);
+            process_event(event);
         }
     } catch (...) {
         stop();
@@ -63,18 +77,28 @@ void TradeEngine::run() {
     engine_logger.stop();
 }
 
-TradeAction TradeEngine::evaluate(double price) {
-    std::lock_guard<std::mutex> lock(state_mutex);
-    const auto now = std::chrono::system_clock::now();
+TradeAction TradeEngine::process_event(const MarketEvent& event) {
+    if (event.symbol != symbol || event.price <= 0.0) return TradeAction::NONE;
+    const auto age = clock->now() - event.timestamp;
+    if (age > std::chrono::milliseconds(risk.max_data_age_ms)) {
+        engine_logger.log("[RISK] stale market event rejected");
+        return TradeAction::NONE;
+    }
+    latest_price.store(event.price, std::memory_order_relaxed);
+    return evaluate_at(event.price, event.timestamp, api ? "binance-websocket" : "replay");
+}
 
+TradeAction TradeEngine::evaluate(double price) {
+    return evaluate_at(price, clock->now(), api ? "binance-websocket" : "replay");
+}
+
+TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::time_point now, const std::string& source) {
+    std::lock_guard<std::mutex> lock(state_mutex);
     if (!position.open) {
         const StrategySignal signal = strategy->on_price(price, now);
         if (signal.action != TradeAction::BUY) return TradeAction::NONE;
         const RiskDecision decision = risk_manager->approve_entry(signal, price, now, last_exit);
-        engine_logger.log("[SIGNAL] strategy=" + signal.strategy + " reason=" + signal.reason);
-        engine_logger.log("[RISK] approved=" + std::string(decision.approved ? "true" : "false") + " reason=" + decision.reason);
         if (!decision.approved) return TradeAction::NONE;
-
         const double ask = price * (1.0 + risk.spread_percent * 0.5);
         const double fill = ask * (1.0 + risk.slippage_percent);
         position = TradePosition{};
@@ -82,7 +106,7 @@ TradeAction TradeEngine::evaluate(double price) {
         position.simulated = true;
         position.risk_approved = true;
         position.symbol = symbol;
-        position.source = "binance-websocket";
+        position.source = source;
         position.strategy = signal.strategy;
         position.signal_reason = signal.reason;
         position.risk_reason = decision.reason;
@@ -102,32 +126,28 @@ TradeAction TradeEngine::evaluate(double price) {
         position.take_profit_percent = risk.take_profit_percent;
         position.trailing_sl_enabled = risk.trailing_sl_enabled;
         position.trailing_sl_percent = risk.trailing_sl_percent;
-        position.trailing_tp_enabled = risk.trailing_tp_enabled;
-        position.trailing_tp_percent = risk.trailing_tp_percent;
         position.buy_fee_percent = risk.buy_fee_percent;
         position.sell_fee_percent = risk.sell_fee_percent;
         position.fee_entry = fill * position.quantity * risk.buy_fee_percent;
         logger.log(position, TradeAction::BUY);
-        engine_logger.log("[FILL] side=BUY reference=" + std::to_string(price) + " executed=" + std::to_string(fill));
         return TradeAction::BUY;
     }
-
     if (price > position.highest_price) {
         position.highest_price = price;
         if (position.trailing_sl_enabled) position.stop_loss_price = price * (1.0 - position.trailing_sl_percent);
     }
     if (price < position.lowest_price) position.lowest_price = price;
-    if (price <= position.stop_loss_price) return close_position(price, "stop_loss");
-    if (price >= position.take_profit_price) return close_position(price, "take_profit");
-    if (now - position.entry_time >= std::chrono::seconds(risk.max_holding_seconds)) return close_position(price, "maximum_holding_time");
+    if (price <= position.stop_loss_price) return close_position(price, "stop_loss", now);
+    if (price >= position.take_profit_price) return close_position(price, "take_profit", now);
+    if (now - position.entry_time >= std::chrono::seconds(risk.max_holding_seconds)) return close_position(price, "maximum_holding_time", now);
     return TradeAction::NONE;
 }
 
-TradeAction TradeEngine::close_position(double market_price, const std::string& reason) {
+TradeAction TradeEngine::close_position(double market_price, const std::string& reason, std::chrono::system_clock::time_point now) {
     const double bid = market_price * (1.0 - risk.spread_percent * 0.5);
     const double fill = bid * (1.0 - risk.slippage_percent);
     position.exit_price = fill;
-    position.exit_time = std::chrono::system_clock::now();
+    position.exit_time = now;
     position.close_reason = reason;
     position.stop_loss_triggered = reason == "stop_loss";
     position.take_profit_triggered = reason == "take_profit";
@@ -138,7 +158,7 @@ TradeAction TradeEngine::close_position(double market_price, const std::string& 
     if (position.net_profit >= 0.0) ++win_count; else ++lose_count;
     logger.log(position, TradeAction::SELL);
     history->save(position);
-    engine_logger.log("[EXIT] reason=" + reason + " executed=" + std::to_string(fill) + " net=" + std::to_string(position.net_profit));
+    completed_.push_back(position);
     last_exit = position.exit_time;
     position.open = false;
     strategy->reset();
