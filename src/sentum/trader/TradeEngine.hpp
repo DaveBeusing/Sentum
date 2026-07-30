@@ -6,7 +6,10 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
+#include <sentum/market/MarketEvent.hpp>
+#include <sentum/time/Clock.hpp>
 #include <sentum/trader/types/RiskConfig.hpp>
 #include <sentum/trader/types/TradePosition.hpp>
 #include <sentum/trader/types/TradeAction.hpp>
@@ -22,10 +25,15 @@
 class TradeEngine {
 public:
     explicit TradeEngine(const std::string& symbol, BinanceRestClient& binance, bool paper_trading);
+    TradeEngine(const std::string& symbol, RiskConfig config, std::shared_ptr<IClock> clock,
+                std::unique_ptr<IStrategy> strategy, const std::string& history_path = ":memory:");
     ~TradeEngine();
+
     void run();
     void stop();
+    TradeAction process_event(const MarketEvent& event);
     TradeAction evaluate(double price);
+    const std::vector<TradePosition>& completed_trades() const { return completed_; }
     TradePosition get_current_position() const;
     double get_latest_price() const;
     double get_total_profit() const;
@@ -36,14 +44,15 @@ public:
     double get_average_profit() const;
 
 private:
-    struct PriceEvent { double price; std::chrono::system_clock::time_point observed_at; };
+    void initialize_components();
     void enqueue_price(double price);
-    TradeAction close_position(double market_price, const std::string& reason);
+    TradeAction evaluate_at(double price, std::chrono::system_clock::time_point now, const std::string& source);
+    TradeAction close_position(double market_price, const std::string& reason, std::chrono::system_clock::time_point now);
 
     std::string symbol;
-    BinanceRestClient& api;
-    std::atomic<bool> running;
-    bool isPaperTrading;
+    BinanceRestClient* api = nullptr;
+    std::atomic<bool> running{false};
+    bool isPaperTrading = true;
     RiskConfig risk;
     TradePosition position;
     TradeLogger logger;
@@ -55,11 +64,14 @@ private:
     std::unique_ptr<IStrategy> strategy;
     std::unique_ptr<RiskManager> risk_manager;
     std::unique_ptr<TradeHistoryRepository> history;
+    std::shared_ptr<IClock> clock;
+    std::string history_path = "log/klines.sqlite3";
+    std::vector<TradePosition> completed_;
     std::chrono::system_clock::time_point last_exit{};
     std::unique_ptr<BinanceWebsocketClient> price_stream;
     std::atomic<double> latest_price{0.0};
     std::mutex queue_mutex;
     std::condition_variable queue_cv;
-    std::deque<PriceEvent> price_queue;
+    std::deque<MarketEvent> price_queue;
     static constexpr std::size_t max_queue_size = 4096;
 };
