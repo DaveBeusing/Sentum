@@ -4,12 +4,14 @@
 #include <chrono>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
 
 #include <sentum/api/BinanceSpotExecutionClient.hpp>
 #include <sentum/api/BinanceUserDataStream.hpp>
+#include <sentum/trader/order/ConfirmedPositionLedger.hpp>
 #include <sentum/trader/order/OrderManager.hpp>
 
 namespace sentum::order {
@@ -31,11 +33,23 @@ public:
 
     ~LiveOrderSession() { stop(); }
 
-    void set_update_handler(UpdateHandler handler) { manager_.set_update_handler(std::move(handler)); }
+    void set_update_handler(UpdateHandler handler) {
+        std::lock_guard<std::mutex> lock(handler_mutex_);
+        external_handler_ = std::move(handler);
+    }
 
     void start() {
         if (started_.exchange(true)) return;
         try {
+            manager_.set_update_handler([this](const Snapshot& update) {
+                ledger_.on_order_update(update);
+                UpdateHandler copy;
+                {
+                    std::lock_guard<std::mutex> lock(handler_mutex_);
+                    copy = external_handler_;
+                }
+                if (copy) copy(update);
+            });
             manager_.reconcile_startup();
             listen_key_ = exchange_.create_listen_key();
             stream_ = std::make_unique<BinanceUserDataStream>(listen_key_,
@@ -76,6 +90,7 @@ public:
     void kill() { manager_.activate_kill_switch(); }
     bool killed() const noexcept { return manager_.kill_switch_active(); }
     std::optional<Snapshot> get(const std::string& client_order_id) const { return manager_.get(client_order_id); }
+    std::optional<ConfirmedPosition> confirmed_position(const std::string& symbol) const { return ledger_.get(symbol); }
 
 private:
     LiveOrderSession(std::string key, std::string secret)
@@ -83,8 +98,11 @@ private:
 
     BinanceSpotExecutionClient exchange_;
     OrderManager manager_;
+    ConfirmedPositionLedger ledger_;
     std::unique_ptr<BinanceUserDataStream> stream_;
     std::string listen_key_;
+    mutable std::mutex handler_mutex_;
+    UpdateHandler external_handler_;
     std::atomic<bool> started_{false};
     std::atomic<bool> keepalive_running_{false};
     std::thread keepalive_thread_;
