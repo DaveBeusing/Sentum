@@ -1,0 +1,34 @@
+name: Phase 1 Stability
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/phase-1-runtime-stability
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
+      - name: Configure release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build release
+        run: cmake --build build --parallel
+
+  tsan-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
+      - name: Configure ThreadSanitizer
+        run: cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DSENTUM_ENABLE_TSAN=ON
+      - name: Build ThreadSanitizer
+        run: cmake --build build-tsan --parallel
