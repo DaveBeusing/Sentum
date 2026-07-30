@@ -20,6 +20,9 @@ struct Collector::Impl {
     bool connection_valid = false;
 };
 
+Collector::Collector(Database& db, const std::vector<MarketInfo>& markets_)
+    : Collector(db, MarketDataStore::global(), markets_) {}
+
 Collector::Collector(Database& db, MarketDataStore& store, const std::vector<MarketInfo>& markets_)
     : db_ref(db), store_ref(store), markets(markets_), logger("log/collector.log"), impl(std::make_unique<Impl>()) {}
 
@@ -30,6 +33,11 @@ double Collector::drop_rate() const {
     const auto rejected = dropped.load();
     const auto total = accepted + rejected;
     return total == 0 ? 0.0 : static_cast<double>(rejected) / static_cast<double>(total);
+}
+
+bool Collector::has_pending_items() {
+    std::lock_guard<std::mutex> lock(queue_mutex);
+    return !queue.empty();
 }
 
 void Collector::start() {
@@ -77,7 +85,8 @@ void Collector::writer_loop() {
     batch.reserve(batch_size);
     auto last_metrics = std::chrono::steady_clock::now();
 
-    while (running.load() || !queue.empty()) {
+    while (running.load() || has_pending_items()) {
+        std::size_t depth = 0;
         {
             std::unique_lock<std::mutex> lock(queue_mutex);
             queue_cv.wait_for(lock, 100ms, [this] { return !queue.empty() || !running.load(); });
@@ -85,6 +94,7 @@ void Collector::writer_loop() {
                 batch.emplace_back(std::move(queue.front()));
                 queue.pop_front();
             }
+            depth = queue.size();
         }
         if (!batch.empty()) {
             if (!db_ref.save_kline_batch(batch)) logger.log("SQLite batch UPSERT failed, size=" + std::to_string(batch.size()));
@@ -92,7 +102,7 @@ void Collector::writer_loop() {
         }
         if (std::chrono::steady_clock::now() - last_metrics >= 10s) {
             const double rate = drop_rate();
-            logger.log("Queue metrics: depth=" + std::to_string(queue.size()) +
+            logger.log("Queue metrics: depth=" + std::to_string(depth) +
                        " enqueued=" + std::to_string(enqueued.load()) +
                        " dropped=" + std::to_string(dropped.load()) +
                        " drop_rate=" + std::to_string(rate) +
