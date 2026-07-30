@@ -15,6 +15,11 @@ public:
     explicit MarketDataStore(std::size_t capacity_per_symbol = 600)
         : capacity_per_symbol_(capacity_per_symbol) {}
 
+    static MarketDataStore& global() {
+        static MarketDataStore instance;
+        return instance;
+    }
+
     void upsert(const std::string& symbol, const Kline& kline) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto& buffer = buffers_[symbol];
