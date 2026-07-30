@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <stdexcept>
 
 class IClock {
 public:
@@ -10,9 +11,7 @@ public:
 
 class SystemClock final : public IClock {
 public:
-    std::chrono::system_clock::time_point now() const override {
-        return std::chrono::system_clock::now();
-    }
+    std::chrono::system_clock::time_point now() const override { return std::chrono::system_clock::now(); }
 };
 
 class ReplayClock final : public IClock {
