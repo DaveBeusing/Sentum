@@ -5,6 +5,9 @@
 
 constexpr double ROUND_FACTOR = 1e8;
 
+SymbolScanner::SymbolScanner(Database&, double threshold)
+    : SymbolScanner(MarketDataStore::global(), threshold) {}
+
 SymbolScanner::SymbolScanner(MarketDataStore& store_, double threshold)
     : store(store_), min_return_threshold(threshold) {}
 
