@@ -18,6 +18,7 @@
 
 class Collector {
 public:
+    Collector(Database& db, const std::vector<MarketInfo>& markets);
     Collector(Database& db, MarketDataStore& store, const std::vector<MarketInfo>& markets);
     ~Collector();
     void start();
@@ -32,6 +33,7 @@ private:
     void run();
     void writer_loop();
     bool try_enqueue(std::string symbol, Kline kline);
+    bool has_pending_items();
 
     static constexpr std::size_t queue_capacity = 8192;
     static constexpr std::size_t batch_size = 256;
