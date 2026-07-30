@@ -1,33 +1,19 @@
 /****
  * Copyright (C) 2025 Dave Beusing <david.beusing@gmail.com>
- * 
  * MIT License - https://opensource.org/license/mit/
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the “Software”), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is furnished 
- * to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all 
- * copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A 
- * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT 
- * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION 
- * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
- * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- * 
  */
 
 #include <chrono>
+#include <filesystem>
 #include <iostream>
+#include <stdexcept>
 
 #include <sentum/core/ExecutionEngine.hpp>
 
-ExecutionEngine::ExecutionEngine() : running(false), collector_active(false), scanner_active(false), trader_active(false), logger("log/core.log") {
+ExecutionEngine::ExecutionEngine()
+	: running(false), collector_active(false), scanner_active(false), trader_active(false),
+	  quote_balance(0.0), db_size(0), logger("log/core.log") {
+	std::filesystem::create_directories("log");
 	logger.start();
 }
 
@@ -41,132 +27,127 @@ bool ExecutionEngine::is_running() const {
 }
 
 void ExecutionEngine::start() {
-		running = true;
-		init();
-		ui->on_exit = [this]() { stop(); };
-		ui->on_stop_trader = [this]() { stop_trader(); };
-		ui->on_restart_collector = [this]() {
-			if (collector) {
-				collector->stop();
-				collector->start();
-				ui->set_collector_active(true);
-			}
-		};
-		ui_thread = std::thread([this] { ui->start(); });
-		main_thread = std::thread(&ExecutionEngine::run_main_loop, this);
+	if (running.load()) return;
+
+	init();
+
+	ui->on_exit = [this]() { running.store(false); };
+	ui->on_stop_trader = [this]() { stop_trader(); };
+	ui->on_restart_collector = [this]() {
+		if (collector) {
+			collector->stop();
+			collector->start();
+			collector_active.store(true);
+			ui->set_collector_active(true);
+		}
+	};
+
+	running.store(true);
+	ui_thread = std::thread([this] { ui->start(); });
+	main_thread = std::thread(&ExecutionEngine::run_main_loop, this);
 }
 
 void ExecutionEngine::stop() {
-	std::cout << "[Engine] stop() aufgerufen\n";
-	running = false;
-	if (main_thread.joinable()) main_thread.join();
-	if (scanner_thread.joinable()) scanner_thread.join();
-	if (trader_thread.joinable()) trader_thread.join();
-	if (collector) collector->stop();
-	if (trader) trader->stop();
+	const bool was_running = running.exchange(false);
+	if (!was_running && !main_thread.joinable() && !ui_thread.joinable() &&
+		!scanner_thread.joinable() && !trader_thread.joinable()) {
+		return;
+	}
+
+	stop_trader();
+	if (collector) {
+		collector->stop();
+		collector_active.store(false);
+	}
 	if (ui) ui->stop();
-	if (ui_thread.joinable()) ui_thread.join();
+
+	if (main_thread.joinable() && main_thread.get_id() != std::this_thread::get_id()) main_thread.join();
+	if (scanner_thread.joinable() && scanner_thread.get_id() != std::this_thread::get_id()) scanner_thread.join();
+	if (ui_thread.joinable() && ui_thread.get_id() != std::this_thread::get_id()) ui_thread.join();
+
+	scanner_active.store(false);
 	ui.reset();
 }
 
 void ExecutionEngine::init_config() {
-
-	try{
-		config = load_config("config/config.json");
-	} catch(const std::exception& e) {
-		logger.log("[ERROR] Failed to load config/config.json: " + std::string(e.what()));
-		throw std::runtime_error("Failed to load config/config.json!");
+	if (!std::filesystem::exists("config") || !std::filesystem::is_directory("config")) {
+		throw std::runtime_error("Required config/ directory is missing");
+	}
+	if (!std::filesystem::exists("config/config.json")) {
+		throw std::runtime_error("Required config/config.json is missing");
+	}
+	if (!std::filesystem::exists("config/secrets.json")) {
+		throw std::runtime_error("Required config/secrets.json is missing");
+	}
+	if (!std::filesystem::exists("config/risk.json")) {
+		throw std::runtime_error("Required config/risk.json is missing");
 	}
 
-	try{
+	try {
+		config = load_config("config/config.json");
+	} catch (const std::exception& e) {
+		logger.log("[ERROR] Failed to load config/config.json: " + std::string(e.what()));
+		throw;
+	}
+
+	try {
 		secrets = load_secrets("config/secrets.json");
 		if (secrets.api_key.empty() || secrets.api_secret.empty()) {
-			throw std::runtime_error("Missing API keys in secrets.json!");
+			throw std::runtime_error("Missing API keys in secrets.json");
 		}
-	} catch(const std::exception& e) {
-		logger.log("[ERROR] Failed to load secrets.json: " + std::string(e.what()));
-		throw std::runtime_error("Failed to load secrets.json!");
+	} catch (const std::exception& e) {
+		logger.log("[ERROR] Failed to load config/secrets.json: " + std::string(e.what()));
+		throw;
 	}
 
-	if( config.paperTrading ){
-		logger.log("[INFO] Running in PAPER TRADING mode");
-	} else {
-		logger.log("[INFO] Running in LIVE mode");
+	if (!config.paperTrading) {
+		logger.log("[ERROR] Live trading requested, but live order execution is not production-ready");
+		throw std::runtime_error("Live trading is disabled. Set paperTrading=true in config/config.json");
 	}
-
+	logger.log("[INFO] Running in PAPER TRADING mode");
 }
 
 void ExecutionEngine::init_components() {
 	db_path = "log/klines.sqlite3";
 
-	try {
-		binance = std::make_unique<BinanceRestClient>(secrets.api_key, secrets.api_secret);
-		markets = binance->get_markets_by_quote(config.quoteAsset);
-		quote_balance = binance->get_coin_balance(config.quoteAsset);
-	} catch(const std::exception& e) {
-		logger.log("[ERROR] Failed to initialize BinanceRestClient or dependencies: " + std::string(e.what()));
-		throw std::runtime_error("Failed to initialize BinanceRestClient or dependencies of it!");
-	}
+	binance = std::make_unique<BinanceRestClient>(secrets.api_key, secrets.api_secret);
+	markets = binance->get_markets_by_quote(config.quoteAsset);
+	quote_balance = binance->get_coin_balance(config.quoteAsset);
 
-	try {
-		db = std::make_unique<Database>(db_path);
-	} catch(const std::exception& e) {
-		logger.log("[ERROR] Failed to initialize Database: " + std::string(e.what()));
-		throw std::runtime_error("Failed to initialize Database!");
-	}
+	db = std::make_unique<Database>(db_path);
+	collector = std::make_unique<Collector>(*db, markets);
+	scanner = std::make_unique<SymbolScanner>(*db, config.minCumulativeReturn);
+	ui = std::make_unique<UiConsole>();
 
-	try {
-		collector = std::make_unique<Collector>(*db, markets);
-		collector_active = true;
-		collector->start();
-	} catch(const std::exception& e) {
-		logger.log("[ERROR] Failed to initialize or start Collector: " + std::string(e.what()));
-		throw std::runtime_error("Failed to initialize or start Collector!");
-	}
-
-	try {
-		scanner = std::make_unique<SymbolScanner>(*db, config.minCumulativeReturn);
-		scanner_active = true;
-	} catch(const std::exception& e) {
-		logger.log("[ERROR] Failed to initialize SymbolScanner: " + std::string(e.what()));
-		throw std::runtime_error("Failed to initialize SymbolScanner!");
-	}
-
-	try {
-		ui = std::make_unique<UiConsole>();
-	} catch(const std::exception& e) {
-		logger.log("[ERROR] Failed to initialize UiConsole: " + std::string(e.what()));
-		throw std::runtime_error("Failed to initialize UiConsole!");
-	}
-
+	collector->start();
+	collector_active.store(true);
+	scanner_active.store(true);
 }
 
 void ExecutionEngine::init() {
+	std::filesystem::create_directories("log");
 	init_config();
 	init_components();
 
 	start_time = std::chrono::system_clock::now();
-
-	ui->set_mode( config.paperTrading ? "PAPER TRADING" : "LIVE" );
-
-	ui->set_collector_active(collector_active);
-	ui->set_scanner_active(scanner_active);
-	ui->set_trader_active(trader_active);
-
+	ui->set_mode("PAPER TRADING");
+	ui->set_collector_active(collector_active.load());
+	ui->set_scanner_active(scanner_active.load());
+	ui->set_trader_active(trader_active.load());
 	ui->set_balance(quote_balance);
 	ui->set_quote_asset(config.quoteAsset);
 	ui->set_markets(markets.size());
 	ui->set_start_time(start_time);
-	ui->set_db_path( db_path );
-
+	ui->set_db_path(db_path);
 }
 
 void ExecutionEngine::run_main_loop() {
 	scanner_thread = std::thread(&ExecutionEngine::monitor_scanner, this);
-	int scanner_interval = 10;
+	constexpr int scanner_interval = 10;
 	int countdown = scanner_interval;
+
 	try {
-		while (running) {
+		while (running.load()) {
 			std::string top_asset = "-";
 			double top_ret = 0.0;
 			if (scanner) {
@@ -176,94 +157,91 @@ void ExecutionEngine::run_main_loop() {
 					top_ret = top[0].cum_return * 100.0;
 				}
 			}
+
 			db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
+			std::string symbol_snapshot;
+			{
+				std::lock_guard<std::mutex> lock(symbol_mutex);
+				symbol_snapshot = current_symbol;
+			}
 
 			ui->set_top_performer(top_asset, top_ret);
 			ui->set_countdown(countdown);
 			ui->set_db_size(db_size);
-			ui->set_collector_active(collector_active);
-			ui->set_scanner_active(scanner_active);
-			ui->set_trader_active(trader_active);
-			ui->set_current_symbol(current_symbol);
+			ui->set_collector_active(collector_active.load());
+			ui->set_scanner_active(scanner_active.load());
+			ui->set_trader_active(trader_active.load());
+			ui->set_current_symbol(symbol_snapshot);
 
 			if (trader) {
+				const auto position = trader->get_current_position();
 				ui->set_trader_metrics(
-					trader->get_total_profit(),
-					trader->get_win_count(),
-					trader->get_lose_count(),
-					trader->get_total_trades(),
-					trader->get_winrate_percent(),
-					trader->get_average_profit()
-				);
-			}
+					trader->get_total_profit(), trader->get_win_count(), trader->get_lose_count(),
+					trader->get_total_trades(), trader->get_winrate_percent(), trader->get_average_profit());
 
-			if (trader && trader->get_position().open) {
-				const auto& pos = trader->get_position();
-				double price = trader->get_latest_price();
-				double profit = (price - pos.entry_price) * pos.quantity;
-
-				ui->set_active_trade(
-					pos.open,
-					pos.entry_price,
-					pos.quantity,
-					pos.stop_loss_price,
-					pos.take_profit_price,
-					price,
-					profit
-				);
-			} else {
-				ui->set_active_trade(false, 0, 0, 0, 0, 0, 0);
+				if (position.open) {
+					const double price = trader->get_latest_price();
+					const double profit = (price - position.entry_price) * position.quantity;
+					ui->set_active_trade(true, position.entry_price, position.quantity,
+						position.stop_loss_price, position.take_profit_price, price, profit);
+				} else {
+					ui->set_active_trade(false, 0, 0, 0, 0, 0, 0);
+				}
 			}
 
 			std::this_thread::sleep_for(std::chrono::seconds(1));
 			if (--countdown <= 0) countdown = scanner_interval;
 		}
-	} catch( const std::exception& e ) {
+	} catch (const std::exception& e) {
 		logger.log("[ERROR] ExecutionEngine::run_main_loop: " + std::string(e.what()));
+		running.store(false);
 	}
 }
 
 void ExecutionEngine::monitor_scanner() {
 	using namespace std::chrono_literals;
 	try {
-		while (running) {
-			if (!trader_active) {
-				auto top = scanner->fetch_top_performers(30, 3);//fetch 3 top markets from last 30 seconds
+		while (running.load()) {
+			if (!trader_active.load()) {
+				auto top = scanner->fetch_top_performers(30, 3);
 				if (!top.empty()) {
-					std::lock_guard<std::mutex> lock(symbol_mutex);
-					const auto& symbol = top[0].symbol;
-					if (symbol != current_symbol) {
-						current_symbol = symbol;
-						start_trader_for(symbol);
-						ui->set_current_symbol(current_symbol);
+					const std::string symbol = top[0].symbol;
+					bool changed = false;
+					{
+						std::lock_guard<std::mutex> lock(symbol_mutex);
+						if (symbol != current_symbol) {
+							current_symbol = symbol;
+							changed = true;
+						}
 					}
+					if (changed) start_trader_for(symbol);
 				}
 			}
-			std::this_thread::sleep_for(5s); // scanner takt
+			std::this_thread::sleep_for(5s);
 		}
-	} catch(const std::exception& e){
+	} catch (const std::exception& e) {
 		logger.log("[ERROR] ExecutionEngine::monitor_scanner: " + std::string(e.what()));
+		running.store(false);
 	}
 }
 
 void ExecutionEngine::start_trader_for(const std::string& symbol) {
-	trader_active = true;
-	trader = std::make_unique<TradeEngine>(symbol, *binance, config.paperTrading );
+	if (trader_thread.joinable()) trader_thread.join();
+	trader = std::make_unique<TradeEngine>(symbol, *binance, true);
+	trader_active.store(true);
 	trader_thread = std::thread([this] {
-		try{
+		try {
 			trader->run();
-		} catch(const std::exception& e){
+		} catch (const std::exception& e) {
 			logger.log("[ERROR] ExecutionEngine::start_trader_for: " + std::string(e.what()));
 		}
-		trader_active = false;
+		trader_active.store(false);
 	});
 }
 
 void ExecutionEngine::stop_trader() {
-	if (trader) {
-		trader->stop();
-		if (trader_thread.joinable()) trader_thread.join();
-	}
+	if (trader) trader->stop();
+	if (trader_thread.joinable() && trader_thread.get_id() != std::this_thread::get_id()) trader_thread.join();
 	trader.reset();
-	trader_active = false;
+	trader_active.store(false);
 }

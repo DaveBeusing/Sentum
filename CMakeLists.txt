@@ -2,33 +2,41 @@ cmake_minimum_required(VERSION 3.10)
 project(sentum)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mtune=native -DNDEBUG -flto=auto")
+option(SENTUM_ENABLE_TSAN "Build with ThreadSanitizer" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE Release)
 endif()
 
-file(GLOB_RECURSE SOURCES "src/*.cpp")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mtune=native -DNDEBUG -flto=auto")
 
-add_executable(
-	client
-	${SOURCES}
-)
+if(SENTUM_ENABLE_TSAN)
+	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+		message(FATAL_ERROR "ThreadSanitizer requires GCC or Clang")
+	endif()
+	add_compile_options(-O1 -g -fno-omit-frame-pointer -fsanitize=thread)
+	add_link_options(-fsanitize=thread)
+endif()
+
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
+
+add_executable(client ${SOURCES})
 
 target_include_directories(
 	client
 	PRIVATE
 		${CMAKE_SOURCE_DIR}/src
 		${CURL_INCLUDE_DIR}
-		/usr/include
 )
 
-# CURL + Boost + OpenSSL + SQLite3
 find_package(CURL REQUIRED)
 find_package(Boost REQUIRED system)
 find_package(OpenSSL REQUIRED)
 find_package(SQLite3 REQUIRED)
+find_package(Threads REQUIRED)
 
 target_link_libraries(
 	client
@@ -37,13 +45,15 @@ target_link_libraries(
 		OpenSSL::SSL
 		OpenSSL::Crypto
 		SQLite::SQLite3
-		pthread
+		Threads::Threads
 		${CURL_LIBRARIES}
 )
 
-add_custom_command(
-	TARGET client POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:client> ${CMAKE_SOURCE_DIR}/client
-	COMMAND strip ${CMAKE_SOURCE_DIR}/client
-	COMMENT " ⇒ Strip optimize binary..."
-)
+if(NOT SENTUM_ENABLE_TSAN)
+	add_custom_command(
+		TARGET client POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:client> ${CMAKE_SOURCE_DIR}/client
+		COMMAND ${CMAKE_STRIP} ${CMAKE_SOURCE_DIR}/client
+		COMMENT "Strip optimized binary"
+	)
+endif()
