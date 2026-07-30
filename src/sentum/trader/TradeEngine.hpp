@@ -1,32 +1,15 @@
 /****
  * Copyright (C) 2025 Dave Beusing <david.beusing@gmail.com>
- * 
  * MIT License - https://opensource.org/license/mit/
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the “Software”), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is furnished 
- * to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all 
- * copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A 
- * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT 
- * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION 
- * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
- * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- * 
  */
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <memory>
+#include <mutex>
 #include <string>
-#include <chrono>
-#include <thread>
 
 #include <sentum/trader/types/RiskConfig.hpp>
 #include <sentum/trader/types/TradePosition.hpp>
@@ -37,44 +20,47 @@
 #include <sentum/api/BinanceRestClient.hpp>
 #include <sentum/api/BinanceWebsocketClient.hpp>
 
-
 class TradeEngine {
+public:
+	explicit TradeEngine(const std::string& symbol, BinanceRestClient& binance, bool paper_trading);
+	~TradeEngine();
 
-	public:
+	void run();
+	void stop();
 
-		TradeEngine(const std::string& symbol, BinanceRestClient& binance, bool paper_trading );
-		void run();
-		void stop();
+	TradeAction evaluate(double price);
+	TradePosition get_current_position() const;
+	double get_latest_price() const;
+	double get_total_profit() const;
+	int get_win_count() const;
+	int get_lose_count() const;
+	double get_winrate_percent() const;
+	int get_total_trades() const;
+	double get_average_profit() const;
 
-		TradeAction evaluate(double price);
-		const TradePosition& get_position() const;//??
-		TradePosition get_current_position() const;
-		double get_latest_price() const;
+private:
+	void enqueue_price(double price);
 
-		double get_total_profit() const;
-		int get_win_count() const;
-		int get_lose_count() const;
-		double get_winrate_percent() const;
-		int get_total_trades() const;
-		double get_average_profit() const;
+	std::string symbol;
+	BinanceRestClient& api;
+	std::atomic<bool> running;
+	bool isPaperTrading;
 
-	private:
-		std::string symbol;
-		BinanceRestClient& api;
-		std::atomic<bool> running;
-		bool isPaperTrading;
+	RiskConfig risk;
+	TradePosition position;
+	TradeLogger logger;
+	AsyncLogger engine_logger;
 
-		RiskConfig risk;
-		TradePosition position;
+	mutable std::mutex state_mutex;
+	double total_profit = 0.0;
+	int win_count = 0;
+	int lose_count = 0;
 
-		TradeLogger logger;
-		AsyncLogger engine_logger;
+	std::unique_ptr<BinanceWebsocketClient> price_stream;
+	std::atomic<double> latest_price{0.0};
 
-		double total_profit = 0.0;
-		int win_count = 0;
-		int lose_count = 0;
-
-		std::unique_ptr<BinanceWebsocketClient> price_stream;
-		std::atomic<double> latest_price = 0.0;
-
+	std::mutex queue_mutex;
+	std::condition_variable queue_cv;
+	std::deque<double> price_queue;
+	static constexpr std::size_t max_queue_size = 4096;
 };
