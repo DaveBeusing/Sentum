@@ -26,11 +26,11 @@ private:
     void flush_unlocked() {
         const std::filesystem::path path(path_);
         if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
-        const auto temp = path_.append(".tmp");
+        const std::filesystem::path temp(path_.string() + ".tmp");
         { std::ofstream out(temp, std::ios::trunc); if (!out) return; out << state_.dump(2) << '\n'; }
         std::error_code ec;
-        std::filesystem::rename(temp, path_, ec);
-        if (ec) { std::filesystem::remove(path_, ec); std::filesystem::rename(temp, path_, ec); }
+        std::filesystem::rename(temp, path, ec);
+        if (ec) { std::filesystem::remove(path, ec); std::filesystem::rename(temp, path, ec); }
     }
 
     std::string path_;
