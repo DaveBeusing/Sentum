@@ -16,16 +16,12 @@ public:
     void start(UpdateHandler handler) override {
         session_->set_update_handler(std::move(handler));
         session_->start();
-        ready_ = true;
     }
 
-    void stop() noexcept override {
-        ready_ = false;
-        if (session_) session_->stop();
-    }
+    void stop() noexcept override { if (session_) session_->stop(); }
 
     order::Snapshot submit(const order::Request& request) override {
-        if (!ready()) throw std::logic_error("Testnet execution venue is not ready");
+        if (!ready()) throw std::logic_error("Testnet execution venue is not reconciled and ready");
         return session_->submit(request);
     }
 
@@ -34,13 +30,12 @@ public:
     }
 
     void kill() noexcept override { if (session_) session_->kill(); }
-    bool ready() const noexcept override { return ready_ && session_ && !session_->killed(); }
+    bool ready() const noexcept override { return session_ && session_->ready(); }
     bool killed() const noexcept override { return !session_ || session_->killed(); }
     const char* name() const noexcept override { return "binance-spot-testnet"; }
 
 private:
     std::unique_ptr<order::LiveOrderSession> session_;
-    bool ready_ = false;
 };
 
 } // namespace sentum::execution
