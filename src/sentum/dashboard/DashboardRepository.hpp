@@ -21,7 +21,7 @@ public:
     }
 
     nlohmann::json recent_orders(int limit = 100) const {
-        return query("SELECT client_order_id,exchange_order_id,symbol,side,state,source,requested_quantity,executed_quantity,average_fill_price,rejection_reason,exchange_ts,local_ts FROM order_events ORDER BY id DESC LIMIT ?;",
+        return query("SELECT client_order_id,exchange_order_id,symbol,side,state,source,requested_qty,executed_qty,average_fill_price,rejection_reason,exchange_ts,local_ts FROM order_events ORDER BY id DESC LIMIT ?;",
             limit,
             {"client_order_id","exchange_order_id","symbol","side","state","source","requested_quantity","executed_quantity","average_fill_price","rejection_reason","exchange_ts","local_ts"});
     }
