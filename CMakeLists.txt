@@ -26,12 +26,9 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 
 add_executable(client ${SOURCES})
 
-target_include_directories(
-	client
-	PRIVATE
-		${CMAKE_SOURCE_DIR}/src
-		${CURL_INCLUDE_DIR}
-)
+set(SENTUM_CORE_SOURCES ${SOURCES})
+list(FILTER SENTUM_CORE_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
+add_executable(sentum_portfolio_research tools/portfolio_research_main.cpp ${SENTUM_CORE_SOURCES})
 
 find_package(CURL REQUIRED)
 find_package(Boost REQUIRED system)
@@ -39,16 +36,25 @@ find_package(OpenSSL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
 
-target_link_libraries(
-	client
-	PRIVATE
-		Boost::system
-		OpenSSL::SSL
-		OpenSSL::Crypto
-		SQLite::SQLite3
-		Threads::Threads
-		${CURL_LIBRARIES}
-)
+foreach(target client sentum_portfolio_research)
+	target_include_directories(
+		${target}
+		PRIVATE
+			${CMAKE_SOURCE_DIR}/src
+			${CURL_INCLUDE_DIR}
+	)
+
+	target_link_libraries(
+		${target}
+		PRIVATE
+			Boost::system
+			OpenSSL::SSL
+			OpenSSL::Crypto
+			SQLite::SQLite3
+			Threads::Threads
+			${CURL_LIBRARIES}
+	)
+endforeach()
 
 if(SENTUM_BUILD_BENCHMARKS)
 	add_executable(sentum_market_benchmark benchmarks/market_path_benchmark.cpp)
