@@ -14,6 +14,17 @@ endif()
 
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mtune=native -DNDEBUG -flto=auto")
 
+execute_process(
+	COMMAND git rev-parse --verify HEAD
+	WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+	OUTPUT_VARIABLE SENTUM_GIT_COMMIT
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+	ERROR_QUIET
+)
+if(NOT SENTUM_GIT_COMMIT)
+	set(SENTUM_GIT_COMMIT "unknown")
+endif()
+
 if(SENTUM_ENABLE_TSAN)
 	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 		message(FATAL_ERROR "ThreadSanitizer requires GCC or Clang")
@@ -29,6 +40,7 @@ add_executable(client ${SOURCES})
 set(SENTUM_CORE_SOURCES ${SOURCES})
 list(FILTER SENTUM_CORE_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
 add_executable(sentum_portfolio_research tools/portfolio_research_main.cpp ${SENTUM_CORE_SOURCES})
+add_executable(sentum_experiment tools/experiment_main.cpp ${SENTUM_CORE_SOURCES})
 
 find_package(CURL REQUIRED)
 find_package(Boost REQUIRED system)
@@ -36,13 +48,15 @@ find_package(OpenSSL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
 
-foreach(target client sentum_portfolio_research)
+foreach(target client sentum_portfolio_research sentum_experiment)
 	target_include_directories(
 		${target}
 		PRIVATE
 			${CMAKE_SOURCE_DIR}/src
 			${CURL_INCLUDE_DIR}
 	)
+
+	target_compile_definitions(${target} PRIVATE SENTUM_GIT_COMMIT="${SENTUM_GIT_COMMIT}")
 
 	target_link_libraries(
 		${target}
