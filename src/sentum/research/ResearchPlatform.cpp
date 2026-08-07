@@ -83,31 +83,51 @@ BacktestMetrics average_metrics(const std::vector<BacktestMetrics>& values) {
     return out;
 }
 
-BacktestMetrics run_slice(const std::vector<MarketEvent>& events,
-                          std::size_t begin, std::size_t end,
-                          std::chrono::system_clock::time_point minimum_entry_time,
-                          const ParameterSet& parameters, RiskConfig risk,
-                          const std::string& symbol) {
-    if (begin >= end || end > events.size()) return {};
+void apply_trial_risk(RiskConfig& risk, const ParameterSet& parameters) {
     risk.stop_loss_percent = parameters.stop_loss_percent;
     risk.take_profit_percent = parameters.take_profit_percent;
     risk.slippage_percent = parameters.slippage_percent;
+}
 
+BacktestMetrics run_training_slice(const std::vector<MarketEvent>& events,
+                                   std::size_t end,
+                                   const ParameterSet& parameters,
+                                   RiskConfig risk,
+                                   const std::string& symbol) {
+    if (end == 0 || end > events.size()) return {};
+    apply_trial_risk(risk, parameters);
     auto clock = std::make_shared<ReplayClock>();
     TradeEngine engine(symbol, risk, clock,
         std::make_unique<MomentumStrategy>(parameters.lookback, parameters.entry_threshold), ":memory:");
-    for (std::size_t i = begin; i < end; ++i) {
+    for (std::size_t i = 0; i < end; ++i) {
         clock->advance_to(events[i].timestamp);
         engine.process_event(events[i]);
     }
+    return MetricsCalculator::calculate(engine.completed_trades());
+}
 
-    if (minimum_entry_time == std::chrono::system_clock::time_point{})
-        return MetricsCalculator::calculate(engine.completed_trades());
+BacktestMetrics run_validation_slice(const std::vector<MarketEvent>& events,
+                                     std::size_t validation_begin,
+                                     std::size_t validation_end,
+                                     const ParameterSet& parameters,
+                                     RiskConfig risk,
+                                     const std::string& symbol) {
+    if (validation_begin >= validation_end || validation_end > events.size()) return {};
+    apply_trial_risk(risk, parameters);
 
-    std::vector<TradePosition> filtered;
-    for (const auto& trade : engine.completed_trades())
-        if (trade.entry_time >= minimum_entry_time) filtered.push_back(trade);
-    return MetricsCalculator::calculate(filtered);
+    auto strategy = std::make_unique<MomentumStrategy>(parameters.lookback, parameters.entry_threshold);
+    const std::size_t warmup = std::min<std::size_t>(validation_begin, parameters.lookback + 1);
+    const std::size_t warmup_begin = validation_begin - warmup;
+    for (std::size_t i = warmup_begin; i < validation_begin; ++i)
+        strategy->on_price(events[i].price, events[i].timestamp);
+
+    auto clock = std::make_shared<ReplayClock>();
+    TradeEngine engine(symbol, risk, clock, std::move(strategy), ":memory:");
+    for (std::size_t i = validation_begin; i < validation_end; ++i) {
+        clock->advance_to(events[i].timestamp);
+        engine.process_event(events[i]);
+    }
+    return MetricsCalculator::calculate(engine.completed_trades());
 }
 
 double finite_or_zero(double value) { return std::isfinite(value) ? value : 0.0; }
@@ -244,11 +264,9 @@ ResearchSummary ResearchRunner::run(const ResearchConfig& input_config) const {
                 : std::min(events.size(), initial_train + (fold + 1) * fold_width);
             if (train_end >= validation_end) continue;
 
-            train_metrics.push_back(run_slice(events, 0, train_end, {}, parameters, base_risk_, config.symbol));
-            const std::size_t warmup = std::min<std::size_t>(train_end, lookback + 1);
-            const std::size_t validation_begin = train_end - warmup;
-            validation_metrics.push_back(run_slice(events, validation_begin, validation_end,
-                events[train_end].timestamp, parameters, base_risk_, config.symbol));
+            train_metrics.push_back(run_training_slice(events, train_end, parameters, base_risk_, config.symbol));
+            validation_metrics.push_back(run_validation_slice(events, train_end, validation_end,
+                parameters, base_risk_, config.symbol));
         }
 
         TrialResult trial;
