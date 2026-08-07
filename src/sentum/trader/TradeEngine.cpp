@@ -103,17 +103,18 @@ TradeAction TradeEngine::process_event(const MarketEvent& event) {
         return TradeAction::NONE;
     }
     latest_price.store(event.price, std::memory_order_relaxed);
-    return evaluate_at(event.price, event.timestamp, api ? "binance-websocket" : "replay");
+    return evaluate_at(event.price, event.timestamp, api ? "binance-websocket" : "replay", &event);
 }
 
 TradeAction TradeEngine::evaluate(double price) {
-    return evaluate_at(price, clock->now(), api ? "binance-websocket" : "replay");
+    return evaluate_at(price, clock->now(), api ? "binance-websocket" : "replay", nullptr);
 }
 
-TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::time_point now, const std::string& source) {
+TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::time_point now,
+                                     const std::string& source, const MarketEvent* event) {
     std::lock_guard<std::mutex> lock(state_mutex);
     if (!position.open) {
-        const StrategySignal signal = strategy->on_price(price, now);
+        const StrategySignal signal = event ? strategy->on_event(*event) : strategy->on_price(price, now);
         if (signal.action != TradeAction::BUY) return TradeAction::NONE;
         const RiskDecision decision = risk_manager->approve_entry(signal, price, now, last_exit);
         if (!decision.approved) return TradeAction::NONE;
