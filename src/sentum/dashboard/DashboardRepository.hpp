@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <fstream>
-#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -28,12 +28,13 @@ public:
 
     nlohmann::json equity_curve(int limit = 500) const {
         sqlite3* db = open();
+        nlohmann::json result = nlohmann::json::array();
+        if (!db) return result;
         sqlite3_stmt* stmt = nullptr;
         const char* sql = "SELECT exit_ts,net_profit FROM trades ORDER BY exit_ts ASC LIMIT ?;";
-        nlohmann::json result = nlohmann::json::array();
         double equity = 0.0;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, std::max(1, limit));
+            sqlite3_bind_int(stmt, 1, std::clamp(limit, 1, 5000));
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 equity += sqlite3_column_double(stmt, 1);
                 result.push_back({{"ts", sqlite3_column_int64(stmt, 0)}, {"equity", equity}});
