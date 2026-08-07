@@ -26,7 +26,7 @@ private:
     void flush_unlocked() {
         const std::filesystem::path path(path_);
         if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
-        const std::filesystem::path temp(path_.string() + ".tmp");
+        const std::filesystem::path temp(path.string() + ".tmp");
         { std::ofstream out(temp, std::ios::trunc); if (!out) return; out << state_.dump(2) << '\n'; }
         std::error_code ec;
         std::filesystem::rename(temp, path, ec);
