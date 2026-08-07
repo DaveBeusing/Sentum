@@ -1,10 +1,11 @@
-name: Phase 1 Stability
+name: Sentum Core CI
 
 on:
   pull_request:
   push:
     branches:
-      - agent/phase-1-runtime-stability
+      - master
+      - agent/phase-8-core-performance-architecture
 
 jobs:
   build:
@@ -15,10 +16,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
-      - name: Configure release
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Configure release and benchmarks
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSENTUM_BUILD_BENCHMARKS=ON
       - name: Build release
         run: cmake --build build --parallel
+      - name: Run market path benchmark
+        run: ./build/sentum_market_benchmark
 
   tsan-build:
     runs-on: ubuntu-latest
