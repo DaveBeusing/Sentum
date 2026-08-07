@@ -51,6 +51,7 @@ jobs:
               }, f)
           PY
           ./client --research /tmp/research.json
+          cp log/research_trials.csv /tmp/research_trials_first.csv
           python3 - <<'PY'
           import csv, json
           with open('log/research_latest.json') as f:
@@ -63,6 +64,8 @@ jobs:
               rows = list(csv.DictReader(f))
           assert len(rows) == 4
           PY
+          ./client --research /tmp/research.json
+          cmp /tmp/research_trials_first.csv log/research_trials.csv
       - name: Smoke test dashboard
         shell: bash
         run: |
