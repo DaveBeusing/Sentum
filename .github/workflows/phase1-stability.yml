@@ -7,6 +7,7 @@ on:
       - master
       - agent/phase-8-core-performance-architecture
       - agent/phase-9-sentum-dashboard
+      - agent/phase-10-quant-research-platform
 
 jobs:
   build:
@@ -23,6 +24,45 @@ jobs:
         run: cmake --build build --parallel
       - name: Run market path benchmark
         run: ./build/sentum_market_benchmark
+      - name: Smoke test quant research
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, math
+          with open('/tmp/research.csv', 'w') as f:
+              f.write('timestamp_ms,price,volume\n')
+              for i in range(360):
+                  trend = i * 0.015
+                  cycle = math.sin(i / 6.0) * 1.8
+                  f.write(f'{1710000000000 + i * 1000},{100.0 + trend + cycle:.8f},1.0\n')
+          with open('/tmp/research.json', 'w') as f:
+              json.dump({
+                  'dataset': '/tmp/research.csv',
+                  'symbol': 'BTCUSDT',
+                  'objective': 'sharpe',
+                  'train_fraction': 0.7,
+                  'walk_forward_folds': 2,
+                  'max_trials': 8,
+                  'leaderboard_size': 4,
+                  'grid': {
+                      'lookback': [5, 10],
+                      'entry_threshold': [0.001, 0.002]
+                  }
+              }, f)
+          PY
+          ./client --research /tmp/research.json
+          python3 - <<'PY'
+          import csv, json
+          with open('log/research_latest.json') as f:
+              report = json.load(f)
+          assert report['trials'] == 4
+          assert report['folds'] == 2
+          assert len(report['leaderboard']) == 4
+          assert report['leaderboard'][0]['validation_score'] >= report['leaderboard'][-1]['validation_score']
+          with open('log/research_trials.csv') as f:
+              rows = list(csv.DictReader(f))
+          assert len(rows) == 4
+          PY
       - name: Smoke test dashboard
         shell: bash
         run: |
@@ -37,6 +77,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:8080/api/health | grep '"read_only":true'
           curl --fail --silent http://127.0.0.1:8080/api/status | grep '"dashboard_port":8080'
+          curl --fail --silent http://127.0.0.1:8080/api/research | grep '"objective":"sharpe"'
           curl --fail --silent http://127.0.0.1:8080/ | grep 'Sentum Dashboard'
           kill -TERM "$pid"
           wait "$pid"
