@@ -1,0 +1,31 @@
+{
+  "datasets": [
+    {
+      "id": "btc-usdt-2025",
+      "symbol": "BTCUSDT",
+      "path": "data/btcusdt-2025.csv",
+      "interval": "1s",
+      "start_ms": 1735689600000,
+      "end_ms": 1767225599000,
+      "tags": ["spot", "crypto", "2025"]
+    },
+    {
+      "id": "eth-usdt-2025",
+      "symbol": "ETHUSDT",
+      "path": "data/ethusdt-2025.csv",
+      "interval": "1s",
+      "start_ms": 1735689600000,
+      "end_ms": 1767225599000,
+      "tags": ["spot", "crypto", "2025"]
+    },
+    {
+      "id": "sol-usdt-2025",
+      "symbol": "SOLUSDT",
+      "path": "data/solusdt-2025.csv",
+      "interval": "1s",
+      "start_ms": 1735689600000,
+      "end_ms": 1767225599000,
+      "tags": ["spot", "crypto", "2025"]
+    }
+  ]
+}
