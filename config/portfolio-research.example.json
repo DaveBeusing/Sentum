@@ -1,0 +1,28 @@
+{
+  "starting_equity": 100000.0,
+  "datasets": [
+    {"symbol": "BTCUSDT", "path": "data/btcusdt.csv", "weight": 1.0},
+    {"symbol": "ETHUSDT", "path": "data/ethusdt.csv", "weight": 1.0},
+    {"symbol": "SOLUSDT", "path": "data/solusdt.csv", "weight": 0.75}
+  ],
+  "strategy": {
+    "type": "ensemble",
+    "threshold": 0.55,
+    "members": [
+      {"type": "momentum", "weight": 1.0, "parameters": {"lookback": 20, "entry_threshold": 0.001}},
+      {"type": "trend", "weight": 1.0, "parameters": {"fast_period": 12, "slow_period": 26, "threshold": 0.001}},
+      {"type": "breakout", "weight": 0.75, "parameters": {"lookback": 20, "buffer": 0.001}},
+      {"type": "multi_timeframe_trend", "weight": 1.25, "parameters": {"fast_timeframe_seconds": 60, "slow_timeframe_seconds": 300, "ema_period": 8, "threshold": 0.001}}
+    ]
+  },
+  "portfolio_risk": {
+    "max_gross_exposure": 1.0,
+    "max_asset_exposure": 0.35,
+    "max_correlated_exposure": 0.60,
+    "max_daily_drawdown": 0.05,
+    "max_consecutive_losses": 5,
+    "max_trades_per_hour": 20,
+    "target_volatility": 0.02,
+    "correlation_threshold": 0.75
+  }
+}
