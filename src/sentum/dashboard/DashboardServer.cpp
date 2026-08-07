@@ -30,16 +30,27 @@ bool starts_with(beast::string_view value, beast::string_view prefix) {
     return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
 }
 
-int query_limit(beast::string_view target, int fallback, int maximum) {
-    const auto pos = target.find("limit=");
-    if (pos == beast::string_view::npos) return fallback;
-    auto value = target.substr(pos + 6);
+std::string query_value(beast::string_view target, beast::string_view key) {
+    std::string needle(key);
+    needle += '=';
+    const auto pos = target.find(needle);
+    if (pos == beast::string_view::npos) return {};
+    auto value = target.substr(pos + needle.size());
     const auto amp = value.find('&');
     if (amp != beast::string_view::npos) value = value.substr(0, amp);
+    std::string out(value.data(), value.size());
+    if (out.size() > 160) return {};
+    for (char c : out) {
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.')) return {};
+    }
+    return out;
+}
+
+int query_limit(beast::string_view target, int fallback, int maximum) {
+    const auto text = query_value(target, "limit");
+    if (text.empty()) return fallback;
     int parsed = fallback;
-    const char* first = value.data();
-    const char* last = value.data() + value.size();
-    auto result = std::from_chars(first, last, parsed);
+    auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
     return result.ec == std::errc{} ? std::clamp(parsed, 1, maximum) : fallback;
 }
 
@@ -143,8 +154,18 @@ void DashboardServer::run() {
                 response = json_response(impl_->repository.replay_metrics(), request.version());
             } else if (starts_with(target, "/api/research")) {
                 response = json_response(impl_->repository.research_results(), request.version());
+            } else if (starts_with(target, "/api/experiment/trials")) {
+                const auto run = query_value(target, "run_id");
+                response = run.empty() ? json_response(nlohmann::json::array(), request.version())
+                                       : json_response(impl_->repository.experiment_trials(run, query_limit(target, 5000, 10000)), request.version());
+            } else if (starts_with(target, "/api/experiment")) {
+                const auto run = query_value(target, "run_id");
+                response = run.empty() ? json_response(nlohmann::json::object(), request.version())
+                                       : json_response(impl_->repository.experiment_detail(run), request.version());
+            } else if (starts_with(target, "/api/experiments")) {
+                response = json_response(impl_->repository.experiment_runs(query_limit(target, 100, 1000)), request.version());
             } else if (target == "/api/health") {
-                response = json_response({{"status", "ok"}, {"read_only", true}, {"bind", "127.0.0.1"}}, request.version());
+                response = json_response({{"status", "ok"}, {"read_only", true}, {"bind", "127.0.0.1"}, {"research_dashboard", true}}, request.version());
             } else {
                 response = text_response(http::status::not_found, "not found", "text/plain", request.version());
             }
