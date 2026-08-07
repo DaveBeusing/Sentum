@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <fstream>
 #include <string>
 
 #include <boost/asio.hpp>
@@ -25,6 +26,10 @@ struct DashboardServer::Impl {
 };
 
 namespace {
+bool starts_with(beast::string_view value, beast::string_view prefix) {
+    return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+}
+
 int query_limit(beast::string_view target, int fallback, int maximum) {
     const auto pos = target.find("limit=");
     if (pos == beast::string_view::npos) return fallback;
@@ -36,6 +41,13 @@ int query_limit(beast::string_view target, int fallback, int maximum) {
     const char* last = value.data() + value.size();
     auto result = std::from_chars(first, last, parsed);
     return result.ec == std::errc{} ? std::clamp(parsed, 1, maximum) : fallback;
+}
+
+nlohmann::json runtime_status_file() {
+    std::ifstream file("log/status.json");
+    if (!file) return nlohmann::json::object();
+    try { nlohmann::json value; file >> value; return value.is_object() ? value : nlohmann::json::object(); }
+    catch (...) { return nlohmann::json::object(); }
 }
 
 http::response<http::string_body> json_response(const nlohmann::json& value, unsigned version) {
@@ -113,20 +125,24 @@ void DashboardServer::run() {
                 response = text_response(http::status::method_not_allowed, "read-only dashboard", "text/plain", request.version());
             } else if (target == "/" || target == "/index.html") {
                 response = text_response(http::status::ok, kDashboardHtml, "text/html; charset=utf-8", request.version());
-            } else if (target.starts_with("/api/status")) {
-                auto state = DashboardState::global().snapshot();
+            } else if (starts_with(target, "/api/status")) {
+                auto state = runtime_status_file();
+                const auto live = DashboardState::global().snapshot();
+                for (auto it = live.begin(); it != live.end(); ++it) {
+                    if (!it.value().is_null() && !(it.key() == "mode" && it.value() == "idle")) state[it.key()] = it.value();
+                }
                 state["dashboard_port"] = port_;
                 response = json_response(state, request.version());
-            } else if (target.starts_with("/api/trades")) {
+            } else if (starts_with(target, "/api/trades")) {
                 response = json_response(impl_->repository.recent_trades(query_limit(target, 100, 1000)), request.version());
-            } else if (target.starts_with("/api/orders")) {
+            } else if (starts_with(target, "/api/orders")) {
                 response = json_response(impl_->repository.recent_orders(query_limit(target, 100, 1000)), request.version());
-            } else if (target.starts_with("/api/equity")) {
+            } else if (starts_with(target, "/api/equity")) {
                 response = json_response(impl_->repository.equity_curve(query_limit(target, 500, 5000)), request.version());
-            } else if (target.starts_with("/api/replay")) {
+            } else if (starts_with(target, "/api/replay")) {
                 response = json_response(impl_->repository.replay_metrics(), request.version());
             } else if (target == "/api/health") {
-                response = json_response({{"status", "ok"}, {"read_only", true}}, request.version());
+                response = json_response({{"status", "ok"}, {"read_only", true}, {"bind", "127.0.0.1"}}, request.version());
             } else {
                 response = text_response(http::status::not_found, "not found", "text/plain", request.version());
             }
