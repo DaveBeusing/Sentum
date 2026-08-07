@@ -6,9 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
-#include <limits>
 #include <memory>
-#include <numeric>
 #include <stdexcept>
 #include <utility>
 
@@ -35,10 +33,12 @@ void validate_positive(const std::vector<double>& values, const char* key, bool 
 }
 
 void validate_lookbacks(const std::vector<std::size_t>& values) {
-    for (auto value : values) if (value < 2) throw std::runtime_error("Research lookback must be >= 2");
+    for (auto value : values)
+        if (value < 2) throw std::runtime_error("Research lookback must be >= 2");
 }
 
 std::size_t checked_trial_count(const ResearchConfig& config) {
+    if (config.max_trials == 0) throw std::runtime_error("max_trials must be >= 1");
     const std::size_t dimensions[] = {
         config.lookbacks.size(), config.entry_thresholds.size(), config.stop_losses.size(),
         config.take_profits.size(), config.slippages.size()
@@ -50,7 +50,6 @@ std::size_t checked_trial_count(const ResearchConfig& config) {
             throw std::runtime_error("Research grid exceeds max_trials");
         count *= dimension;
     }
-    if (count > config.max_trials) throw std::runtime_error("Research grid exceeds max_trials");
     return count;
 }
 
@@ -111,21 +110,19 @@ BacktestMetrics run_slice(const std::vector<MarketEvent>& events,
     return MetricsCalculator::calculate(filtered);
 }
 
-double json_number(double value) {
-    return std::isfinite(value) ? value : 0.0;
-}
+double finite_or_zero(double value) { return std::isfinite(value) ? value : 0.0; }
 
 nlohmann::json metrics_json(const BacktestMetrics& metrics) {
     return {
-        {"net_profit", json_number(metrics.net_profit)},
-        {"max_drawdown", json_number(metrics.max_drawdown)},
-        {"profit_factor", json_number(metrics.profit_factor)},
-        {"win_rate", json_number(metrics.win_rate)},
-        {"expectancy", json_number(metrics.expectancy)},
-        {"sharpe", json_number(metrics.sharpe)},
-        {"sortino", json_number(metrics.sortino)},
-        {"fee_share", json_number(metrics.fee_share)},
-        {"slippage_sensitivity", json_number(metrics.slippage_sensitivity)},
+        {"net_profit", finite_or_zero(metrics.net_profit)},
+        {"max_drawdown", finite_or_zero(metrics.max_drawdown)},
+        {"profit_factor", finite_or_zero(metrics.profit_factor)},
+        {"win_rate", finite_or_zero(metrics.win_rate)},
+        {"expectancy", finite_or_zero(metrics.expectancy)},
+        {"sharpe", finite_or_zero(metrics.sharpe)},
+        {"sortino", finite_or_zero(metrics.sortino)},
+        {"fee_share", finite_or_zero(metrics.fee_share)},
+        {"slippage_sensitivity", finite_or_zero(metrics.slippage_sensitivity)},
         {"trades", metrics.trades}
     };
 }
@@ -142,9 +139,9 @@ nlohmann::json trial_json(const TrialResult& trial) {
         }},
         {"train", metrics_json(trial.train)},
         {"validation", metrics_json(trial.validation)},
-        {"train_score", json_number(trial.train_score)},
-        {"validation_score", json_number(trial.validation_score)},
-        {"overfit_gap", json_number(trial.overfit_gap)}
+        {"train_score", finite_or_zero(trial.train_score)},
+        {"validation_score", finite_or_zero(trial.validation_score)},
+        {"overfit_gap", finite_or_zero(trial.overfit_gap)}
     };
 }
 
@@ -165,7 +162,8 @@ ResearchConfig load_research_config(const std::string& path) {
     config.max_trials = json.value("max_trials", std::size_t{5000});
     config.leaderboard_size = json.value("leaderboard_size", std::size_t{25});
 
-    const auto& grid = json.contains("grid") ? json.at("grid") : nlohmann::json::object();
+    const nlohmann::json grid = json.contains("grid") ? json.at("grid") : nlohmann::json::object();
+    if (!grid.is_object()) throw std::runtime_error("Research grid must be a JSON object");
     config.lookbacks = value_or<std::size_t>(grid, "lookback", {10, 20, 40});
     config.entry_thresholds = value_or<double>(grid, "entry_threshold", {0.0005, 0.001, 0.002});
     config.stop_losses = value_or<double>(grid, "stop_loss_percent", {});
@@ -305,7 +303,11 @@ void ResearchRunner::write_artifacts(const ResearchSummary& summary,
         if (!file) throw std::runtime_error("Cannot write research JSON artifact");
         file << to_json(summary).dump(2) << '\n';
     }
-    std::filesystem::rename(json_tmp, json_path);
+    std::error_code ec;
+    std::filesystem::remove(json_path, ec);
+    ec.clear();
+    std::filesystem::rename(json_tmp, json_path, ec);
+    if (ec) throw std::runtime_error("Cannot publish research JSON artifact: " + ec.message());
 
     std::ofstream csv(csv_path, std::ios::trunc);
     if (!csv) throw std::runtime_error("Cannot write research CSV artifact");
