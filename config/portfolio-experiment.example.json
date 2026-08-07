@@ -1,0 +1,14 @@
+{
+  "name": "crypto-ensemble-2025-h1",
+  "kind": "portfolio",
+  "dataset_catalog": "config/datasets.json",
+  "portfolio_config": "config/portfolio-research.json",
+  "risk_config": "config/risk.json",
+  "output_root": "log/experiments",
+  "registry_path": "log/experiments.sqlite3",
+  "datasets": [
+    {"id": "btc-usdt-2025", "from_ms": 1735689600000, "to_ms": 1751327999000, "weight": 1.0},
+    {"id": "eth-usdt-2025", "from_ms": 1735689600000, "to_ms": 1751327999000, "weight": 1.0},
+    {"id": "sol-usdt-2025", "from_ms": 1735689600000, "to_ms": 1751327999000, "weight": 0.75}
+  ]
+}
