@@ -22,6 +22,9 @@ void TradeEngine::initialize_components() {
     if (!strategy) strategy = std::make_unique<MomentumStrategy>();
     risk_manager = std::make_unique<RiskManager>(risk);
     history = std::make_unique<TradeHistoryRepository>(history_path);
+    execution_venue = std::make_unique<sentum::execution::SimulatedExecutionVenue>(api ? "paper" : "replay");
+    execution_venue->set_fill_model(risk.spread_percent, risk.slippage_percent);
+    execution_venue->start([](const sentum::order::Snapshot&) {});
 }
 
 void TradeEngine::enqueue_price(double price) {
@@ -35,7 +38,7 @@ void TradeEngine::enqueue_price(double price) {
     {
         std::lock_guard<std::mutex> lock(queue_mutex);
         if (price_queue.size() >= max_queue_size) price_queue.pop_front();
-        price_queue.push_back(event);
+        price_queue.push_back(std::move(event));
     }
     queue_cv.notify_one();
 }
@@ -43,6 +46,7 @@ void TradeEngine::enqueue_price(double price) {
 void TradeEngine::stop() {
     if (!running.exchange(false)) return;
     if (price_stream) price_stream->stop();
+    if (execution_venue) execution_venue->stop();
     queue_cv.notify_all();
 }
 
@@ -63,7 +67,7 @@ void TradeEngine::run() {
                 std::unique_lock<std::mutex> lock(queue_mutex);
                 queue_cv.wait(lock, [this] { return !running.load() || !price_queue.empty(); });
                 if (!running.load() && price_queue.empty()) break;
-                event = price_queue.front();
+                event = std::move(price_queue.front());
                 price_queue.pop_front();
             }
             process_event(event);
@@ -74,7 +78,21 @@ void TradeEngine::run() {
         throw;
     }
     if (price_stream) price_stream->stop();
+    if (execution_venue) execution_venue->stop();
     engine_logger.stop();
+}
+
+sentum::order::Snapshot TradeEngine::execute(sentum::order::Side side, double quantity, double price,
+                                              std::chrono::system_clock::time_point now, const char* purpose) {
+    if (!execution_venue) throw std::logic_error("Execution venue is not initialized");
+    execution_venue->set_market(price, now);
+    sentum::order::Request request;
+    request.symbol = symbol;
+    request.side = side;
+    request.quantity = quantity;
+    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+    request.client_order_id = "sentum-" + symbol + "-" + purpose + "-" + std::to_string(micros);
+    return execution_venue->submit(request);
 }
 
 TradeAction TradeEngine::process_event(const MarketEvent& event) {
@@ -99,8 +117,10 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
         if (signal.action != TradeAction::BUY) return TradeAction::NONE;
         const RiskDecision decision = risk_manager->approve_entry(signal, price, now, last_exit);
         if (!decision.approved) return TradeAction::NONE;
-        const double ask = price * (1.0 + risk.spread_percent * 0.5);
-        const double fill = ask * (1.0 + risk.slippage_percent);
+
+        const auto fill = execute(sentum::order::Side::Buy, decision.quantity, price, now, "buy");
+        if (!fill.exchange_confirmed_fill()) return TradeAction::NONE;
+
         position = TradePosition{};
         position.open = true;
         position.simulated = true;
@@ -111,15 +131,15 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
         position.signal_reason = signal.reason;
         position.risk_reason = decision.reason;
         position.reference_price = signal.reference_price;
-        position.entry_price = fill;
-        position.executed_price = fill;
-        position.entry_time = now;
+        position.entry_price = fill.average_fill_price;
+        position.executed_price = fill.average_fill_price;
+        position.entry_time = fill.updated_at;
         position.signal_time = signal.created_at;
-        position.quantity = decision.quantity;
-        position.highest_price = fill;
-        position.lowest_price = fill;
-        position.stop_loss_price = fill * (1.0 - risk.stop_loss_percent);
-        position.take_profit_price = fill * (1.0 + risk.take_profit_percent);
+        position.quantity = fill.executed_quantity;
+        position.highest_price = fill.average_fill_price;
+        position.lowest_price = fill.average_fill_price;
+        position.stop_loss_price = fill.average_fill_price * (1.0 - risk.stop_loss_percent);
+        position.take_profit_price = fill.average_fill_price * (1.0 + risk.take_profit_percent);
         position.risk_per_trade = risk.risk_per_trade;
         position.capital_at_risk = risk.max_total_capital * risk.risk_per_trade;
         position.stop_loss_percent = risk.stop_loss_percent;
@@ -128,7 +148,7 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
         position.trailing_sl_percent = risk.trailing_sl_percent;
         position.buy_fee_percent = risk.buy_fee_percent;
         position.sell_fee_percent = risk.sell_fee_percent;
-        position.fee_entry = fill * position.quantity * risk.buy_fee_percent;
+        position.fee_entry = fill.average_fill_price * position.quantity * risk.buy_fee_percent;
         logger.log(position, TradeAction::BUY);
         return TradeAction::BUY;
     }
@@ -143,16 +163,18 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
     return TradeAction::NONE;
 }
 
-TradeAction TradeEngine::close_position(double market_price, const std::string& reason, std::chrono::system_clock::time_point now) {
-    const double bid = market_price * (1.0 - risk.spread_percent * 0.5);
-    const double fill = bid * (1.0 - risk.slippage_percent);
-    position.exit_price = fill;
-    position.exit_time = now;
+TradeAction TradeEngine::close_position(double market_price, const std::string& reason,
+                                        std::chrono::system_clock::time_point now) {
+    const auto fill = execute(sentum::order::Side::Sell, position.quantity, market_price, now, "sell");
+    if (!fill.exchange_confirmed_fill()) return TradeAction::NONE;
+
+    position.exit_price = fill.average_fill_price;
+    position.exit_time = fill.updated_at;
     position.close_reason = reason;
     position.stop_loss_triggered = reason == "stop_loss";
     position.take_profit_triggered = reason == "take_profit";
-    position.gross_profit = (fill - position.entry_price) * position.quantity;
-    position.fee_exit = fill * position.quantity * risk.sell_fee_percent;
+    position.gross_profit = (position.exit_price - position.entry_price) * position.quantity;
+    position.fee_exit = position.exit_price * position.quantity * risk.sell_fee_percent;
     position.net_profit = position.gross_profit - position.fee_entry - position.fee_exit;
     total_profit += position.net_profit;
     if (position.net_profit >= 0.0) ++win_count; else ++lose_count;
