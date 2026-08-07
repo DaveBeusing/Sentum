@@ -18,6 +18,11 @@ SymbolScanner::~SymbolScanner() {
     if (subscription_id_ != 0) sentum::market::MarketEventBus::global().unsubscribe(subscription_id_);
 }
 
+void SymbolScanner::set_top_changed_handler(TopChangedHandler handler) {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    top_changed_handler_ = std::move(handler);
+}
+
 void SymbolScanner::update_cache(const std::string& symbol, std::size_t lookback,
                                  std::unordered_map<std::string, double>& cache) {
     double value = 0.0;
@@ -27,9 +32,26 @@ void SymbolScanner::update_cache(const std::string& symbol, std::size_t lookback
 
 void SymbolScanner::on_market_event(const MarketEvent& event) {
     if (event.symbol.empty() || !event.closed) return;
-    std::lock_guard<std::mutex> lock(cache_mutex_);
-    update_cache(event.symbol, 30, returns_30_);
-    update_cache(event.symbol, 60, returns_60_);
+
+    TopChangedHandler handler;
+    SymbolPerformance top;
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        update_cache(event.symbol, 30, returns_30_);
+        update_cache(event.symbol, 60, returns_60_);
+
+        for (const auto& [symbol, value] : returns_30_) {
+            if (value <= min_return_threshold) continue;
+            if (top.symbol.empty() || value > top.cum_return) top = {symbol, value};
+        }
+        if (!top.symbol.empty() && top.symbol != last_top_symbol_) {
+            last_top_symbol_ = top.symbol;
+            handler = top_changed_handler_;
+            changed = true;
+        }
+    }
+    if (changed && handler) handler(top);
 }
 
 std::vector<SymbolPerformance> SymbolScanner::fetch_top_performers(int lookback, int max_symbols) {
