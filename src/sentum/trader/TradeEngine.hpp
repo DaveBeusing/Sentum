@@ -48,7 +48,8 @@ public:
 private:
     void initialize_components();
     void enqueue_price(double price);
-    TradeAction evaluate_at(double price, std::chrono::system_clock::time_point now, const std::string& source);
+    TradeAction evaluate_at(double price, std::chrono::system_clock::time_point now, const std::string& source,
+                            const MarketEvent* event = nullptr);
     TradeAction close_position(double market_price, const std::string& reason, std::chrono::system_clock::time_point now);
     sentum::order::Snapshot execute(sentum::order::Side side, double quantity, double price,
                                     std::chrono::system_clock::time_point now, const char* purpose);
