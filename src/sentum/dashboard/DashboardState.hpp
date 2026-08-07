@@ -38,10 +38,6 @@ private:
     nlohmann::json state_ = {
         {"mode", "idle"},
         {"health", "starting"},
-        {"market_data_connected", false},
-        {"user_stream_connected", false},
-        {"reconciliation_complete", false},
-        {"kill_switch_active", false},
         {"scanner", nlohmann::json::array()},
         {"active_position", nullptr}
     };
