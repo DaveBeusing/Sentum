@@ -11,6 +11,7 @@
 #include <sentum/research/ExperimentManager.hpp>
 #include <sentum/research/PortfolioResearch.hpp>
 #include <sentum/research/ResearchPlatform.hpp>
+#include <sentum/research/ResearchVisualization.hpp>
 #include <sentum/trader/utils/RiskConfigLoader.hpp>
 
 #ifndef SENTUM_GIT_COMMIT
@@ -145,12 +146,16 @@ private:
         config.symbol = manifest.datasets.front().symbol;
         const ResearchRunner runner(risk);
         const auto summary = runner.run(config);
-        const auto json_path = (std::filesystem::path(manifest.output_directory) / "research.json").string();
-        const auto csv_path = (std::filesystem::path(manifest.output_directory) / "trials.csv").string();
+        const auto root = std::filesystem::path(manifest.output_directory);
+        const auto json_path = (root / "research.json").string();
+        const auto csv_path = (root / "trials.csv").string();
+        const auto visual_path = (root / "research-visualization.json").string();
         ResearchRunner::write_artifacts(summary, json_path, csv_path);
+        write_research_visualization(build_research_visualization(config, summary, risk), visual_path);
         manifest.artifacts.push_back(json_path);
         manifest.artifacts.push_back(csv_path);
-        const auto config_copy = (std::filesystem::path(manifest.output_directory) / "research-config.json").string();
+        manifest.artifacts.push_back(visual_path);
+        const auto config_copy = (root / "research-config.json").string();
         copy_input(spec.research_config, config_copy);
         manifest.artifacts.push_back(config_copy);
     }
