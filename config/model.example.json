@@ -7,12 +7,11 @@
   "source_config_sha256": "<config-sha256-from-experiment>",
   "risk_config": "config/risk.json",
   "strategy": {
-    "type": "ensemble",
-    "threshold": 0.55,
-    "members": [
-      {"type": "momentum", "weight": 1.0, "parameters": {"lookback": 20, "entry_threshold": 0.001}},
-      {"type": "trend", "weight": 1.0, "parameters": {"fast_period": 12, "slow_period": 26, "threshold": 0.001}}
-    ]
+    "type": "momentum",
+    "parameters": {
+      "lookback": 20,
+      "entry_threshold": 0.001
+    }
   },
   "promotion_policy": {
     "min_trades": 30,
