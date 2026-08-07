@@ -1,0 +1,16 @@
+{
+  "name": "btc-momentum-2025-q1",
+  "kind": "research",
+  "dataset_catalog": "config/datasets.json",
+  "research_config": "config/research.json",
+  "risk_config": "config/risk.json",
+  "output_root": "log/experiments",
+  "registry_path": "log/experiments.sqlite3",
+  "datasets": [
+    {
+      "id": "btc-usdt-2025",
+      "from_ms": 1735689600000,
+      "to_ms": 1743465599000
+    }
+  ]
+}
