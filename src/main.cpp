@@ -21,6 +21,7 @@
 #include <sentum/core/ExecutionEngine.hpp>
 #include <sentum/dashboard/DashboardServer.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
+#include <sentum/research/ResearchPlatform.hpp>
 #include <sentum/time/Clock.hpp>
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/trader/execution/BinanceTestnetExecutionVenue.hpp>
@@ -93,6 +94,48 @@ int replay_main(const std::string& path, const std::string& symbol) {
     return EXIT_SUCCESS;
 }
 
+int research_main(const std::string& config_path) {
+    const auto config = sentum::research::load_research_config(config_path);
+    const RiskConfig risk = load_risk_config("config/risk.json");
+    sentum::research::ResearchRunner runner(risk);
+
+    std::cout << "Quant research: " << config.symbol << "\n"
+              << "Dataset: " << config.dataset << "\n"
+              << "Objective: " << config.objective << "\n";
+
+    const auto summary = runner.run(config);
+    sentum::research::ResearchRunner::write_artifacts(summary);
+
+    std::cout << "Events: " << summary.events << "\n"
+              << "Walk-forward folds: " << summary.folds << "\n"
+              << "Trials: " << summary.trials << "\n";
+    if (!summary.leaderboard.empty()) {
+        const auto& best = summary.leaderboard.front();
+        std::cout << std::fixed << std::setprecision(8)
+                  << "Best trial: " << best.trial_id << "\n"
+                  << "Validation score: " << best.validation_score << "\n"
+                  << "Train score: " << best.train_score << "\n"
+                  << "Overfit gap: " << best.overfit_gap << "\n"
+                  << "Lookback: " << best.parameters.lookback << "\n"
+                  << "Entry threshold: " << best.parameters.entry_threshold << "\n"
+                  << "Stop loss: " << best.parameters.stop_loss_percent << "\n"
+                  << "Take profit: " << best.parameters.take_profit_percent << "\n"
+                  << "Slippage: " << best.parameters.slippage_percent << "\n"
+                  << "Validation trades: " << best.validation.trades << "\n"
+                  << "Validation net profit: " << best.validation.net_profit << "\n"
+                  << "Validation max drawdown: " << best.validation.max_drawdown << "\n";
+    }
+    std::cout << "Research artifacts: log/research_latest.json, log/research_trials.csv\n";
+
+    auto& dashboard = sentum::dashboard::DashboardState::global();
+    dashboard.set("mode", "research");
+    dashboard.set("health", "complete");
+    dashboard.set("current_symbol", config.symbol);
+    dashboard.set("research_trials", summary.trials);
+    if (!summary.leaderboard.empty()) dashboard.set("research_best_score", summary.leaderboard.front().validation_score);
+    return EXIT_SUCCESS;
+}
+
 int paper_main() {
     auto dashboard = start_dashboard();
     auto engine = std::make_unique<ExecutionEngine>();
@@ -130,7 +173,13 @@ int dashboard_main() {
 }
 
 void usage() {
-    std::cerr << "Usage:\n  client --paper\n  client --replay <timestamp_ms,price,volume.csv> <symbol>\n  client --testnet <symbol>\n  client --dashboard\n\nOptional environment:\n  SENTUM_DASHBOARD_PORT=8080\n";
+    std::cerr << "Usage:\n"
+              << "  client --paper\n"
+              << "  client --replay <timestamp_ms,price,volume.csv> <symbol>\n"
+              << "  client --research <research.json>\n"
+              << "  client --testnet <symbol>\n"
+              << "  client --dashboard\n\n"
+              << "Optional environment:\n  SENTUM_DASHBOARD_PORT=8080\n";
 }
 }
 
@@ -139,6 +188,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 1 || (argc == 2 && std::string(argv[1]) == "--paper")) return paper_main();
         if (argc == 4 && std::string(argv[1]) == "--replay") return replay_main(argv[2], argv[3]);
+        if (argc == 3 && std::string(argv[1]) == "--research") return research_main(argv[2]);
         if (argc == 3 && std::string(argv[1]) == "--testnet") return testnet_main(argv[2]);
         if (argc == 2 && std::string(argv[1]) == "--dashboard") return dashboard_main();
         usage(); return EXIT_FAILURE;

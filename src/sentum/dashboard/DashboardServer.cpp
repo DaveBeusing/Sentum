@@ -141,6 +141,8 @@ void DashboardServer::run() {
                 response = json_response(impl_->repository.equity_curve(query_limit(target, 500, 5000)), request.version());
             } else if (starts_with(target, "/api/replay")) {
                 response = json_response(impl_->repository.replay_metrics(), request.version());
+            } else if (starts_with(target, "/api/research")) {
+                response = json_response(impl_->repository.research_results(), request.version());
             } else if (target == "/api/health") {
                 response = json_response({{"status", "ok"}, {"read_only", true}, {"bind", "127.0.0.1"}}, request.version());
             } else {

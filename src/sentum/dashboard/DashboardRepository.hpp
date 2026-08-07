@@ -45,14 +45,17 @@ public:
         return result;
     }
 
-    nlohmann::json replay_metrics() const {
-        std::ifstream file("log/replay_metrics.json");
+    nlohmann::json replay_metrics() const { return read_json("log/replay_metrics.json"); }
+    nlohmann::json research_results() const { return read_json("log/research_latest.json"); }
+
+private:
+    static nlohmann::json read_json(const std::string& path) {
+        std::ifstream file(path);
         if (!file) return nlohmann::json::object();
         try { nlohmann::json value; file >> value; return value; }
         catch (...) { return nlohmann::json::object(); }
     }
 
-private:
     sqlite3* open() const {
         sqlite3* db = nullptr;
         if (sqlite3_open_v2(db_path_.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nullptr) != SQLITE_OK) {

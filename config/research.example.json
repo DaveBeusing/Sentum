@@ -1,0 +1,16 @@
+{
+  "dataset": "data/btcusdt.csv",
+  "symbol": "BTCUSDT",
+  "objective": "sharpe",
+  "train_fraction": 0.70,
+  "walk_forward_folds": 3,
+  "max_trials": 5000,
+  "leaderboard_size": 25,
+  "grid": {
+    "lookback": [10, 20, 40],
+    "entry_threshold": [0.0005, 0.001, 0.002],
+    "stop_loss_percent": [0.01, 0.02, 0.03],
+    "take_profit_percent": [0.02, 0.04, 0.06],
+    "slippage_percent": [0.00025, 0.0005, 0.001]
+  }
+}

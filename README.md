@@ -1,10 +1,10 @@
 # Sentum
 
-**Deterministic market replay, auditable paper trading, Binance Spot Testnet execution infrastructure, and a local read-only trading dashboard in C++17.**
+**Deterministic market replay, auditable paper trading, quantitative strategy research, Binance Spot Testnet execution infrastructure, and a local read-only trading dashboard in C++17.**
 
-Sentum is an experimental trading-system and research project focused on predictable lifecycle behavior, bounded market-data processing, reproducible strategy execution, traceable risk decisions, exchange-confirmed state, and observable runtime health.
+Sentum is an experimental trading-system and research project focused on predictable lifecycle behavior, bounded market-data processing, reproducible strategy execution, traceable risk decisions, exchange-confirmed state, observable runtime health, and out-of-sample strategy evaluation.
 
-> **Current status:** Phases 1–8 are merged into `master`; Phase 9 adds the local Sentum Dashboard. Paper, replay, and Binance Spot Testnet modes are exposed by `main()`. Production Binance execution and withdrawal endpoints remain intentionally absent.
+> **Current status:** Phases 1–9 are merged into `master`; Phase 10 adds the Quant Research Platform. Paper, replay, research, Binance Spot Testnet, and dashboard modes are exposed by `main()`. Production Binance execution and withdrawal endpoints remain intentionally absent.
 
 ## Capabilities
 
@@ -20,13 +20,17 @@ Sentum is an experimental trading-system and research project focused on predict
 - persistent completed-trade and order-event audit history
 - deterministic CSV replay with `ReplayClock`
 - Net Profit, Max Drawdown, Profit Factor, Win Rate, Expectancy, Sharpe, Sortino, fee-share, and slippage-sensitivity metrics
+- deterministic parameter-grid research using the normal strategy/risk/execution stack
+- expanding walk-forward validation and out-of-sample ranking
+- Train/Validation score and overfit-gap reporting
+- complete CSV trial export plus compact JSON research leaderboard
 - independent replay-metric verification tooling
 - Binance Spot Testnet order state machine, reconciliation, User Data Stream, dynamic exchange filters, and kill switch
 - account/balance reconciliation and controlled resume after reconciliation
 - persistent runtime, reconciliation, and kill-switch operational events
 - machine-readable runtime status
-- local read-only Sentum web dashboard
-- Release/ThreadSanitizer CI and a market-path microbenchmark
+- local read-only Sentum web dashboard and research API
+- Release/ThreadSanitizer CI, market-path microbenchmark, dashboard smoke test, and research smoke test
 
 ## Runtime modes
 
@@ -53,6 +57,22 @@ timestamp_ms,price,volume
 ```
 
 The volume column is optional. Events are stably sorted and processed with `ReplayClock`.
+
+### Quant research
+
+```bash
+cp config/research.example.json config/research.json
+./client --research config/research.json
+```
+
+Research mode performs a bounded Cartesian parameter search using deterministic replay and expanding walk-forward validation. Trial ranking uses validation rather than training metrics. Results are written to:
+
+```text
+log/research_latest.json
+log/research_trials.csv
+```
+
+See [`docs/RESEARCH.md`](docs/RESEARCH.md).
 
 ### Binance Spot Testnet
 
@@ -119,14 +139,23 @@ MarketEventBus
               /             \
    SimulatedExecution   Binance Testnet
      paper / replay       OrderManager
-              |                 |
-              v                 v
-        trade history     User Data Stream
-                                |
-                                v
-                     exchange-confirmed state
+       / research              |
+              |                v
+              |         User Data Stream
+              |                |
+              v                v
+        trade history   exchange-confirmed state
 
-Runtime state + SQLite history + replay metrics
+Historical CSV + deterministic ReplayClock
+                     |
+                     v
+          Quant Research Platform
+         grid -> walk-forward folds
+                     |
+                     v
+       JSON leaderboard + CSV trials
+
+Runtime state + SQLite history + replay/research metrics
                      |
                      v
           local Sentum Dashboard
@@ -203,7 +232,7 @@ cmake --build build-perf --parallel
 
 ## Configuration
 
-Required files:
+Required runtime files:
 
 ```text
 config/config.json
@@ -211,7 +240,13 @@ config/risk.json
 config/secrets.json
 ```
 
-`config/risk.json` controls capital limits, risk per trade, stops, take profit, fees, spread, slippage, leverage, cooldown, holding duration, stale-data limits, and local risk constraints. Binance Testnet quantity/notional rules are additionally loaded from exchange metadata.
+Research configuration starts from:
+
+```text
+config/research.example.json
+```
+
+`config/risk.json` controls capital limits, risk per trade, stops, take profit, fees, spread, slippage, leverage, cooldown, holding duration, stale-data limits, and local risk constraints. Research grids can override stop-loss, take-profit, and slippage assumptions per trial. Binance Testnet quantity/notional rules are additionally loaded from exchange metadata.
 
 Do not commit real API credentials. Testnet keys should use only the permissions required for Spot Testnet trading and should never have withdrawal rights.
 
@@ -220,13 +255,15 @@ Do not commit real API credentials. Testnet keys should use only the permissions
 Sentum uses:
 
 ```text
-log/klines.sqlite3       candles, trades, order and operational events
-log/status.json          machine-readable Testnet runtime state
-log/replay.sqlite3       most recent deterministic replay trade history
-log/replay_metrics.json  most recent replay metrics
+log/klines.sqlite3         candles, trades, order and operational events
+log/status.json            machine-readable Testnet runtime state
+log/replay.sqlite3         most recent deterministic replay trade history
+log/replay_metrics.json    most recent replay metrics
+log/research_latest.json   most recent research leaderboard
+log/research_trials.csv    complete trial table for the latest research run
 ```
 
-The dashboard reads SQLite through independent read-only connections, so browser requests do not enter the market-data or execution hot path.
+The dashboard reads SQLite through independent read-only connections, so browser requests do not enter the market-data or execution hot path. Research results are exposed as a read-only file-backed API.
 
 ## Development status
 
@@ -240,7 +277,8 @@ The dashboard reads SQLite through independent read-only connections, so browser
 | 6 | unified Testnet execution, recovery, persistence, observability | Merged |
 | 7 | account reconciliation, dynamic filters, controlled resume | Merged |
 | 8 | event-driven performance architecture and shared simulated venue | Merged |
-| 9 | local Sentum Dashboard and read-only runtime API | In development |
+| 9 | local Sentum Dashboard and read-only runtime API | Merged |
+| 10 | Quant Research Platform, grid search, walk-forward validation | In development |
 
 ## Dashboard API
 
@@ -251,6 +289,7 @@ GET /api/trades?limit=100
 GET /api/orders?limit=100
 GET /api/equity?limit=500
 GET /api/replay
+GET /api/research
 ```
 
 The browser API is read-only. Order placement, cancellation, kill-switch reset, configuration writes, credential access, and production-trading activation are intentionally not exposed.
@@ -266,5 +305,8 @@ Before treating Sentum as release-ready, continue validating:
 - real Binance Spot Testnet balance mismatch and controlled-resume scenarios
 - independent replay metric reference checks over multiple datasets
 - dashboard load and SQLite-WAL coexistence during long runtimes
+- research datasets across different regimes and symbols
+- parameter stability around leaderboard winners rather than only the single best point
+- stronger research methods such as purged/embargoed folds and Monte Carlo resampling before production claims
 
 Sentum remains experimental software and should not be assumed safe for production or real-money trading without dedicated validation.
