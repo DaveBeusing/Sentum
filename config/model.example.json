@@ -1,0 +1,24 @@
+{
+  "model_id": "btc-momentum-v1",
+  "name": "BTC Momentum Candidate v1",
+  "symbol": "BTCUSDT",
+  "source_experiment_run": "<phase-13-run-id>",
+  "source_git_commit": "<git-commit-from-experiment>",
+  "source_config_sha256": "<config-sha256-from-experiment>",
+  "risk_config": "config/risk.json",
+  "strategy": {
+    "type": "momentum",
+    "parameters": {
+      "lookback": 20,
+      "entry_threshold": 0.001
+    }
+  },
+  "promotion_policy": {
+    "min_trades": 30,
+    "min_net_profit": 0.0,
+    "min_profit_factor": 1.10,
+    "min_win_rate": 45.0,
+    "min_sharpe": 0.50,
+    "max_drawdown": 250.0
+  }
+}

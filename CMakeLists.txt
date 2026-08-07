@@ -41,6 +41,7 @@ set(SENTUM_CORE_SOURCES ${SOURCES})
 list(FILTER SENTUM_CORE_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
 add_executable(sentum_portfolio_research tools/portfolio_research_main.cpp ${SENTUM_CORE_SOURCES})
 add_executable(sentum_experiment tools/experiment_main.cpp ${SENTUM_CORE_SOURCES})
+add_executable(sentum_model tools/model_promotion_main.cpp ${SENTUM_CORE_SOURCES})
 
 find_package(CURL REQUIRED)
 find_package(Boost REQUIRED system)
@@ -48,7 +49,7 @@ find_package(OpenSSL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
 
-foreach(target client sentum_portfolio_research sentum_experiment)
+foreach(target client sentum_portfolio_research sentum_experiment sentum_model)
 	target_include_directories(
 		${target}
 		PRIVATE
