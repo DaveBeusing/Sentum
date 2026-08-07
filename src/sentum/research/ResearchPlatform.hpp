@@ -52,6 +52,7 @@ struct ResearchSummary {
     std::size_t events = 0;
     std::size_t folds = 0;
     std::size_t trials = 0;
+    std::vector<TrialResult> results;
     std::vector<TrialResult> leaderboard;
 };
 
