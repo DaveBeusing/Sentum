@@ -9,6 +9,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include <sentum/api/BinanceWebsocketClient.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
