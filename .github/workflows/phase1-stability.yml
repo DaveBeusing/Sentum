@@ -53,4 +53,4 @@ jobs:
       - name: Configure ThreadSanitizer
         run: cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DSENTUM_ENABLE_TSAN=ON
       - name: Build ThreadSanitizer
-        run: cmake --build build-tsan --parallel
+        run: cmake --build build-tsan --parallel 2
