@@ -3,14 +3,28 @@
 #include <iostream>
 #include <string>
 
+#include <sentum/research/DatasetCatalog.hpp>
 #include <sentum/research/ExperimentRunner.hpp>
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "Usage: sentum_experiment <experiment.json>\n";
-        return EXIT_FAILURE;
-    }
     try {
+        if (argc == 3 && std::string(argv[1]) == "--list-datasets") {
+            const auto catalog = sentum::research::DatasetCatalog::load(argv[2]);
+            for (const auto& entry : catalog.entries()) {
+                std::cout << entry.id << '\t' << entry.symbol << '\t' << entry.interval
+                          << '\t' << entry.start_ms << '\t' << entry.end_ms
+                          << '\t' << entry.path << '\n';
+            }
+            return EXIT_SUCCESS;
+        }
+
+        if (argc != 2) {
+            std::cerr << "Usage:\n"
+                      << "  sentum_experiment <experiment.json>\n"
+                      << "  sentum_experiment --list-datasets <catalog.json>\n";
+            return EXIT_FAILURE;
+        }
+
         const std::string spec_path = argv[1];
         const auto spec = sentum::research::load_experiment_spec(spec_path);
         sentum::research::ExperimentRunner runner;
