@@ -6,6 +6,7 @@ on:
     branches:
       - master
       - agent/phase-8-core-performance-architecture
+      - agent/phase-9-sentum-dashboard
 
 jobs:
   build:
@@ -15,13 +16,31 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
+          sudo apt-get install -y build-essential cmake curl libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
       - name: Configure release and benchmarks
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSENTUM_BUILD_BENCHMARKS=ON
       - name: Build release
         run: cmake --build build --parallel
       - name: Run market path benchmark
         run: ./build/sentum_market_benchmark
+      - name: Smoke test dashboard
+        shell: bash
+        run: |
+          ./client --dashboard > /tmp/sentum-dashboard.log 2>&1 &
+          pid=$!
+          trap 'kill -TERM "$pid" 2>/dev/null || true' EXIT
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/api/health >/tmp/health.json; then
+              break
+            fi
+            sleep 0.2
+          done
+          curl --fail --silent http://127.0.0.1:8080/api/health | grep '"read_only":true'
+          curl --fail --silent http://127.0.0.1:8080/api/status | grep '"dashboard_port":8080'
+          curl --fail --silent http://127.0.0.1:8080/ | grep 'Sentum Dashboard'
+          kill -TERM "$pid"
+          wait "$pid"
+          trap - EXIT
 
   tsan-build:
     runs-on: ubuntu-latest
