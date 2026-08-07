@@ -88,6 +88,14 @@ public:
         manifest.output_directory = (std::filesystem::path(spec.output_root) / manifest.run_id).string();
         std::filesystem::create_directories(std::filesystem::path(manifest.output_directory) / "datasets");
 
+        const auto spec_copy = (std::filesystem::path(manifest.output_directory) / "experiment.json").string();
+        const auto catalog_copy = (std::filesystem::path(manifest.output_directory) / "dataset-catalog.json").string();
+        const auto risk_copy = (std::filesystem::path(manifest.output_directory) / "risk.json").string();
+        copy_input(spec_path, spec_copy);
+        copy_input(spec.dataset_catalog, catalog_copy);
+        copy_input(spec.risk_config, risk_copy);
+        manifest.artifacts = {spec_copy, catalog_copy, risk_copy};
+
         ExperimentRepository repository(spec.registry_path);
         materialize(spec, catalog, manifest);
         write_manifest(manifest);
@@ -135,14 +143,16 @@ private:
         auto config = load_research_config(spec.research_config);
         config.dataset = manifest.datasets.front().materialized_path;
         config.symbol = manifest.datasets.front().symbol;
-        ResearchRunner runner(risk);
+        const ResearchRunner runner(risk);
         const auto summary = runner.run(config);
         const auto json_path = (std::filesystem::path(manifest.output_directory) / "research.json").string();
         const auto csv_path = (std::filesystem::path(manifest.output_directory) / "trials.csv").string();
         ResearchRunner::write_artifacts(summary, json_path, csv_path);
-        manifest.artifacts = {json_path, csv_path};
-        copy_input(spec.research_config, (std::filesystem::path(manifest.output_directory) / "research-config.json").string());
-        manifest.artifacts.push_back((std::filesystem::path(manifest.output_directory) / "research-config.json").string());
+        manifest.artifacts.push_back(json_path);
+        manifest.artifacts.push_back(csv_path);
+        const auto config_copy = (std::filesystem::path(manifest.output_directory) / "research-config.json").string();
+        copy_input(spec.research_config, config_copy);
+        manifest.artifacts.push_back(config_copy);
     }
 
     static void run_portfolio(const ExperimentSpec& spec, const RiskConfig& risk, ExperimentManifest& manifest) {
@@ -156,9 +166,10 @@ private:
         const auto summary = runner.run(config);
         const auto output = (std::filesystem::path(manifest.output_directory) / "portfolio-research.json").string();
         PortfolioResearchRunner::write_artifact(summary, output);
-        manifest.artifacts = {output};
-        copy_input(spec.portfolio_config, (std::filesystem::path(manifest.output_directory) / "portfolio-config.json").string());
-        manifest.artifacts.push_back((std::filesystem::path(manifest.output_directory) / "portfolio-config.json").string());
+        manifest.artifacts.push_back(output);
+        const auto config_copy = (std::filesystem::path(manifest.output_directory) / "portfolio-config.json").string();
+        copy_input(spec.portfolio_config, config_copy);
+        manifest.artifacts.push_back(config_copy);
     }
 
     static void copy_input(const std::string& source, const std::string& target) {
