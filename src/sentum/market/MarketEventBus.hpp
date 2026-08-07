@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
 #include <utility>
