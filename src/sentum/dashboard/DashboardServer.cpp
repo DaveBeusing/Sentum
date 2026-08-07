@@ -1,6 +1,7 @@
 #include <sentum/dashboard/DashboardServer.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <fstream>
 #include <string>
@@ -154,6 +155,8 @@ void DashboardServer::run() {
                 response = json_response(impl_->repository.replay_metrics(), request.version());
             } else if (starts_with(target, "/api/research")) {
                 response = json_response(impl_->repository.research_results(), request.version());
+            } else if (starts_with(target, "/api/experiments")) {
+                response = json_response(impl_->repository.experiment_runs(query_limit(target, 100, 1000)), request.version());
             } else if (starts_with(target, "/api/experiment/trials")) {
                 const auto run = query_value(target, "run_id");
                 response = run.empty() ? json_response(nlohmann::json::array(), request.version())
@@ -162,8 +165,6 @@ void DashboardServer::run() {
                 const auto run = query_value(target, "run_id");
                 response = run.empty() ? json_response(nlohmann::json::object(), request.version())
                                        : json_response(impl_->repository.experiment_detail(run), request.version());
-            } else if (starts_with(target, "/api/experiments")) {
-                response = json_response(impl_->repository.experiment_runs(query_limit(target, 100, 1000)), request.version());
             } else if (target == "/api/health") {
                 response = json_response({{"status", "ok"}, {"read_only", true}, {"bind", "127.0.0.1"}, {"research_dashboard", true}}, request.version());
             } else {
