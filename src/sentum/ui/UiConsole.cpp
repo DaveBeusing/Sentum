@@ -115,5 +115,5 @@ void UiConsole::draw() {
         std::cout << " ├ Stop Loss:        " << ui::wrap_value_fixed(stop_loss, "", 4) << "\n";
         std::cout << " └ Take Profit:      " << ui::wrap_value_fixed(take_profit, "", 4) << "\n";
     }
-    std::cout << "\n Dashboard: http://127.0.0.1:8080\n" << std::flush;
+    std::cout << "\n Dashboard: see startup URL (SENTUM_DASHBOARD_PORT)\n" << std::flush;
 }
