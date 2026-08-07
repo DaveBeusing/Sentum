@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SENTUM_ENABLE_TSAN "Build with ThreadSanitizer" OFF)
+option(SENTUM_BUILD_BENCHMARKS "Build Sentum microbenchmarks" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE Release)
@@ -48,6 +49,12 @@ target_link_libraries(
 		Threads::Threads
 		${CURL_LIBRARIES}
 )
+
+if(SENTUM_BUILD_BENCHMARKS)
+	add_executable(sentum_market_benchmark benchmarks/market_path_benchmark.cpp)
+	target_include_directories(sentum_market_benchmark PRIVATE ${CMAKE_SOURCE_DIR}/src)
+	target_link_libraries(sentum_market_benchmark PRIVATE Threads::Threads)
+endif()
 
 if(NOT SENTUM_ENABLE_TSAN)
 	add_custom_command(
