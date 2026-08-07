@@ -1,40 +1,47 @@
 # Sentum
 
-**Deterministic market replay, auditable paper trading, and exchange-confirmed Binance Spot Testnet order infrastructure in C++17.**
+**Deterministic market replay, auditable paper trading, Binance Spot Testnet execution infrastructure, and a local read-only trading dashboard in C++17.**
 
-Sentum is an experimental trading-system project focused on predictable lifecycle behavior, bounded market-data processing, reproducible strategy execution, traceable risk decisions, and fail-closed exchange state handling.
+Sentum is an experimental trading-system and research project focused on predictable lifecycle behavior, bounded market-data processing, reproducible strategy execution, traceable risk decisions, exchange-confirmed state, and observable runtime health.
 
-> **Current status:** Phases 1–5 are merged into `master`. Paper trading and deterministic replay are integrated into the normal runtime. The Binance Spot Testnet order infrastructure exists as a separate execution layer, but it is not yet connected end to end to the normal `ExecutionEngine` strategy path.
+> **Current status:** Phases 1–8 are merged into `master`; Phase 9 adds the local Sentum Dashboard. Paper, replay, and Binance Spot Testnet modes are exposed by `main()`. Production Binance execution and withdrawal endpoints remain intentionally absent.
 
 ## Capabilities
 
 - Binance market-data collection over TLS WebSockets
-- bounded, non-blocking queue between market-data callbacks and SQLite
-- one batched SQLite writer using WAL and reusable prepared UPSERT statements
-- in-memory candle ring buffers for scanner decisions
-- modular `IStrategy` interface and momentum strategy
-- central `RiskManager` with strict configuration validation, position sizing, and exchange-style filters
-- auditable paper fills with spread, slippage, fees, cooldown, stale-data checks, stops, take profit, and maximum holding time
-- persistent completed-trade history in SQLite
-- deterministic CSV replay through the same strategy, risk, fill, and exit code used by paper mode
-- backtest metrics: Net Profit, Max Drawdown, Profit Factor, Win Rate, Expectancy, Sharpe, Sortino, fee share, and slippage sensitivity
-- Binance Spot Testnet order state machine, startup reconciliation, User Data Stream handling, kill switch, and confirmed-position ledger
-- controlled SIGINT/SIGTERM shutdown and optional ThreadSanitizer builds
+- fixed-capacity in-memory per-symbol market buffers
+- event-driven scanner using incremental market updates rather than timed polling
+- bounded non-blocking persistence queue with one batched SQLite WAL writer
+- reusable prepared UPSERT statements
+- modular `IStrategy` interface and incremental indicator primitives
+- central `RiskManager` with strict configuration validation and position sizing
+- shared `IExecutionVenue` boundary for simulated and Testnet execution
+- deterministic paper/replay fill modelling with spread and slippage
+- persistent completed-trade and order-event audit history
+- deterministic CSV replay with `ReplayClock`
+- Net Profit, Max Drawdown, Profit Factor, Win Rate, Expectancy, Sharpe, Sortino, fee-share, and slippage-sensitivity metrics
+- independent replay-metric verification tooling
+- Binance Spot Testnet order state machine, reconciliation, User Data Stream, dynamic exchange filters, and kill switch
+- account/balance reconciliation and controlled resume after reconciliation
+- persistent runtime, reconciliation, and kill-switch operational events
+- machine-readable runtime status
+- local read-only Sentum web dashboard
+- Release/ThreadSanitizer CI and a market-path microbenchmark
 
 ## Runtime modes
 
 ### Paper trading
 
 ```bash
-./client
+./client --paper
 ```
 
-The normal entry point starts `ExecutionEngine`, the collector, scanner, UI, and paper `TradeEngine`.
+`./client` without arguments is equivalent. Paper mode starts `ExecutionEngine`, collector, event-driven scanner, console UI, paper `TradeEngine`, and the web dashboard.
 
 ### Deterministic replay
 
 ```bash
-./client --replay data/btcusdt.csv btcusdt
+./client --replay data/btcusdt.csv BTCUSDT
 ```
 
 CSV format:
@@ -45,21 +52,40 @@ timestamp_ms,price,volume
 1710000001000,68260.20,0.12
 ```
 
-The volume column is optional. Events are stably sorted by timestamp and processed with `ReplayClock`.
+The volume column is optional. Events are stably sorted and processed with `ReplayClock`.
 
-### Binance Spot Testnet execution
-
-The Phase 5 components are available under `src/sentum/trader/order/`, but `main()` does not currently expose a Testnet execution mode and `ExecutionEngine` does not yet route strategy signals through `LiveOrderSession`.
-
-The implemented safety gate requires:
+### Binance Spot Testnet
 
 ```bash
 export SENTUM_ENABLE_SPOT_TESTNET=I_UNDERSTAND_TESTNET_ONLY
 export SENTUM_BINANCE_TESTNET_API_KEY='...'
 export SENTUM_BINANCE_TESTNET_API_SECRET='...'
+./client --testnet BTCUSDT
 ```
 
-The execution client is hard-wired to Binance Spot Testnet. Production execution and withdrawal endpoints are intentionally absent.
+The execution client is hard-wired to Binance Spot Testnet. Production and withdrawal endpoints are not implemented.
+
+### Sentum Dashboard
+
+Paper and Testnet modes start the dashboard automatically. It can also run independently against persisted data:
+
+```bash
+./client --dashboard
+```
+
+Default URL:
+
+```text
+http://127.0.0.1:8080
+```
+
+Custom port:
+
+```bash
+export SENTUM_DASHBOARD_PORT=8090
+```
+
+The dashboard is intentionally read-only and loopback-only. See [`docs/DASHBOARD.md`](docs/DASHBOARD.md).
 
 ## Architecture
 
@@ -68,35 +94,42 @@ Binance market WebSocket
         |
         v
 Collector / parser
-   |             |
-   |             +--> bounded queue --> single SQLite writer --> WAL database
+   |                  |
+   |                  +--> bounded queue --> SQLite WAL writer
    |
-   +--> in-memory ring buffers --> scanner --> TradeEngine
-                                             |
-                                             v
-                                        IStrategy
-                                             |
-                                             v
-                                        RiskManager
-                                             |
-                              +--------------+--------------+
-                              |                             |
-                              v                             v
-                         paper mode                     replay mode
-                              |                             |
-                              +--------------+--------------+
-                                             |
-                                             v
-                                   persistent trade history
-
-Separate Phase 5 Testnet infrastructure:
-Order intent --> OrderManager --> Binance Spot Testnet REST
-                     ^                     |
-                     |                     v
-              reconciliation <----- User Data Stream
+   v
+fixed MarketDataStore ring buffers
+        |
+        v
+MarketEventBus
+        |
+        +--> event-driven SymbolScanner
+        |
+        +--> strategy/risk pipeline
                      |
                      v
-          ConfirmedPositionLedger
+                 IStrategy
+                     |
+                     v
+                RiskManager
+                     |
+                     v
+              IExecutionVenue
+               /           \
+              /             \
+   SimulatedExecution   Binance Testnet
+     paper / replay       OrderManager
+              |                 |
+              v                 v
+        trade history     User Data Stream
+                                |
+                                v
+                     exchange-confirmed state
+
+Runtime state + SQLite history + replay metrics
+                     |
+                     v
+          local Sentum Dashboard
 ```
 
 ## Exchange order-state authority
@@ -113,13 +146,7 @@ cancelled
 rejected
 ```
 
-A successful REST placement response advances an order only to `acknowledged`. It does not create a local executed position. The confirmed-position ledger accepts a fill only when the exchange reports:
-
-- state `filled`,
-- a non-zero exchange order ID, and
-- a positive executed quantity.
-
-Cancellation remains `cancelling` until confirmed by User Data Stream or reconciliation.
+A REST placement acknowledgement does not create an executed local position. Confirmed position state changes only from exchange-confirmed fills or reconciliation. Failed/ambiguous recovery keeps trading blocked.
 
 ## Requirements
 
@@ -128,7 +155,7 @@ Cancellation remains `cancelling` until confirmed by User Data Stream or reconci
 - CMake 3.10+
 - libcurl
 - OpenSSL
-- Boost.System
+- Boost.System / Boost.Beast headers
 - WebSocket++
 - SQLite3
 - POSIX threads
@@ -155,8 +182,6 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
 
-The standard build copies the stripped executable to `./client`.
-
 ### ThreadSanitizer
 
 ```bash
@@ -164,6 +189,16 @@ cmake -S . -B build-tsan \
   -DCMAKE_BUILD_TYPE=Debug \
   -DSENTUM_ENABLE_TSAN=ON
 cmake --build build-tsan --parallel
+```
+
+### Market-path benchmark
+
+```bash
+cmake -S . -B build-perf \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DSENTUM_BUILD_BENCHMARKS=ON
+cmake --build build-perf --parallel
+./build-perf/sentum_market_benchmark
 ```
 
 ## Configuration
@@ -176,85 +211,60 @@ config/risk.json
 config/secrets.json
 ```
 
-`config/config.json` controls quote asset, scanner threshold, database setting, and paper mode. The current normal runtime must use:
+`config/risk.json` controls capital limits, risk per trade, stops, take profit, fees, spread, slippage, leverage, cooldown, holding duration, stale-data limits, and local risk constraints. Binance Testnet quantity/notional rules are additionally loaded from exchange metadata.
 
-```json
-"paperTrading": true
-```
-
-`config/risk.json` contains capital limits, risk per trade, stops, take profit, fees, spread, slippage, leverage, quantity filters, cooldown, maximum holding time, maximum data age, and trailing settings. Missing or invalid required values fail startup.
-
-Do not commit real API credentials. Use keys with the minimum required permissions and no withdrawal rights.
+Do not commit real API credentials. Testnet keys should use only the permissions required for Spot Testnet trading and should never have withdrawal rights.
 
 ## Persistence and observability
 
-- market candles and trade history use SQLite
-- the collector writes completed candles through a bounded queue
-- the persistence batch size is 256 records
-- the queue capacity is 8,192 records
-- the documented drop-rate limit is 0.1%
-- queue depth, accepted events, dropped events, and drop rate are logged periodically
-- scanner decisions use the in-memory ring buffer rather than SQLite
+Sentum uses:
+
+```text
+log/klines.sqlite3       candles, trades, order and operational events
+log/status.json          machine-readable Testnet runtime state
+log/replay.sqlite3       most recent deterministic replay trade history
+log/replay_metrics.json  most recent replay metrics
+```
+
+The dashboard reads SQLite through independent read-only connections, so browser requests do not enter the market-data or execution hot path.
 
 ## Development status
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | startup/shutdown stability, serialized strategy work, database retention, TSAN option | Merged; full soak validation still required |
-| 2 | bounded persistence path, WAL, batching, prepared statements, in-memory scanner | Merged; production-load drop-rate validation still required |
-| 3 | strategy interface, risk approval, sizing, paper fills, persistent trade audit | Merged; strategy and parameter validation still required |
-| 4 | deterministic replay, shared event pipeline, metrics, slippage sensitivity | Merged; independent metric validation still required |
-| 5 | Testnet OrderManager, User Data Stream, reconciliation, kill switch, confirmed ledger | Merged as infrastructure; runtime integration and real Testnet validation outstanding |
+| 1 | lifecycle stability, serialized strategy processing | Merged |
+| 2 | bounded WAL persistence and in-memory scanner | Merged |
+| 3 | strategy/risk modelling and auditable paper fills | Merged |
+| 4 | deterministic replay and backtest metrics | Merged |
+| 5 | exchange-confirmed Testnet order execution infrastructure | Merged |
+| 6 | unified Testnet execution, recovery, persistence, observability | Merged |
+| 7 | account reconciliation, dynamic filters, controlled resume | Merged |
+| 8 | event-driven performance architecture and shared simulated venue | Merged |
+| 9 | local Sentum Dashboard and read-only runtime API | In development |
 
-## Known limitations
-
-- Phase 5 is not connected to the normal strategy execution path.
-- `main()` supports paper mode and replay only.
-- no production Binance execution endpoints are implemented.
-- no real-money operation has been validated or approved.
-- no documented 24-hour paper-trading soak test has been completed.
-- no documented end-to-end Binance Spot Testnet integration test has been completed.
-- User Data Stream reconnect and missed-event recovery still require deliberate fault testing.
-- replay metrics have not yet been compared against an independent reference implementation.
-- CI and ThreadSanitizer results should be reviewed before treating `master` as release-ready.
-
-## Next milestones
-
-1. Integrate `LiveOrderSession` behind an explicit Testnet-only runtime mode.
-2. Connect confirmed exchange fills to the strategy portfolio state without allowing REST acknowledgements to mutate positions.
-3. Add unit tests for every order-state transition and reconciliation case.
-4. Add mocked REST/User Data Stream integration tests and reconnect recovery.
-5. Complete release, TSAN, replay reproducibility, paper soak, and Testnet soak validation.
-6. Add operational metrics, account reconciliation, and a documented incident runbook.
-7. Consider production execution only in a separately reviewed change with a strict capital cap.
-
-## Repository layout
+## Dashboard API
 
 ```text
-config/                         runtime and risk configuration
-docs/                           safety and operational documentation
-src/main.cpp                    paper/replay command-line entry point
-src/sentum/api/                 Binance REST and WebSocket clients
-src/sentum/backtest/            historical-event reader and metrics
-src/sentum/collector/           market-data ingestion and persistence queue
-src/sentum/core/                runtime orchestration
-src/sentum/market/              unified market events and in-memory buffers
-src/sentum/scanner/             in-memory symbol scanner
-src/sentum/time/                system and replay clocks
-src/sentum/trader/              strategy, risk, paper execution, history, and orders
-src/sentum/utils/Database.*     SQLite candle persistence
+GET /api/health
+GET /api/status
+GET /api/trades?limit=100
+GET /api/orders?limit=100
+GET /api/equity?limit=500
+GET /api/replay
 ```
 
-See [`docs/LIVE_TRADING_SAFETY.md`](docs/LIVE_TRADING_SAFETY.md) for the Testnet safety model.
+The browser API is read-only. Order placement, cancellation, kill-switch reset, configuration writes, credential access, and production-trading activation are intentionally not exposed.
 
-## Disclaimer
+## Known validation work
 
-Sentum is experimental research and development software. It is not legal, tax, investment, or financial advice. Trading can result in substantial loss. Do not use Sentum with real capital unless you have independently reviewed the code, validated the strategy and risk model, tested failure modes, secured the operating environment, and accepted full responsibility for the outcome.
+Before treating Sentum as release-ready, continue validating:
 
-Read [`DISCLAIMER.md`](DISCLAIMER.md) before use.
+- long-running paper soak tests and queue-drop limits
+- Release/TSan/ASan/UBSan builds after architecture changes
+- deliberate User Data Stream interruption and recovery
+- partial-fill and process-restart reconciliation
+- real Binance Spot Testnet balance mismatch and controlled-resume scenarios
+- independent replay metric reference checks over multiple datasets
+- dashboard load and SQLite-WAL coexistence during long runtimes
 
-## License
-
-Copyright © 2025 Dave Beusing
-
-Licensed under the MIT License. See [`LICENSE`](LICENSE).
+Sentum remains experimental software and should not be assumed safe for production or real-money trading without dedicated validation.
