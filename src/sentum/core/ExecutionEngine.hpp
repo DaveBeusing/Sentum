@@ -6,22 +6,23 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include <sentum/utils/ConfigLoader.hpp>
-#include <sentum/utils/SecretsLoader.hpp>
-#include <sentum/utils/AsyncLogger.hpp>
-#include <sentum/utils/Database.hpp>
 #include <sentum/api/BinanceRestClient.hpp>
 #include <sentum/collector/Collector.hpp>
 #include <sentum/market/MarketDataStore.hpp>
 #include <sentum/scanner/SymbolScanner.hpp>
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/ui/UiConsole.hpp>
+#include <sentum/utils/AsyncLogger.hpp>
+#include <sentum/utils/ConfigLoader.hpp>
+#include <sentum/utils/Database.hpp>
+#include <sentum/utils/SecretsLoader.hpp>
 
 class ExecutionEngine {
 public:
@@ -35,6 +36,9 @@ private:
     std::thread main_thread, ui_thread, scanner_thread, trader_thread;
     std::atomic<bool> running, collector_active, scanner_active, trader_active;
     std::mutex symbol_mutex;
+    std::mutex scanner_signal_mutex;
+    std::condition_variable scanner_signal_cv;
+    std::string pending_scanner_symbol;
 
     std::unique_ptr<Database> db;
     std::unique_ptr<MarketDataStore> market_store;

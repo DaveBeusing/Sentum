@@ -8,10 +8,19 @@
 #include <websocketpp/config/asio_client.hpp>
 
 #include <sentum/collector/Collector.hpp>
+#include <sentum/market/MarketEventBus.hpp>
 #include <sentum/utils/helper.hpp>
 
 using json = nlohmann::json;
 using client = websocketpp::client<websocketpp::config::asio_tls_client>;
+
+namespace {
+double parse_json_number(const json& value) {
+    if (value.is_number()) return value.get<double>();
+    if (value.is_string()) return std::stod(value.get_ref<const std::string&>());
+    throw std::runtime_error("Expected numeric JSON value");
+}
+}
 
 struct Collector::Impl {
     client websocket;
@@ -143,16 +152,32 @@ void Collector::run() {
                 const auto payload = json::parse(msg->get_payload());
                 if (!payload.contains("data") || !payload["data"].contains("k")) return;
                 const auto& k = payload["data"]["k"];
-                const std::string symbol = helper::to_lowercase(k["s"].get<std::string>());
+                const std::string symbol = helper::to_lowercase(k["s"].get_ref<const std::string&>());
                 Kline entry;
                 entry.timestamp = k["t"];
-                entry.open = std::stod(k["o"].get<std::string>());
-                entry.high = std::stod(k["h"].get<std::string>());
-                entry.low = std::stod(k["l"].get<std::string>());
-                entry.close = std::stod(k["c"].get<std::string>());
-                entry.volume = std::stod(k["v"].get<std::string>());
+                entry.open = parse_json_number(k["o"]);
+                entry.high = parse_json_number(k["h"]);
+                entry.low = parse_json_number(k["l"]);
+                entry.close = parse_json_number(k["c"]);
+                entry.volume = parse_json_number(k["v"]);
                 store_ref.upsert(symbol, entry);
-                if (k.value("x", false)) try_enqueue(symbol, std::move(entry));
+
+                const bool closed = k.value("x", false);
+                if (closed) {
+                    MarketEvent event;
+                    event.type = MarketEvent::Type::Candle;
+                    event.symbol = symbol;
+                    event.timestamp = std::chrono::system_clock::time_point(std::chrono::milliseconds(entry.timestamp));
+                    event.price = entry.close;
+                    event.open = entry.open;
+                    event.high = entry.high;
+                    event.low = entry.low;
+                    event.close = entry.close;
+                    event.volume = entry.volume;
+                    event.closed = true;
+                    sentum::market::MarketEventBus::global().publish(event);
+                    try_enqueue(symbol, std::move(entry));
+                }
             } catch (const std::exception& e) {
                 logger.log(std::string("parse error: ") + e.what());
             }

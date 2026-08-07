@@ -8,19 +8,21 @@
 #include <string>
 #include <vector>
 
-#include <sentum/market/MarketEvent.hpp>
-#include <sentum/time/Clock.hpp>
-#include <sentum/trader/types/RiskConfig.hpp>
-#include <sentum/trader/types/TradePosition.hpp>
-#include <sentum/trader/types/TradeAction.hpp>
-#include <sentum/trader/utils/RiskConfigLoader.hpp>
-#include <sentum/trader/utils/TradeLogger.hpp>
-#include <sentum/trader/strategy/IStrategy.hpp>
-#include <sentum/trader/risk/RiskManager.hpp>
-#include <sentum/trader/history/TradeHistoryRepository.hpp>
-#include <sentum/utils/AsyncLogger.hpp>
 #include <sentum/api/BinanceRestClient.hpp>
 #include <sentum/api/BinanceWebsocketClient.hpp>
+#include <sentum/market/MarketEvent.hpp>
+#include <sentum/time/Clock.hpp>
+#include <sentum/trader/execution/IExecutionVenue.hpp>
+#include <sentum/trader/execution/SimulatedExecutionVenue.hpp>
+#include <sentum/trader/history/TradeHistoryRepository.hpp>
+#include <sentum/trader/risk/RiskManager.hpp>
+#include <sentum/trader/strategy/IStrategy.hpp>
+#include <sentum/trader/types/RiskConfig.hpp>
+#include <sentum/trader/types/TradeAction.hpp>
+#include <sentum/trader/types/TradePosition.hpp>
+#include <sentum/trader/utils/RiskConfigLoader.hpp>
+#include <sentum/trader/utils/TradeLogger.hpp>
+#include <sentum/utils/AsyncLogger.hpp>
 
 class TradeEngine {
 public:
@@ -48,6 +50,8 @@ private:
     void enqueue_price(double price);
     TradeAction evaluate_at(double price, std::chrono::system_clock::time_point now, const std::string& source);
     TradeAction close_position(double market_price, const std::string& reason, std::chrono::system_clock::time_point now);
+    sentum::order::Snapshot execute(sentum::order::Side side, double quantity, double price,
+                                    std::chrono::system_clock::time_point now, const char* purpose);
 
     std::string symbol;
     BinanceRestClient* api = nullptr;
@@ -64,6 +68,7 @@ private:
     std::unique_ptr<IStrategy> strategy;
     std::unique_ptr<RiskManager> risk_manager;
     std::unique_ptr<TradeHistoryRepository> history;
+    std::unique_ptr<sentum::execution::SimulatedExecutionVenue> execution_venue;
     std::shared_ptr<IClock> clock;
     std::string history_path = "log/klines.sqlite3";
     std::vector<TradePosition> completed_;
