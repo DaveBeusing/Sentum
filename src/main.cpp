@@ -19,6 +19,8 @@
 #include <nlohmann/json.hpp>
 #include <sentum/backtest/Backtest.hpp>
 #include <sentum/core/ExecutionEngine.hpp>
+#include <sentum/dashboard/DashboardServer.hpp>
+#include <sentum/dashboard/DashboardState.hpp>
 #include <sentum/time/Clock.hpp>
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/trader/execution/BinanceTestnetExecutionVenue.hpp>
@@ -30,6 +32,25 @@ namespace {
 std::atomic<bool> shutdown_requested{false};
 void handle_signal(int) noexcept { shutdown_requested.store(true, std::memory_order_relaxed); }
 struct ReplayResult { BacktestMetrics metrics; double net_profit = 0.0; };
+
+std::uint16_t dashboard_port() {
+    const char* value = std::getenv("SENTUM_DASHBOARD_PORT");
+    if (!value || !*value) return 8080;
+    try {
+        const int parsed = std::stoi(value);
+        if (parsed < 1 || parsed > 65535) throw std::out_of_range("port");
+        return static_cast<std::uint16_t>(parsed);
+    } catch (...) {
+        throw std::runtime_error("SENTUM_DASHBOARD_PORT must be between 1 and 65535");
+    }
+}
+
+std::unique_ptr<sentum::dashboard::DashboardServer> start_dashboard() {
+    auto server = std::make_unique<sentum::dashboard::DashboardServer>(dashboard_port());
+    server->start();
+    std::cout << "Sentum Dashboard: http://127.0.0.1:" << server->port() << "\n";
+    return server;
+}
 
 ReplayResult run_replay(const std::string& path, const std::string& symbol, RiskConfig risk, const std::string& history_path) {
     const auto events = HistoricalEventReader::read_csv(path, symbol);
@@ -62,29 +83,54 @@ int replay_main(const std::string& path, const std::string& symbol) {
         {"expectancy",metrics.expectancy},{"sharpe",metrics.sharpe},{"sortino",metrics.sortino},
         {"fee_share",metrics.fee_share},{"slippage_sensitivity",metrics.slippage_sensitivity}};
     std::ofstream("log/replay_metrics.json") << report.dump(2) << '\n';
+    auto& dashboard = sentum::dashboard::DashboardState::global();
+    dashboard.set("mode", "replay");
+    dashboard.set("health", "complete");
+    dashboard.set("current_symbol", symbol);
+    dashboard.set("total_profit", metrics.net_profit);
+    dashboard.set("total_trades", metrics.trades);
+    dashboard.set("win_rate", metrics.win_rate);
     return EXIT_SUCCESS;
 }
 
 int paper_main() {
+    auto dashboard = start_dashboard();
     auto engine = std::make_unique<ExecutionEngine>();
     engine->start();
     while (engine->is_running() && !shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     engine->stop();
+    dashboard->stop();
     return EXIT_SUCCESS;
 }
 
 int testnet_main(const std::string& symbol) {
+    auto dashboard_server = start_dashboard();
+    auto& dashboard = sentum::dashboard::DashboardState::global();
+    dashboard.set("mode", "testnet");
+    dashboard.set("symbol", symbol);
+    dashboard.set("health", "starting");
     RiskConfig risk = load_risk_config("config/risk.json");
     auto venue = std::make_unique<sentum::execution::BinanceTestnetExecutionVenue>();
     sentum::execution::TestnetStrategyRuntime runtime(symbol, risk, std::make_unique<MomentumStrategy>(), std::move(venue));
     runtime.start();
+    dashboard.set("health", "healthy");
     while (runtime.running() && !shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     runtime.stop();
+    dashboard.set("health", "stopped");
+    dashboard_server->stop();
+    return EXIT_SUCCESS;
+}
+
+int dashboard_main() {
+    auto dashboard = start_dashboard();
+    std::cout << "Read-only dashboard mode. Press Ctrl+C to stop.\n";
+    while (!shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    dashboard->stop();
     return EXIT_SUCCESS;
 }
 
 void usage() {
-    std::cerr << "Usage:\n  client --paper\n  client --replay <timestamp_ms,price,volume.csv> <symbol>\n  client --testnet <symbol>\n";
+    std::cerr << "Usage:\n  client --paper\n  client --replay <timestamp_ms,price,volume.csv> <symbol>\n  client --testnet <symbol>\n  client --dashboard\n\nOptional environment:\n  SENTUM_DASHBOARD_PORT=8080\n";
 }
 }
 
@@ -94,6 +140,7 @@ int main(int argc, char** argv) {
         if (argc == 1 || (argc == 2 && std::string(argv[1]) == "--paper")) return paper_main();
         if (argc == 4 && std::string(argv[1]) == "--replay") return replay_main(argv[2], argv[3]);
         if (argc == 3 && std::string(argv[1]) == "--testnet") return testnet_main(argv[2]);
+        if (argc == 2 && std::string(argv[1]) == "--dashboard") return dashboard_main();
         usage(); return EXIT_FAILURE;
     } catch (const std::exception& e) { std::cerr << "[FATAL] " << e.what() << '\n'; }
       catch (...) { std::cerr << "[FATAL] Unknown unhandled exception\n"; }

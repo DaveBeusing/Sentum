@@ -9,8 +9,10 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include <sentum/api/BinanceWebsocketClient.hpp>
+#include <sentum/dashboard/DashboardState.hpp>
 #include <sentum/observability/StatusReporter.hpp>
 #include <sentum/trader/execution/IExecutionVenue.hpp>
 #include <sentum/trader/order/OrderEventRepository.hpp>
@@ -31,32 +33,45 @@ public:
 
     void start() {
         if (running_.exchange(true)) return;
-        status_.set("mode", "testnet");
-        status_.set("symbol", symbol_);
-        status_.set("kill_switch_active", false);
-        status_.set("reconciliation_complete", false);
+        set_status("mode", "testnet");
+        set_status("symbol", symbol_);
+        set_status("kill_switch_active", false);
+        set_status("reconciliation_complete", false);
         venue_->start([this](const order::Snapshot& update) { on_order_update(update); });
-        status_.set("reconciliation_complete", venue_->ready());
+        set_status("reconciliation_complete", venue_->ready());
         price_stream_ = std::make_unique<BinanceWebsocketClient>(symbol_);
         price_stream_->set_on_price([this](double price) { on_price(price); });
         price_stream_->start();
-        status_.set("market_data_connected", true);
-        status_.set("user_stream_connected", true);
+        set_status("market_data_connected", true);
+        set_status("user_stream_connected", true);
+        sentum::dashboard::DashboardState::global().set("health", "healthy");
     }
 
     void stop() noexcept {
         if (!running_.exchange(false)) return;
         if (price_stream_) price_stream_->stop();
         if (venue_) venue_->stop();
-        status_.set("market_data_connected", false);
-        status_.set("user_stream_connected", false);
-        status_.set("kill_switch_active", true);
+        set_status("market_data_connected", false);
+        set_status("user_stream_connected", false);
+        set_status("kill_switch_active", true);
+        sentum::dashboard::DashboardState::global().set("health", "stopped");
     }
 
     bool running() const noexcept { return running_.load(); }
-    void kill() noexcept { if (venue_) venue_->kill(); status_.set("kill_switch_active", true); }
+    void kill() noexcept {
+        if (venue_) venue_->kill();
+        set_status("kill_switch_active", true);
+        sentum::dashboard::DashboardState::global().set("health", "blocked");
+    }
 
 private:
+    template <typename T>
+    void set_status(const std::string& key, T&& value) {
+        nlohmann::json json_value = std::forward<T>(value);
+        status_.set(key, json_value);
+        sentum::dashboard::DashboardState::global().set(key, std::move(json_value));
+    }
+
     static std::string id(const std::string& symbol, const char* side) {
         const auto now = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
@@ -66,18 +81,18 @@ private:
     void on_price(double price) {
         if (!running_.load() || !venue_->ready() || price <= 0.0) return;
         const auto now = std::chrono::system_clock::now();
-        status_.set("last_market_event_age_ms", 0);
-        status_.set("last_price", price);
+        set_status("last_market_event_age_ms", 0);
+        set_status("last_price", price);
 
         std::lock_guard<std::mutex> lock(mutex_);
-        if (active_order_) return;
+        if (!active_order_.empty()) return;
 
         if (confirmed_quantity_ <= 0.0) {
             const auto signal = strategy_->on_price(price, now);
             if (signal.action != TradeAction::BUY) return;
             const auto decision = risk_manager_.approve_entry(signal, price, now, last_exit_);
-            status_.set("last_signal", signal.reason);
-            status_.set("last_risk_decision", decision.reason);
+            set_status("last_signal", signal.reason);
+            set_status("last_risk_decision", decision.reason);
             if (!decision.approved) return;
             order::Request request{symbol_, order::Side::Buy, decision.quantity, id(symbol_, "buy")};
             active_order_ = request.client_order_id;
@@ -98,11 +113,12 @@ private:
     }
 
     void on_order_update(const order::Snapshot& update) {
-        try { events_.save(update, "exchange"); } catch (...) { venue_->kill(); }
-        status_.set("last_order_state", order::to_string(update.state));
-        status_.set("orders_pending", update.state == order::State::Pending || update.state == order::State::Acknowledged ? 1 : 0);
-        status_.set("orders_partially_filled", update.state == order::State::PartiallyFilled ? 1 : 0);
-        status_.set("last_user_event_age_ms", 0);
+        try { events_.save(update, "exchange"); }
+        catch (...) { venue_->kill(); set_status("kill_switch_active", true); }
+        set_status("last_order_state", order::to_string(update.state));
+        set_status("orders_pending", update.state == order::State::Pending || update.state == order::State::Acknowledged ? 1 : 0);
+        set_status("orders_partially_filled", update.state == order::State::PartiallyFilled ? 1 : 0);
+        set_status("last_user_event_age_ms", 0);
 
         std::lock_guard<std::mutex> lock(mutex_);
         if (update.state == order::State::Rejected || update.state == order::State::Cancelled) {
@@ -114,16 +130,19 @@ private:
             confirmed_quantity_ = update.executed_quantity;
             entry_price_ = update.average_fill_price;
             entry_time_ = update.updated_at;
-            status_.set("confirmed_position_quantity", confirmed_quantity_);
-            status_.set("confirmed_entry_price", entry_price_);
+            set_status("confirmed_position_quantity", confirmed_quantity_);
+            set_status("confirmed_entry_price", entry_price_);
+            sentum::dashboard::DashboardState::global().set("active_position",
+                nlohmann::json{{"symbol",symbol_},{"quantity",confirmed_quantity_},{"entry_price",entry_price_}});
         } else {
             confirmed_quantity_ = 0.0;
             entry_price_ = 0.0;
             entry_time_ = {};
             last_exit_ = update.updated_at;
             strategy_->reset();
-            status_.set("confirmed_position_quantity", 0.0);
-            status_.set("last_exit_reason", exit_reason_);
+            set_status("confirmed_position_quantity", 0.0);
+            set_status("last_exit_reason", exit_reason_);
+            sentum::dashboard::DashboardState::global().set("active_position", nullptr);
         }
         active_order_.clear();
     }
