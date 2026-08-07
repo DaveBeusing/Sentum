@@ -36,7 +36,7 @@ struct ResearchConfig {
     std::size_t bootstrap_samples = 2000;
     double confidence_level = 0.95;
     std::uint64_t random_seed = 0x53454e54554dULL;
-    std::size_t parallelism = 0; // 0 = hardware_concurrency
+    std::size_t parallelism = 0;
     std::vector<std::size_t> lookbacks{10, 20, 40};
     std::vector<double> entry_thresholds{0.0005, 0.001, 0.002};
     std::vector<double> stop_losses;
@@ -44,23 +44,9 @@ struct ResearchConfig {
     std::vector<double> slippages;
 };
 
-struct ConfidenceInterval {
-    double lower = 0.0;
-    double median = 0.0;
-    double upper = 0.0;
-};
-
-struct MonteCarloSummary {
-    std::size_t samples = 0;
-    ConfidenceInterval net_profit;
-    ConfidenceInterval max_drawdown;
-    double probability_of_loss = 0.0;
-};
-
-struct RegimeMetrics {
-    std::string regime;
-    BacktestMetrics metrics;
-};
+struct ConfidenceInterval { double lower = 0.0; double median = 0.0; double upper = 0.0; };
+struct MonteCarloSummary { std::size_t samples = 0; ConfidenceInterval net_profit; ConfidenceInterval max_drawdown; double probability_of_loss = 0.0; };
+struct RegimeMetrics { std::string regime; BacktestMetrics metrics; };
 
 struct TrialResult {
     std::size_t trial_id = 0;
@@ -101,14 +87,13 @@ ResearchConfig load_research_config(const std::string& path);
 class ResearchRunner {
 public:
     explicit ResearchRunner(RiskConfig base_risk);
+    ResearchSummary run(const ResearchConfig& config);
     ResearchSummary run(const ResearchConfig& config) const;
-
     static double score(const BacktestMetrics& metrics, const std::string& objective);
     static nlohmann::json to_json(const ResearchSummary& summary);
     static void write_artifacts(const ResearchSummary& summary,
                                 const std::string& json_path = "log/research_latest.json",
                                 const std::string& csv_path = "log/research_trials.csv");
-
 private:
     RiskConfig base_risk_;
 };
