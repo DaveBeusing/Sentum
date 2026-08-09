@@ -26,7 +26,7 @@ public:
         auto loaded = ExchangeRules::from_exchange_info(client_.exchange_info(symbol), symbol);
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            rules_[symbol] = {loaded, now};
+            rules_.insert_or_assign(symbol, Entry{loaded, now});
         }
         return loaded;
     }
