@@ -251,7 +251,13 @@ public:
     static std::unique_ptr<IStrategy> create(const nlohmann::json& json) {
         if (!json.is_object()) throw std::runtime_error("strategy configuration must be an object");
         const std::string type = json.value("type", std::string("momentum"));
-        if (type != "ensemble") return create({type, json.value("weight", 1.0), json.value("parameters", nlohmann::json::object())});
+        if (type != "ensemble") {
+            StrategyDefinition definition;
+            definition.type = type;
+            definition.weight = json.value("weight", 1.0);
+            definition.parameters = json.value("parameters", nlohmann::json::object());
+            return create(definition);
+        }
         auto ensemble = std::make_unique<EnsembleStrategy>(json.value("threshold", 0.55));
         if (!json.contains("members") || !json.at("members").is_array() || json.at("members").empty())
             throw std::runtime_error("ensemble strategy requires members");
