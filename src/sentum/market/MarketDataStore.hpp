@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <sentum/api/model/Kline.hpp>
+#include <sentum/market/SymbolId.hpp>
 
 class MarketDataStore {
 public:
@@ -21,19 +22,18 @@ public:
         return instance;
     }
 
-    void upsert(const std::string& symbol, const Kline& kline) {
+    void register_symbol(sentum::market::SymbolId id, const std::string& symbol) {
+        if (id == sentum::market::kInvalidSymbolId) return;
         auto buffer = get_or_create(symbol);
-        std::lock_guard<std::mutex> lock(buffer->mutex);
-        if (buffer->size > 0) {
-            const auto last_index = (buffer->head + buffer->capacity - 1) % buffer->capacity;
-            if (buffer->data[last_index].timestamp == kline.timestamp) {
-                buffer->data[last_index] = kline;
-                return;
-            }
-        }
-        buffer->data[buffer->head] = kline;
-        buffer->head = (buffer->head + 1) % buffer->capacity;
-        if (buffer->size < buffer->capacity) ++buffer->size;
+        std::unique_lock<std::shared_mutex> lock(map_mutex_);
+        if (id_buffers_.size() <= id) id_buffers_.resize(static_cast<std::size_t>(id) + 1);
+        id_buffers_[id] = std::move(buffer);
+    }
+
+    void upsert(const std::string& symbol, const Kline& kline) { upsert_buffer(get_or_create(symbol), kline); }
+    void upsert(sentum::market::SymbolId id, const Kline& kline) {
+        auto buffer = find(id);
+        if (buffer) upsert_buffer(std::move(buffer), kline);
     }
 
     std::vector<std::string> symbols() const {
@@ -44,20 +44,48 @@ public:
         return result;
     }
 
-    std::vector<Kline> latest(const std::string& symbol, std::size_t limit) const {
-        auto buffer = find(symbol);
+    std::vector<Kline> latest(const std::string& symbol, std::size_t limit) const { return latest_buffer(find(symbol), limit); }
+    std::vector<Kline> latest(sentum::market::SymbolId id, std::size_t limit) const { return latest_buffer(find(id), limit); }
+
+    bool cumulative_return(const std::string& symbol, std::size_t lookback, double& result) const { return cumulative_return_buffer(find(symbol), lookback, result); }
+    bool cumulative_return(sentum::market::SymbolId id, std::size_t lookback, double& result) const { return cumulative_return_buffer(find(id), lookback, result); }
+
+    std::size_t size(const std::string& symbol) const { return buffer_size(find(symbol)); }
+    std::size_t size(sentum::market::SymbolId id) const { return buffer_size(find(id)); }
+
+private:
+    struct RingBuffer {
+        explicit RingBuffer(std::size_t c) : data(c), capacity(c) {}
+        std::vector<Kline> data;
+        const std::size_t capacity;
+        std::size_t head = 0;
+        std::size_t size = 0;
+        mutable std::mutex mutex;
+    };
+
+    static void upsert_buffer(const std::shared_ptr<RingBuffer>& buffer, const Kline& kline) {
+        if (!buffer) return;
+        std::lock_guard<std::mutex> lock(buffer->mutex);
+        if (buffer->size > 0) {
+            const auto last_index = (buffer->head + buffer->capacity - 1) % buffer->capacity;
+            if (buffer->data[last_index].timestamp == kline.timestamp) { buffer->data[last_index] = kline; return; }
+        }
+        buffer->data[buffer->head] = kline;
+        buffer->head = (buffer->head + 1) % buffer->capacity;
+        if (buffer->size < buffer->capacity) ++buffer->size;
+    }
+
+    static std::vector<Kline> latest_buffer(const std::shared_ptr<RingBuffer>& buffer, std::size_t limit) {
         if (!buffer || limit == 0) return {};
         std::lock_guard<std::mutex> lock(buffer->mutex);
         const std::size_t count = std::min(limit, buffer->size);
-        std::vector<Kline> result;
-        result.reserve(count);
+        std::vector<Kline> result; result.reserve(count);
         const std::size_t start = (buffer->head + buffer->capacity - count) % buffer->capacity;
         for (std::size_t i = 0; i < count; ++i) result.push_back(buffer->data[(start + i) % buffer->capacity]);
         return result;
     }
 
-    bool cumulative_return(const std::string& symbol, std::size_t lookback, double& result) const {
-        auto buffer = find(symbol);
+    static bool cumulative_return_buffer(const std::shared_ptr<RingBuffer>& buffer, std::size_t lookback, double& result) {
         if (!buffer || lookback < 2) return false;
         std::lock_guard<std::mutex> lock(buffer->mutex);
         const std::size_t count = std::min(lookback, buffer->size);
@@ -70,22 +98,11 @@ public:
         return true;
     }
 
-    std::size_t size(const std::string& symbol) const {
-        auto buffer = find(symbol);
+    static std::size_t buffer_size(const std::shared_ptr<RingBuffer>& buffer) {
         if (!buffer) return 0;
         std::lock_guard<std::mutex> lock(buffer->mutex);
         return buffer->size;
     }
-
-private:
-    struct RingBuffer {
-        explicit RingBuffer(std::size_t c) : data(c), capacity(c) {}
-        std::vector<Kline> data;
-        const std::size_t capacity;
-        std::size_t head = 0;
-        std::size_t size = 0;
-        mutable std::mutex mutex;
-    };
 
     std::shared_ptr<RingBuffer> get_or_create(const std::string& symbol) {
         {
@@ -105,7 +122,14 @@ private:
         return it == buffers_.end() ? nullptr : it->second;
     }
 
+    std::shared_ptr<RingBuffer> find(sentum::market::SymbolId id) const {
+        std::shared_lock<std::shared_mutex> lock(map_mutex_);
+        const auto index = static_cast<std::size_t>(id);
+        return index < id_buffers_.size() ? id_buffers_[index] : nullptr;
+    }
+
     std::size_t capacity_per_symbol_;
     mutable std::shared_mutex map_mutex_;
     std::unordered_map<std::string, std::shared_ptr<RingBuffer>> buffers_;
+    std::vector<std::shared_ptr<RingBuffer>> id_buffers_;
 };
