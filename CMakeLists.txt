@@ -75,6 +75,9 @@ if(SENTUM_BUILD_BENCHMARKS)
 	add_executable(sentum_market_benchmark benchmarks/market_path_benchmark.cpp)
 	target_include_directories(sentum_market_benchmark PRIVATE ${CMAKE_SOURCE_DIR}/src)
 	target_link_libraries(sentum_market_benchmark PRIVATE Threads::Threads)
+
+	add_executable(sentum_parser_allocation_benchmark benchmarks/parser_allocation_benchmark.cpp)
+	target_include_directories(sentum_parser_allocation_benchmark PRIVATE ${CMAKE_SOURCE_DIR}/src)
 endif()
 
 if(NOT SENTUM_ENABLE_TSAN)

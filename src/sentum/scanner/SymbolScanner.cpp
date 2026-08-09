@@ -23,11 +23,14 @@ void SymbolScanner::set_top_changed_handler(TopChangedHandler handler) {
     top_changed_handler_ = std::move(handler);
 }
 
-void SymbolScanner::update_cache(const std::string& symbol, std::size_t lookback,
+void SymbolScanner::update_cache(const MarketEvent& event, std::size_t lookback,
                                  std::unordered_map<std::string, double>& cache) {
     double value = 0.0;
-    if (!store.cumulative_return(symbol, lookback, value)) return;
-    cache[symbol] = std::round(value * ROUND_FACTOR) / ROUND_FACTOR;
+    const bool available = event.symbol_id != sentum::market::kInvalidSymbolId
+        ? store.cumulative_return(event.symbol_id, lookback, value)
+        : store.cumulative_return(event.symbol, lookback, value);
+    if (!available) return;
+    cache[event.symbol] = std::round(value * ROUND_FACTOR) / ROUND_FACTOR;
 }
 
 void SymbolScanner::on_market_event(const MarketEvent& event) {
@@ -38,8 +41,8 @@ void SymbolScanner::on_market_event(const MarketEvent& event) {
     bool changed = false;
     {
         std::lock_guard<std::mutex> lock(cache_mutex_);
-        update_cache(event.symbol, 30, returns_30_);
-        update_cache(event.symbol, 60, returns_60_);
+        update_cache(event, 30, returns_30_);
+        update_cache(event, 60, returns_60_);
 
         for (const auto& [symbol, value] : returns_30_) {
             if (value <= min_return_threshold) continue;

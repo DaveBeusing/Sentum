@@ -7,6 +7,11 @@
 
 #include <sentum/api/model/Kline.hpp>
 
+struct KlineBatchItem {
+    const std::string* symbol = nullptr;
+    Kline kline;
+};
+
 class Database {
 public:
     explicit Database(const std::string& db_path);
@@ -17,6 +22,7 @@ public:
 
     bool save_klines(const std::string& symbol, const std::vector<Kline>& klines);
     bool save_kline_batch(const std::vector<std::pair<std::string, Kline>>& batch);
+    bool save_kline_batch(const std::vector<KlineBatchItem>& batch);
     std::vector<Kline> load_klines(const std::string& symbol, int limit = 100);
 
 private:

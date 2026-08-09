@@ -1,20 +1,30 @@
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <sentum/api/model/Kline.hpp>
 #include <sentum/market/IncrementalIndicators.hpp>
 #include <sentum/market/MarketDataStore.hpp>
 #include <sentum/market/MarketEventBus.hpp>
 
-int main() {
-    constexpr std::size_t symbols = 500;
-    constexpr std::size_t events_per_symbol = 2000;
-    constexpr std::size_t total_events = symbols * events_per_symbol;
+int main(int argc, char** argv) {
+    const std::size_t symbols = argc > 1 ? static_cast<std::size_t>(std::stoull(argv[1])) : 500;
+    const std::size_t events_per_symbol = argc > 2 ? static_cast<std::size_t>(std::stoull(argv[2])) : 2000;
+    const std::size_t total_events = symbols * events_per_symbol;
+    if (symbols == 0 || events_per_symbol == 0 || symbols > 100000) return 2;
 
     MarketDataStore store(600);
+    std::vector<std::string> names;
+    names.reserve(symbols);
+    for (std::size_t i = 0; i < symbols; ++i) {
+        names.push_back("sym" + std::to_string(i));
+        store.register_symbol(static_cast<sentum::market::SymbolId>(i + 1), names.back());
+    }
+
     std::uint64_t delivered = 0;
     const auto subscription = sentum::market::MarketEventBus::global().subscribe(
         [&delivered](const MarketEvent&) { ++delivered; });
@@ -25,7 +35,8 @@ int main() {
 
     const auto begin = std::chrono::steady_clock::now();
     for (std::size_t i = 0; i < total_events; ++i) {
-        const std::string symbol = "sym" + std::to_string(i % symbols);
+        const auto index = i % symbols;
+        const auto id = static_cast<sentum::market::SymbolId>(index + 1);
         const double price = 100.0 + static_cast<double>(i % 1000) * 0.001;
         Kline kline;
         kline.timestamp = static_cast<std::int64_t>(i) * 1000;
@@ -34,7 +45,7 @@ int main() {
         kline.low = price - 0.02;
         kline.close = price;
         kline.volume = 1.0;
-        store.upsert(symbol, kline);
+        store.upsert(id, kline);
 
         rolling_return.push(price);
         sma.push(price);
@@ -42,7 +53,8 @@ int main() {
 
         MarketEvent event;
         event.type = MarketEvent::Type::Candle;
-        event.symbol = symbol;
+        event.symbol_id = id;
+        event.symbol = names[index];
         event.price = price;
         event.close = price;
         event.closed = true;
@@ -54,9 +66,10 @@ int main() {
     const double seconds = std::chrono::duration<double>(elapsed).count();
     const double eps = static_cast<double>(total_events) / seconds;
     double return_60 = 0.0;
-    store.cumulative_return("sym0", 60, return_60);
+    store.cumulative_return(static_cast<sentum::market::SymbolId>(1), 60, return_60);
 
     std::cout << std::fixed << std::setprecision(2)
+              << "symbols=" << symbols << '\n'
               << "events=" << total_events << '\n'
               << "seconds=" << seconds << '\n'
               << "events_per_second=" << eps << '\n'

@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <sentum/core/ExecutionEngine.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
+#include <sentum/market/RuntimePerformanceMetrics.hpp>
 
 ExecutionEngine::ExecutionEngine()
     : running(false), collector_active(false), scanner_active(false), trader_active(false),
@@ -47,12 +48,10 @@ void ExecutionEngine::stop() {
     if (scanner_thread.joinable() && scanner_thread.get_id() != std::this_thread::get_id()) scanner_thread.join();
     if (ui_thread.joinable() && ui_thread.get_id() != std::this_thread::get_id()) ui_thread.join();
     scanner_active.store(false);
-    auto& dashboard = sentum::dashboard::DashboardState::global();
-    dashboard.set("collector_active", false);
-    dashboard.set("scanner_active", false);
-    dashboard.set("trader_active", false);
-    dashboard.set("market_data_connected", false);
-    dashboard.set("health", "stopped");
+    sentum::dashboard::DashboardState::global().merge({
+        {"collector_active", false}, {"scanner_active", false}, {"trader_active", false},
+        {"market_data_connected", false}, {"health", "stopped"}
+    });
     ui.reset();
 }
 
@@ -109,22 +108,20 @@ void ExecutionEngine::init() {
     ui->set_start_time(start_time);
     ui->set_db_path(db_path);
 
-    auto& dashboard = sentum::dashboard::DashboardState::global();
-    dashboard.set("mode", "paper");
-    dashboard.set("quote_asset", config.quoteAsset);
-    dashboard.set("balance", quote_balance);
-    dashboard.set("markets", markets.size());
-    dashboard.set("collector_active", true);
-    dashboard.set("scanner_active", true);
-    dashboard.set("trader_active", false);
-    dashboard.set("market_data_connected", true);
-    dashboard.set("user_stream_connected", false);
-    dashboard.set("reconciliation_complete", true);
-    dashboard.set("kill_switch_active", false);
+    sentum::dashboard::DashboardState::global().merge({
+        {"mode", "paper"}, {"quote_asset", config.quoteAsset}, {"balance", quote_balance},
+        {"markets", markets.size()}, {"collector_active", true}, {"scanner_active", true},
+        {"trader_active", false}, {"market_data_connected", true}, {"user_stream_connected", false},
+        {"reconciliation_complete", true}, {"kill_switch_active", false}
+    });
 }
 
 void ExecutionEngine::run_main_loop() {
+    using namespace std::chrono_literals;
     scanner_thread = std::thread(&ExecutionEngine::monitor_scanner, this);
+    auto last_db_probe = std::chrono::steady_clock::time_point{};
+    auto last_event_sample = std::chrono::steady_clock::now();
+    std::uint64_t previous_events = sentum::market::RuntimePerformanceMetrics::global().market_events.load(std::memory_order_relaxed);
     try {
         while (running.load()) {
             std::string top_asset = "-"; double top_ret = 0.0;
@@ -134,7 +131,15 @@ void ExecutionEngine::run_main_loop() {
                 for (const auto& item : top) scanner_json.push_back({{"symbol", item.symbol}, {"return", item.cum_return}});
                 if (!top.empty()) { top_asset = top[0].symbol; top_ret = top[0].cum_return * 100.0; }
             }
-            db_size = std::filesystem::exists(db_path) ? std::filesystem::file_size(db_path) : 0;
+
+            const auto now = std::chrono::steady_clock::now();
+            if (last_db_probe == std::chrono::steady_clock::time_point{} || now - last_db_probe >= 15s) {
+                std::error_code ec;
+                db_size = std::filesystem::exists(db_path, ec) ? std::filesystem::file_size(db_path, ec) : 0;
+                if (ec) db_size = 0;
+                last_db_probe = now;
+            }
+
             std::string symbol_snapshot;
             { std::lock_guard<std::mutex> lock(symbol_mutex); symbol_snapshot = current_symbol; }
             ui->set_top_performer(top_asset, top_ret);
@@ -145,14 +150,20 @@ void ExecutionEngine::run_main_loop() {
             ui->set_trader_active(trader_active.load());
             ui->set_current_symbol(symbol_snapshot);
 
-            auto& dashboard = sentum::dashboard::DashboardState::global();
-            dashboard.set("scanner", scanner_json);
-            dashboard.set("current_symbol", symbol_snapshot);
-            dashboard.set("db_size_bytes", db_size);
-            dashboard.set("collector_active", collector_active.load());
-            dashboard.set("scanner_active", scanner_active.load());
-            dashboard.set("trader_active", trader_active.load());
-            dashboard.set("drop_rate", collector ? collector->drop_rate() : 0.0);
+            auto& perf = sentum::market::RuntimePerformanceMetrics::global();
+            const auto current_events = perf.market_events.load(std::memory_order_relaxed);
+            const double sample_seconds = std::chrono::duration<double>(now - last_event_sample).count();
+            const double events_per_second = sample_seconds > 0.0 ? static_cast<double>(current_events - previous_events) / sample_seconds : 0.0;
+            previous_events = current_events;
+            last_event_sample = now;
+
+            nlohmann::json runtime = {
+                {"scanner", scanner_json}, {"current_symbol", symbol_snapshot}, {"db_size_bytes", db_size},
+                {"collector_active", collector_active.load()}, {"scanner_active", scanner_active.load()},
+                {"trader_active", trader_active.load()}, {"drop_rate", collector ? collector->drop_rate() : 0.0},
+                {"queue_depth", collector ? collector->queue_depth() : 0}, {"events_per_second", events_per_second},
+                {"performance", perf.snapshot()}
+            };
 
             if (trader) {
                 const auto position = trader->get_current_position();
@@ -160,30 +171,30 @@ void ExecutionEngine::run_main_loop() {
                 const int total_trades = trader->get_total_trades();
                 const double win_rate = trader->get_winrate_percent();
                 ui->set_trader_metrics(total_profit, trader->get_win_count(), trader->get_lose_count(), total_trades, win_rate, trader->get_average_profit());
-                dashboard.set("total_profit", total_profit);
-                dashboard.set("total_trades", total_trades);
-                dashboard.set("win_rate", win_rate);
+                runtime["total_profit"] = total_profit;
+                runtime["total_trades"] = total_trades;
+                runtime["win_rate"] = win_rate;
                 if (position.open) {
                     const double price = trader->get_latest_price();
                     const double profit = (price - position.entry_price) * position.quantity;
                     ui->set_active_trade(true, position.entry_price, position.quantity, position.stop_loss_price, position.take_profit_price, price, profit);
-                    dashboard.set("active_position", nlohmann::json{{"symbol", position.symbol},{"entry_price",position.entry_price},{"quantity",position.quantity},{"current_price",price},{"unrealized_profit",profit},{"stop_loss",position.stop_loss_price},{"take_profit",position.take_profit_price}});
+                    runtime["active_position"] = {{"symbol", position.symbol},{"entry_price",position.entry_price},{"quantity",position.quantity},{"current_price",price},{"unrealized_profit",profit},{"stop_loss",position.stop_loss_price},{"take_profit",position.take_profit_price}};
                 } else {
                     ui->set_active_trade(false, 0, 0, 0, 0, 0, 0);
-                    dashboard.set("active_position", nullptr);
+                    runtime["active_position"] = nullptr;
                 }
             } else {
-                dashboard.set("total_profit", 0.0);
-                dashboard.set("total_trades", 0);
-                dashboard.set("win_rate", 0.0);
-                dashboard.set("active_position", nullptr);
+                runtime["total_profit"] = 0.0;
+                runtime["total_trades"] = 0;
+                runtime["win_rate"] = 0.0;
+                runtime["active_position"] = nullptr;
             }
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            sentum::dashboard::DashboardState::global().merge(runtime);
+            std::this_thread::sleep_for(1s);
         }
     } catch (const std::exception& e) {
         logger.log("[ERROR] ExecutionEngine::run_main_loop: " + std::string(e.what()));
-        sentum::dashboard::DashboardState::global().set("health", "error");
-        sentum::dashboard::DashboardState::global().set("last_error", e.what());
+        sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", e.what()}});
         running.store(false); scanner_signal_cv.notify_all();
     }
 }
