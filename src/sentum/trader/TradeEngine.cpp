@@ -1,6 +1,7 @@
 #include <chrono>
 #include <stdexcept>
 
+#include <sentum/market/RuntimePerformanceMetrics.hpp>
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/trader/strategy/MomentumStrategy.hpp>
 
@@ -96,6 +97,8 @@ sentum::order::Snapshot TradeEngine::execute(sentum::order::Side side, double qu
 }
 
 TradeAction TradeEngine::process_event(const MarketEvent& event) {
+    sentum::market::ScopedLatency decision_latency(
+        sentum::market::RuntimePerformanceMetrics::global().strategy_decision_latency);
     if (event.symbol != symbol || event.price <= 0.0) return TradeAction::NONE;
     const auto age = clock->now() - event.timestamp;
     if (age > std::chrono::milliseconds(risk.max_data_age_ms)) {
@@ -107,6 +110,8 @@ TradeAction TradeEngine::process_event(const MarketEvent& event) {
 }
 
 TradeAction TradeEngine::evaluate(double price) {
+    sentum::market::ScopedLatency decision_latency(
+        sentum::market::RuntimePerformanceMetrics::global().strategy_decision_latency);
     return evaluate_at(price, clock->now(), api ? "binance-websocket" : "replay", nullptr);
 }
 
