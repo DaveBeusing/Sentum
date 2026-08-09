@@ -22,6 +22,14 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSENTUM_BUILD_BENCHMARKS=ON
       - name: Build release
         run: cmake --build build --parallel
+      - name: Smoke test unified CLI
+        run: |
+          ./client help | grep 'Sentum unified CLI'
+          ./client --help | grep 'client paper'
+          ./client version | grep 'Sentum '
+          ./client --version | grep 'Sentum '
+          if ./client unknown-command >/tmp/cli-invalid.log 2>&1; then exit 1; fi
+          grep 'unknown command' /tmp/cli-invalid.log
       - name: Run Phase-16 performance benchmarks
         run: |
           ./build/sentum_market_benchmark 500 2000
@@ -54,7 +62,7 @@ jobs:
                   }
               }, f)
           PY
-          ./client --research /tmp/research.json
+          ./client research /tmp/research.json
           cp log/research_trials.csv /tmp/research_trials_first.csv
           python3 - <<'PY'
           import csv, json
@@ -73,19 +81,19 @@ jobs:
       - name: Smoke test dashboard
         shell: bash
         run: |
-          ./client --dashboard > /tmp/sentum-dashboard.log 2>&1 &
+          ./client dashboard --dashboard-port 18080 > /tmp/sentum-dashboard.log 2>&1 &
           pid=$!
           trap 'kill -TERM "$pid" 2>/dev/null || true' EXIT
           for i in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:8080/api/health >/tmp/health.json; then
+            if curl --fail --silent http://127.0.0.1:18080/api/health >/tmp/health.json; then
               break
             fi
             sleep 0.2
           done
-          curl --fail --silent http://127.0.0.1:8080/api/health | grep '"read_only":true'
-          curl --fail --silent http://127.0.0.1:8080/api/status | grep '"dashboard_port":8080'
-          curl --fail --silent http://127.0.0.1:8080/api/research | grep '"objective":"sharpe"'
-          curl --fail --silent http://127.0.0.1:8080/ | grep 'SENTUM'
+          curl --fail --silent http://127.0.0.1:18080/api/health | grep '"read_only":true'
+          curl --fail --silent http://127.0.0.1:18080/api/status | grep '"dashboard_port":18080'
+          curl --fail --silent http://127.0.0.1:18080/api/research | grep '"objective":"sharpe"'
+          curl --fail --silent http://127.0.0.1:18080/ | grep 'SENTUM'
           kill -TERM "$pid"
           wait "$pid"
           trap - EXIT

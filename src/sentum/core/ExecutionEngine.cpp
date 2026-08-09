@@ -26,33 +26,24 @@ bool ExecutionEngine::is_running() const { return running.load(); }
 void ExecutionEngine::start() {
     if (running.load()) return;
     init();
-    ui->on_exit = [this]() { running.store(false); scanner_signal_cv.notify_all(); };
-    ui->on_stop_trader = [this]() { stop_trader(); };
-    ui->on_restart_collector = [this]() {
-        if (collector) { collector->stop(); collector->start(); collector_active.store(true); ui->set_collector_active(true); }
-    };
     running.store(true);
     sentum::dashboard::DashboardState::global().set("health", "healthy");
-    ui_thread = std::thread([this] { ui->start(); });
     main_thread = std::thread(&ExecutionEngine::run_main_loop, this);
 }
 
 void ExecutionEngine::stop() {
     const bool was_running = running.exchange(false);
     scanner_signal_cv.notify_all();
-    if (!was_running && !main_thread.joinable() && !ui_thread.joinable() && !scanner_thread.joinable() && !trader_thread.joinable()) return;
+    if (!was_running && !main_thread.joinable() && !scanner_thread.joinable() && !trader_thread.joinable()) return;
     stop_trader();
     if (collector) { collector->stop(); collector_active.store(false); }
-    if (ui) ui->stop();
     if (main_thread.joinable() && main_thread.get_id() != std::this_thread::get_id()) main_thread.join();
     if (scanner_thread.joinable() && scanner_thread.get_id() != std::this_thread::get_id()) scanner_thread.join();
-    if (ui_thread.joinable() && ui_thread.get_id() != std::this_thread::get_id()) ui_thread.join();
     scanner_active.store(false);
     sentum::dashboard::DashboardState::global().merge({
         {"collector_active", false}, {"scanner_active", false}, {"trader_active", false},
         {"market_data_connected", false}, {"health", "stopped"}
     });
-    ui.reset();
 }
 
 void ExecutionEngine::init_config() {
@@ -87,7 +78,6 @@ void ExecutionEngine::init_components() {
         { std::lock_guard<std::mutex> lock(scanner_signal_mutex); pending_scanner_symbol = top.symbol; }
         scanner_signal_cv.notify_one();
     });
-    ui = std::make_unique<UiConsole>();
     collector->start();
     collector_active.store(true);
     scanner_active.store(true);
@@ -98,21 +88,13 @@ void ExecutionEngine::init() {
     init_config();
     init_components();
     start_time = std::chrono::system_clock::now();
-    ui->set_mode("PAPER TRADING");
-    ui->set_collector_active(collector_active.load());
-    ui->set_scanner_active(scanner_active.load());
-    ui->set_trader_active(trader_active.load());
-    ui->set_balance(quote_balance);
-    ui->set_quote_asset(config.quoteAsset);
-    ui->set_markets(markets.size());
-    ui->set_start_time(start_time);
-    ui->set_db_path(db_path);
 
     sentum::dashboard::DashboardState::global().merge({
         {"mode", "paper"}, {"quote_asset", config.quoteAsset}, {"balance", quote_balance},
         {"markets", markets.size()}, {"collector_active", true}, {"scanner_active", true},
         {"trader_active", false}, {"market_data_connected", true}, {"user_stream_connected", false},
-        {"reconciliation_complete", true}, {"kill_switch_active", false}
+        {"reconciliation_complete", true}, {"kill_switch_active", false}, {"db_path", db_path},
+        {"started_at_ms", std::chrono::duration_cast<std::chrono::milliseconds>(start_time.time_since_epoch()).count()}
     });
 }
 
@@ -142,13 +124,6 @@ void ExecutionEngine::run_main_loop() {
 
             std::string symbol_snapshot;
             { std::lock_guard<std::mutex> lock(symbol_mutex); symbol_snapshot = current_symbol; }
-            ui->set_top_performer(top_asset, top_ret);
-            ui->set_countdown(0);
-            ui->set_db_size(db_size);
-            ui->set_collector_active(collector_active.load());
-            ui->set_scanner_active(scanner_active.load());
-            ui->set_trader_active(trader_active.load());
-            ui->set_current_symbol(symbol_snapshot);
 
             auto& perf = sentum::market::RuntimePerformanceMetrics::global();
             const auto current_events = perf.market_events.load(std::memory_order_relaxed);
@@ -158,7 +133,8 @@ void ExecutionEngine::run_main_loop() {
             last_event_sample = now;
 
             nlohmann::json runtime = {
-                {"scanner", scanner_json}, {"current_symbol", symbol_snapshot}, {"db_size_bytes", db_size},
+                {"scanner", scanner_json}, {"top_asset", top_asset}, {"top_return_percent", top_ret},
+                {"current_symbol", symbol_snapshot}, {"db_size_bytes", db_size},
                 {"collector_active", collector_active.load()}, {"scanner_active", scanner_active.load()},
                 {"trader_active", trader_active.load()}, {"drop_rate", collector ? collector->drop_rate() : 0.0},
                 {"queue_depth", collector ? collector->queue_depth() : 0}, {"events_per_second", events_per_second},
@@ -170,23 +146,24 @@ void ExecutionEngine::run_main_loop() {
                 const double total_profit = trader->get_total_profit();
                 const int total_trades = trader->get_total_trades();
                 const double win_rate = trader->get_winrate_percent();
-                ui->set_trader_metrics(total_profit, trader->get_win_count(), trader->get_lose_count(), total_trades, win_rate, trader->get_average_profit());
                 runtime["total_profit"] = total_profit;
                 runtime["total_trades"] = total_trades;
                 runtime["win_rate"] = win_rate;
+                runtime["wins"] = trader->get_win_count();
+                runtime["losses"] = trader->get_lose_count();
+                runtime["average_profit"] = trader->get_average_profit();
                 if (position.open) {
                     const double price = trader->get_latest_price();
                     const double profit = (price - position.entry_price) * position.quantity;
-                    ui->set_active_trade(true, position.entry_price, position.quantity, position.stop_loss_price, position.take_profit_price, price, profit);
                     runtime["active_position"] = {{"symbol", position.symbol},{"entry_price",position.entry_price},{"quantity",position.quantity},{"current_price",price},{"unrealized_profit",profit},{"stop_loss",position.stop_loss_price},{"take_profit",position.take_profit_price}};
-                } else {
-                    ui->set_active_trade(false, 0, 0, 0, 0, 0, 0);
-                    runtime["active_position"] = nullptr;
-                }
+                } else runtime["active_position"] = nullptr;
             } else {
                 runtime["total_profit"] = 0.0;
                 runtime["total_trades"] = 0;
                 runtime["win_rate"] = 0.0;
+                runtime["wins"] = 0;
+                runtime["losses"] = 0;
+                runtime["average_profit"] = 0.0;
                 runtime["active_position"] = nullptr;
             }
             sentum::dashboard::DashboardState::global().merge(runtime);

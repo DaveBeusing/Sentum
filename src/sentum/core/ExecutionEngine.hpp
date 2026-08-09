@@ -18,7 +18,6 @@
 #include <sentum/market/MarketDataStore.hpp>
 #include <sentum/scanner/SymbolScanner.hpp>
 #include <sentum/trader/TradeEngine.hpp>
-#include <sentum/ui/UiConsole.hpp>
 #include <sentum/utils/AsyncLogger.hpp>
 #include <sentum/utils/ConfigLoader.hpp>
 #include <sentum/utils/Database.hpp>
@@ -33,7 +32,7 @@ public:
     bool is_running() const;
 
 private:
-    std::thread main_thread, ui_thread, scanner_thread, trader_thread;
+    std::thread main_thread, scanner_thread, trader_thread;
     std::atomic<bool> running, collector_active, scanner_active, trader_active;
     std::mutex symbol_mutex;
     std::mutex scanner_signal_mutex;
@@ -46,7 +45,6 @@ private:
     std::unique_ptr<Collector> collector;
     std::unique_ptr<SymbolScanner> scanner;
     std::unique_ptr<TradeEngine> trader;
-    std::unique_ptr<UiConsole> ui;
 
     std::string current_symbol;
     std::vector<MarketInfo> markets;
