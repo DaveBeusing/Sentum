@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
 namespace sentum::market {
