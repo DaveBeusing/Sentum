@@ -4,7 +4,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <string>
 
 #include <nlohmann/json.hpp>
 
@@ -49,6 +48,7 @@ public:
     static RuntimePerformanceMetrics& global(){static RuntimePerformanceMetrics instance;return instance;}
     LatencyHistogram parse_latency;
     LatencyHistogram event_dispatch_latency;
+    LatencyHistogram strategy_decision_latency;
     LatencyHistogram sqlite_batch_latency;
     std::atomic<std::uint64_t> market_events{0};
     std::atomic<std::uint64_t> queue_high_water{0};
@@ -62,6 +62,7 @@ public:
                 {"queue_high_water",queue_high_water.load(std::memory_order_relaxed)},
                 {"parse_latency",parse_latency.snapshot()},
                 {"event_dispatch_latency",event_dispatch_latency.snapshot()},
+                {"strategy_decision_latency",strategy_decision_latency.snapshot()},
                 {"sqlite_batch_latency",sqlite_batch_latency.snapshot()}};
     }
 };
