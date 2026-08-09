@@ -28,7 +28,7 @@ public:
 
 private:
     void on_market_event(const MarketEvent& event);
-    void update_cache(const std::string& symbol, std::size_t lookback,
+    void update_cache(const MarketEvent& event, std::size_t lookback,
                       std::unordered_map<std::string, double>& cache);
 
     MarketDataStore& store;
