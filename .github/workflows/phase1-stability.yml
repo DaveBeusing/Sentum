@@ -22,8 +22,12 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSENTUM_BUILD_BENCHMARKS=ON
       - name: Build release
         run: cmake --build build --parallel
-      - name: Run market path benchmark
-        run: ./build/sentum_market_benchmark
+      - name: Run Phase-16 performance benchmarks
+        run: |
+          ./build/sentum_market_benchmark 500 2000
+          ./build/sentum_market_benchmark 1000 1000
+          ./build/sentum_market_benchmark 2000 500
+          ./build/sentum_parser_allocation_benchmark
       - name: Smoke test quant research
         shell: bash
         run: |
@@ -81,7 +85,7 @@ jobs:
           curl --fail --silent http://127.0.0.1:8080/api/health | grep '"read_only":true'
           curl --fail --silent http://127.0.0.1:8080/api/status | grep '"dashboard_port":8080'
           curl --fail --silent http://127.0.0.1:8080/api/research | grep '"objective":"sharpe"'
-          curl --fail --silent http://127.0.0.1:8080/ | grep 'Sentum Dashboard'
+          curl --fail --silent http://127.0.0.1:8080/ | grep 'SENTUM'
           kill -TERM "$pid"
           wait "$pid"
           trap - EXIT
