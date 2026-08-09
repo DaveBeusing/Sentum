@@ -36,7 +36,9 @@ void Collector::initialize_symbols() {
     symbol_by_hash.reserve(markets.size() * 2);
     for (std::size_t i = 0; i < markets.size(); ++i) {
         canonical_symbols.push_back(helper::to_lowercase(markets[i].symbol));
+        const auto id = static_cast<sentum::market::SymbolId>(i + 1);
         symbol_by_hash.emplace(sentum::market::symbol_hash(markets[i].symbol), i);
+        store_ref.register_symbol(id, canonical_symbols.back());
     }
 }
 
@@ -165,7 +167,7 @@ void Collector::run() {
             Kline entry;
             entry.timestamp = parsed.timestamp;
             entry.open = parsed.open; entry.high = parsed.high; entry.low = parsed.low; entry.close = parsed.close; entry.volume = parsed.volume;
-            store_ref.upsert(*symbol.canonical, entry);
+            store_ref.upsert(symbol.id, entry);
             auto& perf = sentum::market::RuntimePerformanceMetrics::global();
             perf.market_events.fetch_add(1, std::memory_order_relaxed);
 
