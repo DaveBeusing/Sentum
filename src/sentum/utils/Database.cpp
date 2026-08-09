@@ -77,6 +77,18 @@ bool Database::save_kline_batch(const std::vector<std::pair<std::string, Kline>>
     return sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr) == SQLITE_OK;
 }
 
+bool Database::save_kline_batch(const std::vector<KlineBatchItem>& batch) {
+    if (batch.empty()) return true;
+    if (sqlite3_exec(db, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr) != SQLITE_OK) return false;
+    for (const auto& item : batch) {
+        if (!item.symbol || !bind_and_step(*item.symbol, item.kline)) {
+            sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
+            return false;
+        }
+    }
+    return sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr) == SQLITE_OK;
+}
+
 bool Database::save_klines(const std::string& symbol, const std::vector<Kline>& klines) {
     std::vector<std::pair<std::string, Kline>> batch;
     batch.reserve(klines.size());
