@@ -3,9 +3,12 @@
 #include <chrono>
 #include <string>
 
+#include <sentum/market/SymbolId.hpp>
+
 struct MarketEvent {
     enum class Type { Trade, Candle };
     Type type = Type::Trade;
+    sentum::market::SymbolId symbol_id = sentum::market::kInvalidSymbolId;
     std::string symbol;
     std::chrono::system_clock::time_point timestamp{};
     double price = 0.0;
