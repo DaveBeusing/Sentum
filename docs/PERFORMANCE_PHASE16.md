@@ -43,6 +43,7 @@ SQLite remains on its dedicated writer thread and receives batches of up to 256 
 
 - parser latency
 - market-event dispatch latency
+- market-to-strategy/risk/execution decision latency
 - SQLite batch latency
 
 Snapshots expose:
@@ -104,7 +105,7 @@ Acceptance is zero heap allocations during one million calls to `FastBinanceKlin
 - Collector -> SQLite handoff uses a bounded fixed SPSC ring
 - SQLite remains outside the market decision path
 - `SymbolId` is available through Collector, MarketEvent and MarketDataStore
-- p50/p95/p99 runtime latency is observable
+- p50/p95/p99 parser, dispatch, market-to-decision and SQLite latency is observable
 - queue depth/high-water/drop rate are observable
 - dashboard runtime updates are batched
 - filesystem size polling is no longer performed each second
