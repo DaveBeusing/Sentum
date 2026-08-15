@@ -17,7 +17,13 @@ Copy and edit the example configuration:
 
 ```bash
 cp config/research.example.json config/research.json
-./client --research config/research.json
+./sentum research config/research.json
+```
+
+The legacy flag form remains supported:
+
+```bash
+./sentum --research config/research.json
 ```
 
 Input data uses the normal replay CSV format:
