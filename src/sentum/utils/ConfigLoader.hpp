@@ -15,19 +15,17 @@ struct Config {
     double minCumulativeReturn = 0.0005;
     bool paperTrading = true;
 
-    // Runtime strategy configuration. Uses the same JSON shape as StrategyFactory/research.
     nlohmann::json strategy = {
         {"type", "momentum"},
         {"parameters", {{"lookback", 20}, {"entry_threshold", 0.001}}}
     };
 
-    // Paper runtime/account configuration.
     double paperInitialBalance = 10000.0;
     std::string paperStatePath = "log/paper_account.json";
     bool paperAutoSymbol = true;
     std::string paperSymbol;
+    std::string paperModelDefinition; // optional Phase-15 model JSON; registry stage must be paper
 
-    // Dashboard configuration.
     std::string dashboardHost = "127.0.0.1";
     std::uint16_t dashboardPort = 8080;
 };
