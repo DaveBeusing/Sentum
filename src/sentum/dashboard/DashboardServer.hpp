@@ -10,7 +10,9 @@ namespace sentum::dashboard {
 
 class DashboardServer {
 public:
-    explicit DashboardServer(std::string host = "127.0.0.1", std::uint16_t port = 8080);
+    DashboardServer();
+    explicit DashboardServer(std::uint16_t port);
+    DashboardServer(std::string host, std::uint16_t port);
     ~DashboardServer();
 
     void start();
