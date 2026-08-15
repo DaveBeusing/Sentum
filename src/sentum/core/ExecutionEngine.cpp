@@ -58,7 +58,6 @@ void ExecutionEngine::init_config() {
     try { secrets = load_secrets("config/secrets.json"); }
     catch (const std::exception& e) { logger.log("[ERROR] Failed to load config/secrets.json: " + std::string(e.what())); throw; }
     if (!config.paperTrading) throw std::runtime_error("Live trading is disabled. Set paperTrading=true in config/config.json");
-    // Validate the configured strategy up front.
     (void)sentum::strategy::StrategyFactory::create(config.strategy);
     sentum::runtime::RuntimeControl::global().configure(config.strategy, config.paperAutoSymbol, config.paperSymbol);
     logger.log("[INFO] Running in PAPER TRADING mode");
@@ -103,6 +102,7 @@ void ExecutionEngine::init() {
         {"market_data_connected", true}, {"user_stream_connected", false}, {"reconciliation_complete", true}, {"kill_switch_active", false},
         {"db_path", db_path}, {"strategy_config", strategy_json}, {"strategy_name", strategy_json.value("type", std::string("momentum"))},
         {"symbol_mode", config.paperAutoSymbol ? "auto" : "manual"}, {"manual_symbol", config.paperSymbol}, {"entries_paused", false},
+        {"paper_model_id", config.paperModelId}, {"paper_risk_config_path", config.paperRiskConfigPath},
         {"started_at_ms", std::chrono::duration_cast<std::chrono::milliseconds>(start_time.time_since_epoch()).count()}
     });
 }
@@ -126,7 +126,6 @@ void ExecutionEngine::apply_runtime_control() {
         {"symbol_mode", auto_symbol ? "auto" : "manual"}, {"manual_symbol", manual_symbol}, {"control_pending", nullptr}
     });
 
-    // Recreate a running trader so the new strategy is applied atomically between positions.
     std::string restart_symbol;
     { std::lock_guard<std::mutex> lock(symbol_mutex); restart_symbol = current_symbol; }
     if (!auto_symbol && !manual_symbol.empty()) restart_symbol = manual_symbol;
@@ -239,13 +238,24 @@ void ExecutionEngine::monitor_scanner() {
 
 void ExecutionEngine::start_trader_for(const std::string& symbol) {
     if (trader_thread.joinable()) trader_thread.join();
-    auto risk = load_risk_config("config/risk.json");
+    auto risk = load_risk_config(config.paperRiskConfigPath);
     if (paper_account) risk.max_total_capital = paper_account->equity();
     auto strategy = sentum::strategy::StrategyFactory::create(sentum::runtime::RuntimeControl::global().strategy());
     trader = std::make_unique<TradeEngine>(symbol, *binance, risk, std::move(strategy), "log/klines.sqlite3");
     accounted_profit_ = 0.0;
     trader_active.store(true);
-    sentum::dashboard::DashboardState::global().merge({{"current_symbol", symbol}, {"trader_active", true}});
+    sentum::dashboard::DashboardState::global().merge({
+        {"current_symbol", symbol}, {"trader_active", true},
+        {"risk_config", {
+            {"max_total_capital", risk.max_total_capital}, {"risk_per_trade", risk.risk_per_trade},
+            {"stop_loss_percent", risk.stop_loss_percent}, {"take_profit_percent", risk.take_profit_percent},
+            {"trailing_sl_enabled", risk.trailing_sl_enabled}, {"trailing_sl_percent", risk.trailing_sl_percent},
+            {"buy_fee_percent", risk.buy_fee_percent}, {"sell_fee_percent", risk.sell_fee_percent},
+            {"slippage_percent", risk.slippage_percent}, {"spread_percent", risk.spread_percent},
+            {"cooldown_seconds", risk.cooldown_seconds}, {"max_holding_seconds", risk.max_holding_seconds},
+            {"max_data_age_ms", risk.max_data_age_ms}
+        }}
+    });
     trader_thread = std::thread([this] {
         try { trader->run(); }
         catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::start_trader_for: " + std::string(e.what())); }
