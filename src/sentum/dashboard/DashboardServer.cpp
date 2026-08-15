@@ -5,6 +5,7 @@
 #include <charconv>
 #include <fstream>
 #include <string>
+#include <utility>
 
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
@@ -31,15 +32,17 @@ http::response<http::string_body> json_response(const nlohmann::json& value,unsi
 http::response<http::string_body> text_response(http::status status,std::string body,const char* content_type,unsigned version){http::response<http::string_body> response{status,version};response.set(http::field::content_type,content_type);response.set(http::field::cache_control,"no-store");response.body()=std::move(body);response.prepare_payload();return response;}
 }
 
-DashboardServer::DashboardServer(std::uint16_t port):impl_(std::make_unique<Impl>()),port_(port){}
+DashboardServer::DashboardServer():DashboardServer("127.0.0.1",8080){}
+DashboardServer::DashboardServer(std::uint16_t port):DashboardServer("127.0.0.1",port){}
+DashboardServer::DashboardServer(std::string host,std::uint16_t port):impl_(std::make_unique<Impl>()),host_(std::move(host)),port_(port){}
 DashboardServer::~DashboardServer(){stop();}
-void DashboardServer::start(){if(running_.exchange(true,std::memory_order_acq_rel))return;try{tcp::endpoint endpoint{asio::ip::make_address("127.0.0.1"),port_};impl_->acceptor=std::make_unique<tcp::acceptor>(impl_->io);impl_->acceptor->open(endpoint.protocol());impl_->acceptor->set_option(asio::socket_base::reuse_address(true));impl_->acceptor->bind(endpoint);impl_->acceptor->listen(asio::socket_base::max_listen_connections);thread_=std::thread(&DashboardServer::run,this);}catch(...){running_.store(false,std::memory_order_release);impl_->acceptor.reset();throw;}}
+void DashboardServer::start(){if(running_.exchange(true,std::memory_order_acq_rel))return;try{tcp::endpoint endpoint{asio::ip::make_address(host_),port_};impl_->acceptor=std::make_unique<tcp::acceptor>(impl_->io);impl_->acceptor->open(endpoint.protocol());impl_->acceptor->set_option(asio::socket_base::reuse_address(true));impl_->acceptor->bind(endpoint);impl_->acceptor->listen(asio::socket_base::max_listen_connections);thread_=std::thread(&DashboardServer::run,this);}catch(...){running_.store(false,std::memory_order_release);impl_->acceptor.reset();throw;}}
 void DashboardServer::stop() noexcept{if(!running_.exchange(false,std::memory_order_acq_rel))return;if(impl_->acceptor){boost::system::error_code ec;impl_->acceptor->cancel(ec);impl_->acceptor->close(ec);}impl_->io.stop();if(thread_.joinable()&&thread_.get_id()!=std::this_thread::get_id())thread_.join();}
 
 void DashboardServer::run(){while(running_.load(std::memory_order_acquire)){boost::system::error_code ec;tcp::socket socket{impl_->io};impl_->acceptor->accept(socket,ec);if(ec){if(!running_.load(std::memory_order_acquire))break;continue;}beast::flat_buffer buffer;http::request<http::string_body> request;http::read(socket,buffer,request,ec);if(ec)continue;http::response<http::string_body> response;const auto target=request.target();try{
     if(request.method()!=http::verb::get)response=text_response(http::status::method_not_allowed,"read-only dashboard","text/plain",request.version());
     else if(target=="/"||target=="/index.html")response=text_response(http::status::ok,kDashboardHtml,"text/html; charset=utf-8",request.version());
-    else if(starts_with(target,"/api/status")){auto state=runtime_status_file();const auto live=DashboardState::global().snapshot();for(auto it=live.begin();it!=live.end();++it)if(!it.value().is_null()&&!(it.key()=="mode"&&it.value()=="idle"))state[it.key()]=it.value();state["dashboard_port"]=port_;response=json_response(state,request.version());}
+    else if(starts_with(target,"/api/status")){auto state=runtime_status_file();const auto live=DashboardState::global().snapshot();for(auto it=live.begin();it!=live.end();++it)if(!it.value().is_null()&&!(it.key()=="mode"&&it.value()=="idle"))state[it.key()]=it.value();state["dashboard_host"]=host_;state["dashboard_port"]=port_;response=json_response(state,request.version());}
     else if(starts_with(target,"/api/trades"))response=json_response(impl_->repository.recent_trades(query_limit(target,100,1000)),request.version());
     else if(starts_with(target,"/api/orders"))response=json_response(impl_->repository.recent_orders(query_limit(target,100,1000)),request.version());
     else if(starts_with(target,"/api/equity"))response=json_response(impl_->repository.equity_curve(query_limit(target,500,5000)),request.version());
@@ -50,7 +53,7 @@ void DashboardServer::run(){while(running_.load(std::memory_order_acquire)){boos
     else if(starts_with(target,"/api/experiments"))response=json_response(impl_->repository.experiment_runs(query_limit(target,100,1000)),request.version());
     else if(starts_with(target,"/api/experiment/trials")){const auto run=query_value(target,"run_id");response=run.empty()?json_response(nlohmann::json::array(),request.version()):json_response(impl_->repository.experiment_trials(run,query_limit(target,5000,10000)),request.version());}
     else if(starts_with(target,"/api/experiment")){const auto run=query_value(target,"run_id");response=run.empty()?json_response(nlohmann::json::object(),request.version()):json_response(impl_->repository.experiment_detail(run),request.version());}
-    else if(target=="/api/health")response=json_response({{"status","ok"},{"read_only",true},{"bind","127.0.0.1"},{"research_dashboard",true},{"model_promotion_dashboard",true}},request.version());
+    else if(target=="/api/health")response=json_response({{"status","ok"},{"read_only",true},{"bind",host_},{"research_dashboard",true},{"model_promotion_dashboard",true}},request.version());
     else response=text_response(http::status::not_found,"not found","text/plain",request.version());
 }catch(const std::exception& error){response=json_response({{"error",error.what()}},request.version());response.result(http::status::internal_server_error);}response.keep_alive(false);http::write(socket,response,ec);socket.shutdown(tcp::socket::shutdown_both,ec);}}
 
