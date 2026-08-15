@@ -24,7 +24,9 @@ struct Config {
     std::string paperStatePath = "log/paper_account.json";
     bool paperAutoSymbol = true;
     std::string paperSymbol;
-    std::string paperModelDefinition; // optional Phase-15 model JSON; registry stage must be paper
+    std::string paperModelDefinition;
+    std::string paperRiskConfigPath = "config/risk.json";
+    std::string paperModelId;
 
     std::string dashboardHost = "127.0.0.1";
     std::uint16_t dashboardPort = 8080;
