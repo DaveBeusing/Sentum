@@ -5,6 +5,7 @@
 #include <charconv>
 #include <fstream>
 #include <string>
+#include <utility>
 
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
@@ -31,6 +32,8 @@ http::response<http::string_body> json_response(const nlohmann::json& value,unsi
 http::response<http::string_body> text_response(http::status status,std::string body,const char* content_type,unsigned version){http::response<http::string_body> response{status,version};response.set(http::field::content_type,content_type);response.set(http::field::cache_control,"no-store");response.body()=std::move(body);response.prepare_payload();return response;}
 }
 
+DashboardServer::DashboardServer():DashboardServer("127.0.0.1",8080){}
+DashboardServer::DashboardServer(std::uint16_t port):DashboardServer("127.0.0.1",port){}
 DashboardServer::DashboardServer(std::string host,std::uint16_t port):impl_(std::make_unique<Impl>()),host_(std::move(host)),port_(port){}
 DashboardServer::~DashboardServer(){stop();}
 void DashboardServer::start(){if(running_.exchange(true,std::memory_order_acq_rel))return;try{tcp::endpoint endpoint{asio::ip::make_address(host_),port_};impl_->acceptor=std::make_unique<tcp::acceptor>(impl_->io);impl_->acceptor->open(endpoint.protocol());impl_->acceptor->set_option(asio::socket_base::reuse_address(true));impl_->acceptor->bind(endpoint);impl_->acceptor->listen(asio::socket_base::max_listen_connections);thread_=std::thread(&DashboardServer::run,this);}catch(...){running_.store(false,std::memory_order_release);impl_->acceptor.reset();throw;}}
