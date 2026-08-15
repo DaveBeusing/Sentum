@@ -59,11 +59,18 @@ private:
     void save_locked() const {
         const std::filesystem::path path(path_);
         if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
-        const auto tmp = path_.string() + ".tmp";
+
+        auto tmp = path;
+        tmp += ".tmp";
+
         std::ofstream(tmp, std::ios::trunc) << snapshot_unlocked().dump(2) << '\n';
         std::error_code ec;
-        std::filesystem::rename(tmp, path_, ec);
-        if (ec) { std::filesystem::remove(path_, ec); std::filesystem::rename(tmp, path_, ec); }
+        std::filesystem::rename(tmp, path, ec);
+        if (ec) {
+            std::filesystem::remove(path, ec);
+            ec.clear();
+            std::filesystem::rename(tmp, path, ec);
+        }
     }
 
     nlohmann::json snapshot_unlocked() const {
