@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <string>
 #include <thread>
 
 namespace sentum::ui {
@@ -20,10 +21,16 @@ public:
 private:
     void loop();
     void draw();
+    void poll_input();
+    void handle_key(char key);
+    void cycle_strategy();
 
     std::chrono::milliseconds refresh_;
     std::atomic<bool> running_{false};
     std::thread thread_;
+    bool editing_symbol_ = false;
+    std::string symbol_buffer_;
+    std::string notice_;
 };
 
 bool stdout_is_terminal() noexcept;
