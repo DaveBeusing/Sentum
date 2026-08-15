@@ -2,36 +2,38 @@
 
 Phase 17 replaces the legacy stateful `UiConsole` with one command-line entry point and one terminal view backed by the same `DashboardState` used by the web dashboard.
 
+The unified runtime executable is named `sentum`.
+
 ## Unified commands
 
 Preferred syntax:
 
 ```bash
-./client paper
-./client testnet BTCUSDT
-./client replay data/events.csv BTCUSDT
-./client research config/research.example.json
-./client dashboard
-./client version
-./client help
+./sentum paper
+./sentum testnet BTCUSDT
+./sentum replay data/events.csv BTCUSDT
+./sentum research config/research.example.json
+./sentum dashboard
+./sentum version
+./sentum help
 ```
 
 Existing flag-style invocations remain compatible:
 
 ```bash
-./client --paper
-./client --testnet BTCUSDT
-./client --replay data/events.csv BTCUSDT
-./client --research config/research.example.json
-./client --dashboard
+./sentum --paper
+./sentum --testnet BTCUSDT
+./sentum --replay data/events.csv BTCUSDT
+./sentum --research config/research.example.json
+./sentum --dashboard
 ```
 
 Runtime options can be placed after the command:
 
 ```bash
-./client paper --no-tui
-./client testnet BTCUSDT --dashboard-port 18080
-./client dashboard --dashboard-port 18080
+./sentum paper --no-tui
+./sentum testnet BTCUSDT --dashboard-port 18080
+./sentum dashboard --dashboard-port 18080
 ```
 
 `SENTUM_DASHBOARD_PORT` remains supported when no explicit `--dashboard-port` is supplied.
@@ -80,6 +82,7 @@ Collector / Scanner / Trader / Runtime metrics
 
 CI verifies:
 
+- the `sentum` executable is built and runnable
 - new `help` and `version` commands
 - legacy `--help` and `--version` forms
 - invalid commands fail with a useful error
