@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
+#include <sentum/research/ModelPromotion.hpp>
 #include <sentum/utils/ConfigLoader.hpp>
 
 Config load_config(const std::string& path) {
@@ -38,7 +39,20 @@ Config load_config(const std::string& path) {
     if (config.dashboardHost.empty()) throw std::runtime_error("dashboardHost must not be empty");
     if (!(config.paperInitialBalance > 0.0)) throw std::runtime_error("paper.initialBalance must be > 0");
     if (!config.strategy.is_object()) throw std::runtime_error("strategy must be a JSON object");
-    if (!config.paperAutoSymbol && config.paperSymbol.empty() && config.paperModelDefinition.empty())
-        throw std::runtime_error("paper.symbol is required when paper.autoSymbol=false unless paper.modelDefinition is set");
+
+    if (!config.paperModelDefinition.empty()) {
+        const auto model = sentum::promotion::load_model_definition(config.paperModelDefinition);
+        sentum::promotion::ModelRegistry registry;
+        if (registry.stage(model.model_id) != "paper")
+            throw std::runtime_error("paper.modelDefinition requires a model promoted to the paper stage: " + model.model_id);
+        config.paperModelId = model.model_id;
+        config.strategy = model.strategy;
+        config.paperSymbol = model.symbol;
+        config.paperAutoSymbol = false;
+        config.paperRiskConfigPath = model.risk_config;
+    }
+
+    if (!config.paperAutoSymbol && config.paperSymbol.empty())
+        throw std::runtime_error("paper.symbol is required when paper.autoSymbol=false");
     return config;
 }
