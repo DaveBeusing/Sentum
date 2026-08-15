@@ -137,6 +137,8 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
     if (position.open && control.consume_manual_close()) return close_position(price, "manual_close", now);
 
     if (!position.open) {
+        // A close request issued while flat must never leak into the next position.
+        (void)control.consume_manual_close();
         if (control.entries_paused()) {
             dashboard.merge({{"entries_paused", true}, {"last_signal", "paused"}, {"last_risk_decision", "entry_paused"}});
             return TradeAction::NONE;
