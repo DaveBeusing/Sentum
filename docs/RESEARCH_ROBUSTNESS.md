@@ -69,7 +69,13 @@ Independent parameter trials run through a bounded worker set. `parallelism: 0` 
 Run with:
 
 ```bash
-./client --research config/research.json
+./sentum research config/research.json
+```
+
+The legacy flag form remains supported:
+
+```bash
+./sentum --research config/research.json
 ```
 
 The main artifact remains `log/research_latest.json`; complete trial data remains in `log/research_trials.csv`.
