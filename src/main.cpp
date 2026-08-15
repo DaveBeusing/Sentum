@@ -6,13 +6,13 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -39,19 +39,39 @@ namespace {
 std::atomic<bool> shutdown_requested{false};
 void handle_signal(int) noexcept { shutdown_requested.store(true, std::memory_order_relaxed); }
 struct ReplayResult { BacktestMetrics metrics; double net_profit = 0.0; };
+struct DashboardConfig { std::string host{"127.0.0.1"}; std::uint16_t port{8080}; };
 
-std::uint16_t dashboard_port(const sentum::cli::Options& options) {
-    if (options.dashboard_port) return *options.dashboard_port;
-    const char* value = std::getenv("SENTUM_DASHBOARD_PORT");
-    if (!value || !*value) return 8080;
-    return sentum::cli::parse_port(value);
+DashboardConfig load_dashboard_config(const sentum::cli::Options& options) {
+    DashboardConfig config;
+    std::ifstream file("config/config.json");
+    if (!file) throw std::runtime_error("Cannot open config/config.json");
+    nlohmann::json root;
+    file >> root;
+    if (root.contains("dashboardHost")) {
+        if (!root["dashboardHost"].is_string() || root["dashboardHost"].get<std::string>().empty())
+            throw std::runtime_error("config.json dashboardHost must be a non-empty IP address");
+        config.host = root["dashboardHost"].get<std::string>();
+    }
+    if (root.contains("dashboardPort")) {
+        if (!root["dashboardPort"].is_number_integer())
+            throw std::runtime_error("config.json dashboardPort must be an integer between 1 and 65535");
+        const auto port = root["dashboardPort"].get<int>();
+        if (port < 1 || port > 65535)
+            throw std::runtime_error("config.json dashboardPort must be between 1 and 65535");
+        config.port = static_cast<std::uint16_t>(port);
+    }
+    // Keep the Phase-17 CLI override for scripts and one-off runs.
+    if (options.dashboard_port) config.port = *options.dashboard_port;
+    return config;
 }
 
 std::unique_ptr<sentum::dashboard::DashboardServer> start_dashboard(const sentum::cli::Options& options) {
-    auto server = std::make_unique<sentum::dashboard::DashboardServer>(dashboard_port(options));
+    const auto config = load_dashboard_config(options);
+    auto server = std::make_unique<sentum::dashboard::DashboardServer>(config.host, config.port);
     server->start();
-    sentum::dashboard::DashboardState::global().set("dashboard_port", server->port());
-    std::cout << "Sentum Dashboard: http://127.0.0.1:" << server->port() << "\n";
+    sentum::dashboard::DashboardState::global().merge({{"dashboard_host",server->host()},{"dashboard_port",server->port()}});
+    const std::string display_host = server->host() == "0.0.0.0" ? "<server-ip>" : server->host();
+    std::cout << "Sentum Dashboard: http://" << display_host << ':' << server->port() << "\n";
     return server;
 }
 
