@@ -2,6 +2,20 @@
 
 Phase 18 turns the Phase-17 terminal monitor into a controllable paper-trading runtime while preserving simulated execution and fail-closed model promotion.
 
+## Start
+
+Run the unified Sentum executable in Paper mode:
+
+```bash
+./sentum paper
+```
+
+Running `./sentum` without arguments is equivalent. To disable the TUI while retaining Paper runtime behavior, use:
+
+```bash
+./sentum paper --no-tui
+```
+
 ## Paper runtime
 
 Paper mode uses live Binance market data but never submits exchange orders. Entries and exits run through `SimulatedExecutionVenue`, including configured spread, slippage and fees.
