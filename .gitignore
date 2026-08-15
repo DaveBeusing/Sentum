@@ -1,14 +1,14 @@
-# Build direcotry
+# Build directory
 build/
 
 # Executable
-client
+sentum
 
 # Logfiles & SQLite3 Database
 log/
 
-# Objects 
+# Objects
 *.o
 
-# Secrets 
+# Secrets
 config/secrets.json

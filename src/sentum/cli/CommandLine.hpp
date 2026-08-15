@@ -52,11 +52,11 @@ inline Options parse(int argc, char** argv) {
         if (positional.size() != count + 1) throw std::runtime_error(std::string("invalid arguments; expected: ") + usage);
     };
 
-    if (command == "paper" || command == "--paper") { require(0, "client paper"); out.mode = Mode::Paper; return out; }
-    if (command == "dashboard" || command == "--dashboard") { require(0, "client dashboard"); out.mode = Mode::Dashboard; out.tui = false; return out; }
-    if (command == "testnet" || command == "--testnet") { require(1, "client testnet <symbol>"); out.mode = Mode::Testnet; out.symbol = positional[1]; return out; }
-    if (command == "research" || command == "--research") { require(1, "client research <config.json>"); out.mode = Mode::Research; out.input = positional[1]; out.tui = false; return out; }
-    if (command == "replay" || command == "--replay") { require(2, "client replay <events.csv> <symbol>"); out.mode = Mode::Replay; out.input = positional[1]; out.symbol = positional[2]; out.tui = false; return out; }
+    if (command == "paper" || command == "--paper") { require(0, "sentum paper"); out.mode = Mode::Paper; return out; }
+    if (command == "dashboard" || command == "--dashboard") { require(0, "sentum dashboard"); out.mode = Mode::Dashboard; out.tui = false; return out; }
+    if (command == "testnet" || command == "--testnet") { require(1, "sentum testnet <symbol>"); out.mode = Mode::Testnet; out.symbol = positional[1]; return out; }
+    if (command == "research" || command == "--research") { require(1, "sentum research <config.json>"); out.mode = Mode::Research; out.input = positional[1]; out.tui = false; return out; }
+    if (command == "replay" || command == "--replay") { require(2, "sentum replay <events.csv> <symbol>"); out.mode = Mode::Replay; out.input = positional[1]; out.symbol = positional[2]; out.tui = false; return out; }
 
     throw std::runtime_error("unknown command: " + command);
 }
@@ -65,13 +65,13 @@ inline const char* usage() {
     return
         "Sentum unified CLI\n\n"
         "Usage:\n"
-        "  client paper [--no-tui] [--dashboard-port PORT]\n"
-        "  client testnet <symbol> [--no-tui] [--dashboard-port PORT]\n"
-        "  client replay <events.csv> <symbol>\n"
-        "  client research <research.json>\n"
-        "  client dashboard [--dashboard-port PORT]\n"
-        "  client version\n"
-        "  client help\n\n"
+        "  sentum paper [--no-tui] [--dashboard-port PORT]\n"
+        "  sentum testnet <symbol> [--no-tui] [--dashboard-port PORT]\n"
+        "  sentum replay <events.csv> <symbol>\n"
+        "  sentum research <research.json>\n"
+        "  sentum dashboard [--dashboard-port PORT]\n"
+        "  sentum version\n"
+        "  sentum help\n\n"
         "Legacy --paper/--testnet/--replay/--research/--dashboard forms remain supported.\n"
         "SENTUM_DASHBOARD_PORT is used when --dashboard-port is omitted.\n";
 }

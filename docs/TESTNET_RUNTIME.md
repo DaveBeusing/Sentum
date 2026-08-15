@@ -3,9 +3,9 @@
 Sentum exposes three explicit modes:
 
 ```bash
-./client --paper
-./client --replay data/btcusdt.csv BTCUSDT
-./client --testnet BTCUSDT
+./sentum paper
+./sentum replay data/btcusdt.csv BTCUSDT
+./sentum testnet BTCUSDT
 ```
 
 The Testnet mode requires:

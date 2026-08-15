@@ -5,7 +5,13 @@ Phase 14 turns the local read-only dashboard into a research workbench backed by
 ## Start
 
 ```bash
-./client --dashboard
+./sentum dashboard
+```
+
+The legacy flag form remains supported:
+
+```bash
+./sentum --dashboard
 ```
 
 Open:

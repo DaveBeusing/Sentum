@@ -4,7 +4,7 @@
 
 Sentum is an experimental trading-system and research project focused on predictable lifecycle behavior, bounded market-data processing, reproducible strategy execution, traceable risk decisions, exchange-confirmed state, observable runtime health, and out-of-sample strategy evaluation.
 
-> **Current status:** Phases 1–9 are merged into `master`; Phase 10 adds the Quant Research Platform. Paper, replay, research, Binance Spot Testnet, and dashboard modes are exposed by `main()`. Production Binance execution and withdrawal endpoints remain intentionally absent.
+> **Current status:** Phases 1–18 are merged into `master`. Paper, replay, research, Binance Spot Testnet, dashboard, and interactive paper-control modes are exposed by the unified `sentum` executable. Production Binance execution and withdrawal endpoints remain intentionally absent.
 
 ## Capabilities
 
@@ -30,22 +30,81 @@ Sentum is an experimental trading-system and research project focused on predict
 - persistent runtime, reconciliation, and kill-switch operational events
 - machine-readable runtime status
 - local read-only Sentum web dashboard and research API
+- interactive paper-trading TUI with strategy, symbol, pause/resume, and manual-close controls
+- persistent simulated paper account independent from the real Binance balance
 - Release/ThreadSanitizer CI, market-path microbenchmark, dashboard smoke test, and research smoke test
+
+## Build
+
+```bash
+git clone https://github.com/DaveBeusing/Sentum.git
+cd Sentum
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+The main runtime binary is produced as:
+
+```text
+./sentum
+```
+
+The Release build also copies the stripped executable to the repository root as `sentum`.
+
+### ThreadSanitizer
+
+```bash
+cmake -S . -B build-tsan \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DSENTUM_ENABLE_TSAN=ON
+cmake --build build-tsan --parallel
+```
+
+### Market-path benchmark
+
+```bash
+cmake -S . -B build-perf \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DSENTUM_BUILD_BENCHMARKS=ON
+cmake --build build-perf --parallel
+./build-perf/sentum_market_benchmark
+```
+
+## Unified CLI
+
+```bash
+./sentum help
+./sentum version
+```
+
+Preferred command syntax:
+
+```bash
+./sentum paper
+./sentum testnet BTCUSDT
+./sentum replay data/btcusdt.csv BTCUSDT
+./sentum research config/research.json
+./sentum dashboard
+```
+
+The legacy flag forms (`--paper`, `--testnet`, `--replay`, `--research`, `--dashboard`) remain accepted by the unified CLI.
 
 ## Runtime modes
 
 ### Paper trading
 
 ```bash
-./client --paper
+./sentum paper
 ```
 
-`./client` without arguments is equivalent. Paper mode starts `ExecutionEngine`, collector, event-driven scanner, console UI, paper `TradeEngine`, and the web dashboard.
+`./sentum` without arguments is equivalent to Paper mode. Paper starts `ExecutionEngine`, collector, event-driven scanner, terminal UI when attached to a TTY, paper `TradeEngine`, and the web dashboard.
+
+Paper mode uses live market data and simulated execution only. Strategy and symbol changes, entry pause/resume, and manual simulated position closing are available from the TUI. See [`docs/PHASE18_INTERACTIVE_PAPER_TRADING.md`](docs/PHASE18_INTERACTIVE_PAPER_TRADING.md).
 
 ### Deterministic replay
 
 ```bash
-./client --replay data/btcusdt.csv BTCUSDT
+./sentum replay data/btcusdt.csv BTCUSDT
 ```
 
 CSV format:
@@ -62,7 +121,7 @@ The volume column is optional. Events are stably sorted and processed with `Repl
 
 ```bash
 cp config/research.example.json config/research.json
-./client --research config/research.json
+./sentum research config/research.json
 ```
 
 Research mode performs a bounded Cartesian parameter search using deterministic replay and expanding walk-forward validation. Trial ranking uses validation rather than training metrics. Results are written to:
@@ -80,7 +139,7 @@ See [`docs/RESEARCH.md`](docs/RESEARCH.md).
 export SENTUM_ENABLE_SPOT_TESTNET=I_UNDERSTAND_TESTNET_ONLY
 export SENTUM_BINANCE_TESTNET_API_KEY='...'
 export SENTUM_BINANCE_TESTNET_API_SECRET='...'
-./client --testnet BTCUSDT
+./sentum testnet BTCUSDT
 ```
 
 The execution client is hard-wired to Binance Spot Testnet. Production and withdrawal endpoints are not implemented.
@@ -90,7 +149,7 @@ The execution client is hard-wired to Binance Spot Testnet. Production and withd
 Paper and Testnet modes start the dashboard automatically. It can also run independently against persisted data:
 
 ```bash
-./client --dashboard
+./sentum dashboard
 ```
 
 Default URL:
@@ -100,6 +159,12 @@ http://127.0.0.1:8080
 ```
 
 Custom port:
+
+```bash
+./sentum dashboard --dashboard-port 8090
+```
+
+or:
 
 ```bash
 export SENTUM_DASHBOARD_PORT=8090
@@ -202,34 +267,6 @@ sudo apt install -y \
   nlohmann-json3-dev
 ```
 
-## Build
-
-```bash
-git clone https://github.com/DaveBeusing/Sentum.git
-cd Sentum
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-```
-
-### ThreadSanitizer
-
-```bash
-cmake -S . -B build-tsan \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DSENTUM_ENABLE_TSAN=ON
-cmake --build build-tsan --parallel
-```
-
-### Market-path benchmark
-
-```bash
-cmake -S . -B build-perf \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DSENTUM_BUILD_BENCHMARKS=ON
-cmake --build build-perf --parallel
-./build-perf/sentum_market_benchmark
-```
-
 ## Configuration
 
 Required runtime files:
@@ -257,6 +294,7 @@ Sentum uses:
 ```text
 log/klines.sqlite3         candles, trades, order and operational events
 log/status.json            machine-readable Testnet runtime state
+log/paper_account.json     persistent simulated Paper equity and realized P/L
 log/replay.sqlite3         most recent deterministic replay trade history
 log/replay_metrics.json    most recent replay metrics
 log/research_latest.json   most recent research leaderboard
@@ -278,7 +316,10 @@ The dashboard reads SQLite through independent read-only connections, so browser
 | 7 | account reconciliation, dynamic filters, controlled resume | Merged |
 | 8 | event-driven performance architecture and shared simulated venue | Merged |
 | 9 | local Sentum Dashboard and read-only runtime API | Merged |
-| 10 | Quant Research Platform, grid search, walk-forward validation | In development |
+| 10 | Quant Research Platform, grid search, walk-forward validation | Merged |
+| 11–16 | research robustness, experiments, model promotion, performance | Merged |
+| 17 | unified CLI and terminal UI | Merged |
+| 18 | interactive Paper trading and strategy control | Merged |
 
 ## Dashboard API
 
@@ -293,6 +334,15 @@ GET /api/research
 ```
 
 The browser API is read-only. Order placement, cancellation, kill-switch reset, configuration writes, credential access, and production-trading activation are intentionally not exposed.
+
+## Documentation
+
+- [`docs/CLI_TUI_PHASE17.md`](docs/CLI_TUI_PHASE17.md) - unified CLI and terminal UI
+- [`docs/PHASE18_INTERACTIVE_PAPER_TRADING.md`](docs/PHASE18_INTERACTIVE_PAPER_TRADING.md) - interactive Paper runtime
+- [`docs/DASHBOARD.md`](docs/DASHBOARD.md) - local read-only dashboard
+- [`docs/TESTNET_RUNTIME.md`](docs/TESTNET_RUNTIME.md) - Binance Spot Testnet runtime
+- [`docs/RESEARCH.md`](docs/RESEARCH.md) - quantitative research workflow
+- [`docs/RESEARCH_ROBUSTNESS.md`](docs/RESEARCH_ROBUSTNESS.md) - validation and robustness
 
 ## Known validation work
 

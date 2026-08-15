@@ -24,11 +24,11 @@ jobs:
         run: cmake --build build --parallel
       - name: Smoke test unified CLI
         run: |
-          ./client help | grep 'Sentum unified CLI'
-          ./client --help | grep 'client paper'
-          ./client version | grep 'Sentum '
-          ./client --version | grep 'Sentum '
-          if ./client unknown-command >/tmp/cli-invalid.log 2>&1; then exit 1; fi
+          ./sentum help | grep 'Sentum unified CLI'
+          ./sentum --help | grep 'sentum paper'
+          ./sentum version | grep 'Sentum '
+          ./sentum --version | grep 'Sentum '
+          if ./sentum unknown-command >/tmp/cli-invalid.log 2>&1; then exit 1; fi
           grep 'unknown command' /tmp/cli-invalid.log
       - name: Run Phase-16 performance benchmarks
         run: |
@@ -62,7 +62,7 @@ jobs:
                   }
               }, f)
           PY
-          ./client research /tmp/research.json
+          ./sentum research /tmp/research.json
           cp log/research_trials.csv /tmp/research_trials_first.csv
           python3 - <<'PY'
           import csv, json
@@ -76,12 +76,12 @@ jobs:
               rows = list(csv.DictReader(f))
           assert len(rows) == 4
           PY
-          ./client --research /tmp/research.json
+          ./sentum --research /tmp/research.json
           cmp /tmp/research_trials_first.csv log/research_trials.csv
       - name: Smoke test dashboard
         shell: bash
         run: |
-          ./client dashboard --dashboard-port 18080 > /tmp/sentum-dashboard.log 2>&1 &
+          ./sentum dashboard --dashboard-port 18080 > /tmp/sentum-dashboard.log 2>&1 &
           pid=$!
           trap 'kill -TERM "$pid" 2>/dev/null || true' EXIT
           for i in {1..30}; do

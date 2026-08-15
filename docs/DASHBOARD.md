@@ -23,19 +23,19 @@ export SENTUM_DASHBOARD_PORT=8090
 Paper mode starts the dashboard automatically:
 
 ```bash
-./client --paper
+./sentum paper
 ```
 
 Testnet mode also starts it automatically:
 
 ```bash
-./client --testnet BTCUSDT
+./sentum testnet BTCUSDT
 ```
 
 The dashboard can be run independently against persisted Sentum data:
 
 ```bash
-./client --dashboard
+./sentum dashboard
 ```
 
 Open:

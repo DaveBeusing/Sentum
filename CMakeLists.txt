@@ -35,7 +35,7 @@ endif()
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 
-add_executable(client ${SOURCES})
+add_executable(sentum ${SOURCES})
 
 set(SENTUM_CORE_SOURCES ${SOURCES})
 list(FILTER SENTUM_CORE_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
@@ -49,7 +49,7 @@ find_package(OpenSSL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
 
-foreach(target client sentum_portfolio_research sentum_experiment sentum_model)
+foreach(target sentum sentum_portfolio_research sentum_experiment sentum_model)
 	target_include_directories(
 		${target}
 		PRIVATE
@@ -82,9 +82,9 @@ endif()
 
 if(NOT SENTUM_ENABLE_TSAN)
 	add_custom_command(
-		TARGET client POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:client> ${CMAKE_SOURCE_DIR}/client
-		COMMAND ${CMAKE_STRIP} ${CMAKE_SOURCE_DIR}/client
-		COMMENT "Strip optimized binary"
+		TARGET sentum POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:sentum> ${CMAKE_SOURCE_DIR}/sentum
+		COMMAND ${CMAKE_STRIP} ${CMAKE_SOURCE_DIR}/sentum
+		COMMENT "Strip optimized Sentum binary"
 	)
 endif()
