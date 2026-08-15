@@ -1,6 +1,8 @@
 #include <chrono>
 #include <stdexcept>
 
+#include <sentum/core/RuntimeControl.hpp>
+#include <sentum/dashboard/DashboardState.hpp>
 #include <sentum/market/RuntimePerformanceMetrics.hpp>
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/trader/strategy/MomentumStrategy.hpp>
@@ -9,9 +11,17 @@ TradeEngine::TradeEngine(const std::string& symbol_, BinanceRestClient& api_, bo
     : symbol(symbol_), api(&api_), isPaperTrading(paper_), engine_logger("log/engine.log"),
       clock(std::make_shared<SystemClock>()) {}
 
+TradeEngine::TradeEngine(const std::string& symbol_, BinanceRestClient& api_, RiskConfig config,
+                         std::unique_ptr<IStrategy> strategy_, const std::string& history_path_)
+    : symbol(symbol_), api(&api_), isPaperTrading(true), runtime_configured_(true), risk(std::move(config)),
+      engine_logger("log/engine.log"), strategy(std::move(strategy_)), clock(std::make_shared<SystemClock>()),
+      history_path(history_path_) {
+    if (!strategy) throw std::invalid_argument("Paper engine requires strategy");
+}
+
 TradeEngine::TradeEngine(const std::string& symbol_, RiskConfig config, std::shared_ptr<IClock> clock_,
                          std::unique_ptr<IStrategy> strategy_, const std::string& history_path_)
-    : symbol(symbol_), isPaperTrading(true), risk(std::move(config)), engine_logger("log/replay-engine.log"),
+    : symbol(symbol_), isPaperTrading(true), runtime_configured_(true), risk(std::move(config)), engine_logger("log/replay-engine.log"),
       strategy(std::move(strategy_)), clock(std::move(clock_)), history_path(history_path_) {
     if (!clock || !strategy) throw std::invalid_argument("Replay engine requires clock and strategy");
     initialize_components();
@@ -57,8 +67,11 @@ void TradeEngine::run() {
     if (running.exchange(true)) return;
     engine_logger.start();
     try {
-        risk = load_risk_config("config/risk.json");
+        if (!runtime_configured_) risk = load_risk_config("config/risk.json");
         initialize_components();
+        sentum::dashboard::DashboardState::global().merge({
+            {"strategy_name", strategy->name()}, {"entries_paused", sentum::runtime::RuntimeControl::global().entries_paused()}
+        });
         price_stream = std::make_unique<BinanceWebsocketClient>(symbol);
         price_stream->set_on_price([this](double price) { enqueue_price(price); });
         price_stream->start();
@@ -118,10 +131,25 @@ TradeAction TradeEngine::evaluate(double price) {
 TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::time_point now,
                                      const std::string& source, const MarketEvent* event) {
     std::lock_guard<std::mutex> lock(state_mutex);
+    auto& dashboard = sentum::dashboard::DashboardState::global();
+    auto& control = sentum::runtime::RuntimeControl::global();
+
+    if (position.open && control.consume_manual_close()) return close_position(price, "manual_close", now);
+
     if (!position.open) {
+        // A close request issued while flat must never leak into the next position.
+        (void)control.consume_manual_close();
+        if (control.entries_paused()) {
+            dashboard.merge({{"entries_paused", true}, {"last_signal", "paused"}, {"last_risk_decision", "entry_paused"}});
+            return TradeAction::NONE;
+        }
         const StrategySignal signal = event ? strategy->on_event(*event) : strategy->on_price(price, now);
+        dashboard.merge({{"entries_paused", false}, {"strategy_name", strategy->name()},
+                         {"last_signal", signal.action == TradeAction::BUY ? "BUY" : "NONE"},
+                         {"signal_confidence", signal.confidence}, {"signal_reason", signal.reason}});
         if (signal.action != TradeAction::BUY) return TradeAction::NONE;
         const RiskDecision decision = risk_manager->approve_entry(signal, price, now, last_exit);
+        dashboard.merge({{"last_risk_decision", decision.approved ? "APPROVED" : "REJECTED"}, {"risk_reason", decision.reason}});
         if (!decision.approved) return TradeAction::NONE;
 
         const auto fill = execute(sentum::order::Side::Buy, decision.quantity, price, now, "buy");
@@ -188,6 +216,7 @@ TradeAction TradeEngine::close_position(double market_price, const std::string& 
     history->save(position);
     completed_.push_back(position);
     last_exit = position.exit_time;
+    sentum::dashboard::DashboardState::global().merge({{"last_exit_reason", reason}, {"last_trade_profit", position.net_profit}});
     position.open = false;
     strategy->reset();
     return TradeAction::SELL;
@@ -201,3 +230,4 @@ int TradeEngine::get_lose_count() const { std::lock_guard<std::mutex> lock(state
 double TradeEngine::get_winrate_percent() const { std::lock_guard<std::mutex> lock(state_mutex); const int total=win_count+lose_count; return total==0?0.0:(static_cast<double>(win_count)/total)*100.0; }
 int TradeEngine::get_total_trades() const { std::lock_guard<std::mutex> lock(state_mutex); return win_count+lose_count; }
 double TradeEngine::get_average_profit() const { std::lock_guard<std::mutex> lock(state_mutex); const int total=win_count+lose_count; return total==0?0.0:total_profit/static_cast<double>(total); }
+std::string TradeEngine::strategy_name() const { std::lock_guard<std::mutex> lock(state_mutex); return strategy ? strategy->name() : std::string("none"); }

@@ -27,6 +27,8 @@
 class TradeEngine {
 public:
     explicit TradeEngine(const std::string& symbol, BinanceRestClient& binance, bool paper_trading);
+    TradeEngine(const std::string& symbol, BinanceRestClient& binance, RiskConfig config,
+                std::unique_ptr<IStrategy> strategy, const std::string& history_path = "log/klines.sqlite3");
     TradeEngine(const std::string& symbol, RiskConfig config, std::shared_ptr<IClock> clock,
                 std::unique_ptr<IStrategy> strategy, const std::string& history_path = ":memory:");
     ~TradeEngine();
@@ -44,6 +46,7 @@ public:
     double get_winrate_percent() const;
     int get_total_trades() const;
     double get_average_profit() const;
+    std::string strategy_name() const;
 
 private:
     void initialize_components();
@@ -58,6 +61,7 @@ private:
     BinanceRestClient* api = nullptr;
     std::atomic<bool> running{false};
     bool isPaperTrading = true;
+    bool runtime_configured_ = false;
     RiskConfig risk;
     TradePosition position;
     TradeLogger logger;

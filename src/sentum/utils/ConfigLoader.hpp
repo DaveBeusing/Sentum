@@ -1,38 +1,35 @@
 /****
  * Copyright (C) 2025 Dave Beusing <david.beusing@gmail.com>
- * 
  * MIT License - https://opensource.org/license/mit/
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the “Software”), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is furnished 
- * to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all 
- * copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A 
- * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT 
- * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION 
- * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
- * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- * 
  */
-
 #pragma once
 
+#include <cstdint>
 #include <string>
 
+#include <nlohmann/json.hpp>
 
 struct Config {
+    std::string quoteAsset = "USDC";
+    std::string databasePath = "log/sentum.sqlite3";
+    double minCumulativeReturn = 0.0005;
+    bool paperTrading = true;
 
-	std::string quoteAsset;
-	std::string databasePath;
-	double minCumulativeReturn;
-	bool paperTrading;
+    nlohmann::json strategy = {
+        {"type", "momentum"},
+        {"parameters", {{"lookback", 20}, {"entry_threshold", 0.001}}}
+    };
+
+    double paperInitialBalance = 10000.0;
+    std::string paperStatePath = "log/paper_account.json";
+    bool paperAutoSymbol = true;
+    std::string paperSymbol;
+    std::string paperModelDefinition;
+    std::string paperRiskConfigPath = "config/risk.json";
+    std::string paperModelId;
+
+    std::string dashboardHost = "127.0.0.1";
+    std::uint16_t dashboardPort = 8080;
 };
 
 Config load_config(const std::string& path);
