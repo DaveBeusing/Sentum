@@ -18,6 +18,7 @@
 #include <sentum/market/MarketDataStore.hpp>
 #include <sentum/scanner/SymbolScanner.hpp>
 #include <sentum/trader/TradeEngine.hpp>
+#include <sentum/trader/paper/PaperAccount.hpp>
 #include <sentum/utils/AsyncLogger.hpp>
 #include <sentum/utils/ConfigLoader.hpp>
 #include <sentum/utils/Database.hpp>
@@ -45,12 +46,15 @@ private:
     std::unique_ptr<Collector> collector;
     std::unique_ptr<SymbolScanner> scanner;
     std::unique_ptr<TradeEngine> trader;
+    std::unique_ptr<sentum::paper::PaperAccount> paper_account;
 
     std::string current_symbol;
     std::vector<MarketInfo> markets;
-    double quote_balance;
+    double quote_balance = 0.0;
+    double accounted_profit_ = 0.0;
+    std::uint64_t applied_control_generation_ = 0;
     std::string db_path;
-    size_t db_size;
+    size_t db_size = 0;
 
     std::chrono::system_clock::time_point start_time;
     Config config;
@@ -64,4 +68,5 @@ private:
     void monitor_scanner();
     void start_trader_for(const std::string& symbol);
     void stop_trader();
+    void apply_runtime_control();
 };
