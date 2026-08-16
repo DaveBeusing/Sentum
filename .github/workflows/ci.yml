@@ -1,0 +1,109 @@
+name: Sentum Core CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake curl libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
+      - name: Configure release and benchmarks
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSENTUM_BUILD_BENCHMARKS=ON
+      - name: Build release
+        run: cmake --build build --parallel
+      - name: Smoke test unified CLI
+        run: |
+          ./sentum help | grep 'Sentum unified CLI'
+          ./sentum --help | grep 'sentum paper'
+          ./sentum version | grep 'Sentum '
+          ./sentum --version | grep 'Sentum '
+          if ./sentum unknown-command >/tmp/cli-invalid.log 2>&1; then exit 1; fi
+          grep 'unknown command' /tmp/cli-invalid.log
+      - name: Run performance benchmarks
+        run: |
+          ./build/sentum_market_benchmark 500 2000
+          ./build/sentum_market_benchmark 1000 1000
+          ./build/sentum_market_benchmark 2000 500
+          ./build/sentum_parser_allocation_benchmark
+      - name: Smoke test quant research
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, math
+          with open('/tmp/research.csv', 'w') as f:
+              f.write('timestamp_ms,price,volume\n')
+              for i in range(360):
+                  trend = i * 0.015
+                  cycle = math.sin(i / 6.0) * 1.8
+                  f.write(f'{1710000000000 + i * 1000},{100.0 + trend + cycle:.8f},1.0\n')
+          with open('/tmp/research.json', 'w') as f:
+              json.dump({
+                  'dataset': '/tmp/research.csv',
+                  'symbol': 'BTCUSDT',
+                  'objective': 'sharpe',
+                  'train_fraction': 0.7,
+                  'walk_forward_folds': 2,
+                  'max_trials': 8,
+                  'leaderboard_size': 4,
+                  'grid': {
+                      'lookback': [5, 10],
+                      'entry_threshold': [0.001, 0.002]
+                  }
+              }, f)
+          PY
+          ./sentum research /tmp/research.json
+          cp log/research_trials.csv /tmp/research_trials_first.csv
+          python3 - <<'PY'
+          import csv, json
+          with open('log/research_latest.json') as f:
+              report = json.load(f)
+          assert report['trials'] == 4
+          assert report['folds'] == 2
+          assert len(report['leaderboard']) == 4
+          assert report['leaderboard'][0]['validation_score'] >= report['leaderboard'][-1]['validation_score']
+          with open('log/research_trials.csv') as f:
+              rows = list(csv.DictReader(f))
+          assert len(rows) == 4
+          PY
+          ./sentum --research /tmp/research.json
+          cmp /tmp/research_trials_first.csv log/research_trials.csv
+      - name: Smoke test dashboard
+        shell: bash
+        run: |
+          ./sentum dashboard --dashboard-port 18080 > /tmp/sentum-dashboard.log 2>&1 &
+          pid=$!
+          trap 'kill -TERM "$pid" 2>/dev/null || true' EXIT
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/api/health >/tmp/health.json; then
+              break
+            fi
+            sleep 0.2
+          done
+          curl --fail --silent http://127.0.0.1:18080/api/health | grep '"read_only":true'
+          curl --fail --silent http://127.0.0.1:18080/api/status | grep '"dashboard_port":18080'
+          curl --fail --silent http://127.0.0.1:18080/api/research | grep '"objective":"sharpe"'
+          curl --fail --silent http://127.0.0.1:18080/ | grep 'SENTUM'
+          kill -TERM "$pid"
+          wait "$pid"
+          trap - EXIT
+
+  tsan-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
+      - name: Configure ThreadSanitizer
+        run: cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DSENTUM_ENABLE_TSAN=ON
+      - name: Build ThreadSanitizer
+        run: cmake --build build-tsan --parallel 2
