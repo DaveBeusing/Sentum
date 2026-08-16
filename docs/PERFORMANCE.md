@@ -1,82 +1,93 @@
-# Sentum Core Performance
+# Runtime performance
 
-Phase 8 moves the market-data and simulated execution paths toward an event-driven, bounded architecture.
+Sentum is designed so market-data ingestion, strategy decisions and simulated/exchange execution do not block on persistence or dashboard work.
 
-## Market path
+## Market-data path
 
-Closed Binance candles follow this path:
+The runtime path is:
 
 ```text
-WebSocket parse
-  -> fixed-capacity MarketDataStore ring buffer
-  -> MarketEventBus
-      -> SymbolScanner incremental ranking cache
-  -> bounded SQLite persistence queue
+Binance WebSocket
+    -> FastBinanceKlineParser
+    -> SymbolId / MarketEvent
+    -> fixed MarketDataStore ring buffers
+    -> MarketEventBus
+    -> scanner / strategy
+
+                         -> fixed SPSC persistence queue
+                         -> SQLite WAL writer
 ```
 
-SQLite remains outside the scanner/decision hot path.
+The normal Binance kline parser extracts only the fields required by Sentum instead of building a complete JSON DOM. Symbols are interned to compact `SymbolId` values for hot-path storage and scanner access; strings remain at UI, logging and persistence boundaries.
 
-`MarketDataStore` allocates each symbol ring buffer once and uses per-symbol locking after map lookup. Return calculations read the ring in place and do not copy an entire candle window.
+## Persistence
 
-## Scanner
+Closed candles are passed to a bounded single-producer/single-consumer ring queue. The SQLite writer owns the database write path, reuses prepared statements, uses WAL mode and performs batched writes. The trading decision path does not wait for SQLite.
 
-The scanner maintains cached 30- and 60-sample returns when closed-candle events arrive. A top-symbol change notifies `ExecutionEngine` through a condition variable. The trader trigger no longer wakes on a fixed five-second polling interval.
+Queue depth, high-water mark and drop rate are observable at runtime. The queue is bounded by design so load cannot produce unbounded memory growth.
 
-The console may still read the already-computed ranking once per second for presentation; this does not perform historical-window database or candle copies.
+## In-memory market store
 
-## Incremental indicators
+Each symbol uses a fixed-capacity ring buffer with per-buffer synchronization. Scanner calculations operate on in-memory data rather than querying SQLite. The scanner is event driven and maintains rankings from completed market updates instead of periodically copying large historical windows.
 
-`IncrementalIndicators.hpp` contains bounded/O(1) update primitives for:
+## Runtime telemetry
 
-- rolling return
-- rolling SMA
-- EMA
-- Wilder-style RSI
+`RuntimePerformanceMetrics` tracks:
 
-`MomentumStrategy` uses `RollingReturn`, avoiding `deque` growth/pop operations and repeated historical scans.
+- total market events and events per second
+- parser latency
+- event-dispatch latency
+- strategy/risk/execution decision latency
+- SQLite batch latency
+- persistence queue depth and drop rate
 
-## Unified simulated execution
+Latency distributions expose average, p50, p95, p99 and maximum values. The terminal System view and web dashboard use these metrics for operational visibility.
 
-Paper and replay `TradeEngine` execution is routed through `SimulatedExecutionVenue`, which implements the same `IExecutionVenue` contract as exchange execution.
+## Dashboard overhead
 
-The simulated venue receives the market timestamp, spread and slippage model, and returns an exchange-style confirmed `FILLED` snapshot. Replay therefore keeps deterministic timestamps while sharing the order/fill boundary with paper mode.
+Runtime UI data is published through batched `DashboardState` snapshots. The web dashboard uses independent read-only SQLite connections for historical data. The terminal console caches trade/order/model reads instead of reopening SQLite on every redraw. Database-size probing is rate limited rather than performed every runtime tick.
 
-## Benchmark
+## Exchange metadata
 
-Build the market-path microbenchmark with:
+Symbol filters and exchange rules are cached with a TTL. Quantity, notional and precision validation therefore does not require an exchange-info request for every order decision.
+
+## Benchmarks
+
+Build performance targets with:
 
 ```bash
 cmake -S . -B build-perf \
   -DCMAKE_BUILD_TYPE=Release \
   -DSENTUM_BUILD_BENCHMARKS=ON
 cmake --build build-perf --parallel
-./build-perf/sentum_market_benchmark
 ```
 
-It reports:
+Market-path scaling examples:
 
-- total events
-- elapsed seconds
-- events per second
-- nanoseconds per event
-- event-bus delivery count
-- representative rolling indicator values
-
-The benchmark currently exercises 500 symbols and 1,000,000 events. Treat it as a regression benchmark rather than a claim about exchange-to-order latency.
-
-## Performance acceptance targets
-
-The following targets should be tracked on a stable CI runner or dedicated benchmark host:
-
-```text
-persistence queue drop rate        < 0.1%
-market event bus delivery          100%
-scanner historical DB reads        0
-scanner timed polling for entries  0
-paper/replay fill implementations  1 shared venue
-market path benchmark              no >10% regression without explanation
+```bash
+./build-perf/sentum_market_benchmark 500 2000
+./build-perf/sentum_market_benchmark 1000 1000
+./build-perf/sentum_market_benchmark 2000 500
 ```
 
-## Remaining hot-path work
+The parser-allocation benchmark performs repeated kline parsing and checks the hot parser path for heap allocations:
 
-The Binance collector still constructs a JSON DOM for each WebSocket message. A future optimization can replace this with an on-demand/SAX parser and interned symbol identifiers after benchmark evidence shows JSON parsing is a dominant cost.
+```bash
+./build-perf/sentum_parser_allocation_benchmark
+```
+
+A healthy optimized build should report zero allocations per normal parser invocation.
+
+## Performance acceptance goals
+
+Performance should be evaluated with measurable criteria rather than absolute claims tied to one machine:
+
+- no SQLite blocking in the market-to-decision path
+- bounded persistence memory usage
+- measurable queue drop rate with an explicit operational threshold
+- parser and decision p99 latency visible at runtime
+- no routine heap-allocation hotspot in kline parsing
+- stable behavior under 500, 1,000 and 2,000-symbol synthetic benchmark universes
+- Release, ThreadSanitizer and long-running Paper soak tests after material concurrency changes
+
+Actual throughput and latency depend on hardware, compiler, exchange message rate, symbol universe and enabled strategies.

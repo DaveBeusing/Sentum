@@ -5,9 +5,6 @@ on:
   push:
     branches:
       - master
-      - agent/phase-8-core-performance-architecture
-      - agent/phase-9-sentum-dashboard
-      - agent/phase-10-quant-research-platform
 
 jobs:
   build:
@@ -30,7 +27,7 @@ jobs:
           ./sentum --version | grep 'Sentum '
           if ./sentum unknown-command >/tmp/cli-invalid.log 2>&1; then exit 1; fi
           grep 'unknown command' /tmp/cli-invalid.log
-      - name: Run Phase-16 performance benchmarks
+      - name: Run performance benchmarks
         run: |
           ./build/sentum_market_benchmark 500 2000
           ./build/sentum_market_benchmark 1000 1000

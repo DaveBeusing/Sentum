@@ -26,7 +26,7 @@ inline StageEvidence validate_source_experiment(const ModelDefinition& model,
     const auto research_path=std::filesystem::path(output)/"research.json";std::ifstream file(research_path);if(!file)throw std::runtime_error("Source experiment does not contain research.json; promotion currently requires a single-asset research run");nlohmann::json r;file>>r;
     if(!r.value("holdout_evaluated",false)||!r.contains("final_holdout")||!r.contains("selected_parameters"))throw std::runtime_error("Source experiment has no selected final Holdout model");
 
-    // Phase-10/11 single-asset research optimizes MomentumStrategy. A promoted model must be exactly that researched candidate.
+    // Current single-asset parameter research selects a MomentumStrategy candidate. Promotion must use exactly that researched candidate.
     if(model.strategy.value("type",std::string{})!="momentum")throw std::runtime_error("Source experiment is momentum research; promoted strategy type must be momentum");
     const auto params=model.strategy.value("parameters",nlohmann::json::object());const auto& selected=r.at("selected_parameters");
     if(params.value("lookback",std::size_t{0})!=selected.value("lookback",std::size_t{0})||

@@ -1,189 +1,70 @@
-# Sentum Shadow Trading & Model Promotion
+# Shadow trading and model promotion
 
-Phase 15 adds an explicit model lifecycle between research and exchange execution. The pipeline is intentionally fail-closed and does not introduce production-money execution.
+Sentum supports a controlled model lifecycle from research into progressively more realistic execution environments without exposing an automatic production-trading promotion path.
 
 ## Lifecycle
 
 ```text
-completed research experiment
-        |
-        v
-     research
-        |
-        | manual promotion + quality gates
-        v
-      shadow
-        |
-        | live Binance market data, simulated fills only
-        | manual promotion + quality gates
-        v
-       paper
-        |
-        | persisted stage evidence
-        | manual promotion + quality gates
-        v
-      testnet
-
-production: deliberately unsupported
+research -> shadow -> paper -> testnet
 ```
 
-No stage can be skipped and no promotion is automatic.
+Promotion is linear. Stages cannot be skipped.
 
-## Model definition
+## Model definitions
 
-Copy `config/model.example.json` and fill the immutable source provenance from a completed Phase-13 experiment:
+A model definition identifies the strategy, symbol, source experiment, source revision/config hash, risk configuration and promotion policy. Registration validates that the referenced experiment exists, completed successfully and produced a final holdout result.
 
-- `source_experiment_run`
-- `source_git_commit`
-- `source_config_sha256`
-- strategy definition
-- risk configuration
-- promotion thresholds
+The promoted candidate must match the strategy parameters and execution assumptions selected by research. Sentum rejects attempts to attach different runtime logic to unrelated holdout evidence.
 
-Registration verifies the source run in `log/experiments.sqlite3`. The source must be `completed`, contain a final Holdout result, and match the supplied Git/config provenance when those fields are provided.
+## Shadow trading
 
-## Build
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-```
-
-The Phase-15 CLI is:
-
-```text
-build/sentum_model
-```
-
-## Register candidate
+Shadow mode consumes live Binance public market data but executes only through `SimulatedExecutionVenue`. It does not require an exchange trading API key and does not place exchange orders.
 
 ```bash
 ./build/sentum_model register config/model.json
+./build/sentum_model promote config/model.json shadow I_APPROVE_MODEL_PROMOTION
+./build/sentum_model shadow config/model.json
 ```
 
-Registration stores the candidate in:
+Shadow evidence is persisted separately and can be used by the next promotion gate.
+
+## Promotion policy
+
+Each transition checks configured minimum/maximum criteria such as:
+
+- trade count
+- net profit
+- profit factor
+- win rate
+- Sharpe ratio
+- maximum drawdown
+
+Promotion also requires explicit operator confirmation. Rejected attempts are written to the audit history.
+
+## Paper integration
+
+A model that has reached the `paper` stage can be loaded by the interactive Paper runtime through `paper.modelDefinition` in `config/config.json`. The runtime inherits the registered model's strategy, symbol and risk-config path and fails closed if registry state is inconsistent.
+
+## Persistence
+
+Model lifecycle state is stored in:
 
 ```text
 log/models.sqlite3
 ```
 
-and imports the final Holdout metrics of the source experiment as `research` evidence.
+Important tables include:
 
-## Promote to shadow
+- `models`
+- `stage_evidence`
+- `promotion_events`
 
-```bash
-./build/sentum_model promote \
-  config/model.json shadow I_APPROVE_MODEL_PROMOTION
-```
+Shadow trade history is stored separately under `log/shadow/`.
 
-Promotion is rejected unless the Research evidence satisfies all configured gates.
+## Testnet boundary
 
-## Shadow trading
+`testnet` is the highest promotion stage implemented by this lifecycle. Sentum does not define an automatic production-money promotion stage. Testnet execution remains subject to reconciliation, User Data Stream state and kill-switch controls.
 
-```bash
-./build/sentum_model shadow config/model.json
-```
+## Dashboard and console
 
-Shadow mode consumes real Binance market prices through the existing public WebSocket client but uses the normal Sentum `TradeEngine`, `RiskManager`, strategy framework and simulated execution path. It submits no REST order and uses no API key.
-
-Shadow trades are persisted under:
-
-```text
-log/shadow/<model-id>.sqlite3
-```
-
-On clean shutdown the completed trade set is converted into stage evidence and stored in the model registry. A JSON snapshot is written to:
-
-```text
-log/shadow/<model-id>-latest.json
-```
-
-A single completed shadow session is the evidence unit used by the promotion gate. This avoids statistically invalid averaging of independent Sharpe/Drawdown metrics across sessions.
-
-## Promotion gates
-
-Configured in the model definition:
-
-```json
-{
-  "promotion_policy": {
-    "min_trades": 30,
-    "min_net_profit": 0.0,
-    "min_profit_factor": 1.10,
-    "min_win_rate": 45.0,
-    "min_sharpe": 0.50,
-    "max_drawdown": 250.0
-  }
-}
-```
-
-Every transition requires all gates and the exact operator confirmation token:
-
-```text
-I_APPROVE_MODEL_PROMOTION
-```
-
-The token is intentionally unsuitable for unattended/background promotion.
-
-## Paper and Testnet evidence
-
-Phase 15 provides a strict registry boundary for downstream runtime evidence:
-
-```bash
-./build/sentum_model record-evidence config/model.json paper log/paper-evidence.json
-./build/sentum_model promote config/model.json testnet I_APPROVE_MODEL_PROMOTION
-```
-
-Evidence can only be recorded for the model's current stage. This prevents a future-stage metrics file from being injected before the model actually reaches that stage.
-
-The evidence JSON accepts:
-
-```json
-{
-  "started_at_ms": 0,
-  "finished_at_ms": 0,
-  "trades": 50,
-  "net_profit": 120.0,
-  "max_drawdown": 45.0,
-  "profit_factor": 1.4,
-  "win_rate": 54.0,
-  "expectancy": 2.4,
-  "sharpe": 1.1,
-  "sortino": 1.5
-}
-```
-
-A future runtime integration should generate these evidence files directly from the persistent Paper/Testnet execution ledger. Phase 15 deliberately does not infer or fabricate exchange evidence.
-
-## Registry audit trail
-
-`log/models.sqlite3` contains:
-
-```text
-models
-stage_evidence
-promotion_events
-```
-
-Every attempted promotion records:
-
-- model ID
-- old and requested stage
-- approved/rejected result
-- reason
-- operator confirmation
-- timestamp
-
-Failed gates therefore remain auditable.
-
-## Safety properties
-
-- research provenance must resolve to a completed experiment
-- live Shadow uses public market data only
-- Shadow cannot submit exchange orders
-- stages cannot be skipped
-- promotion is never automatic
-- all promotion attempts are persistent
-- Paper/Testnet evidence must correspond to the current stage
-- no `production` stage exists in the Phase-15 state machine
-- Testnet remains the highest promotable stage
+The web dashboard and terminal Models view expose lifecycle state read-only. Promotion remains an explicit operator workflow and is not reduced to an unaudited browser or single-key action.

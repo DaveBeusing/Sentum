@@ -2,7 +2,7 @@
   "model_id": "btc-momentum-v1",
   "name": "BTC Momentum Candidate v1",
   "symbol": "BTCUSDT",
-  "source_experiment_run": "<phase-13-run-id>",
+  "source_experiment_run": "<experiment-run-id>",
   "source_git_commit": "<git-commit-from-experiment>",
   "source_config_sha256": "<config-sha256-from-experiment>",
   "risk_config": "config/risk.json",
