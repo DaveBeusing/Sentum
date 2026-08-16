@@ -1,12 +1,10 @@
-# Sentum Strategy Framework & Portfolio Research
+# Strategy and portfolio research
 
-Phase 12 turns the single-strategy research stack into a reusable strategy framework and adds multi-asset portfolio research.
+Sentum provides a shared strategy framework for Paper, replay, shadow and research workflows. Strategies are created from JSON through `sentum::strategy::StrategyFactory` and execute through the same risk and simulated-execution components used elsewhere in the application.
 
-## Strategy framework
+## Supported strategies
 
-Strategies implement `IStrategy` and can consume either simple prices or full `MarketEvent` values through `on_event()`.
-
-Built-in strategies:
+The built-in strategy types are:
 
 - `momentum`
 - `trend`
@@ -15,86 +13,66 @@ Built-in strategies:
 - `multi_timeframe_trend`
 - `ensemble`
 
-`StrategyFactory` constructs strategies from JSON. Ensemble strategies recursively construct weighted child strategies and emit a BUY signal only when their weighted confidence reaches the configured threshold.
+Each strategy exposes a signal action, strategy name, explanation, reference price, timestamp and confidence value.
 
-Example:
+## Multi-timeframe strategies
+
+`TimeframeAggregator` derives larger bars from the incoming market-event stream. Multi-timeframe strategies can therefore combine short and slow contexts without requiring a second market-data implementation.
+
+## Ensembles
+
+An ensemble combines weighted strategy members and requires the normalized aggregate confidence to reach a configured threshold. Example:
 
 ```json
 {
   "type": "ensemble",
   "threshold": 0.55,
   "members": [
-    {"type": "momentum", "weight": 1.0, "parameters": {"lookback": 20, "entry_threshold": 0.001}},
-    {"type": "trend", "weight": 1.0, "parameters": {"fast_period": 12, "slow_period": 26, "threshold": 0.001}}
+    {
+      "type": "momentum",
+      "weight": 1.0,
+      "parameters": {"lookback": 20, "entry_threshold": 0.001}
+    },
+    {
+      "type": "trend",
+      "weight": 1.0,
+      "parameters": {"fast_period": 12, "slow_period": 26, "threshold": 0.001}
+    }
   ]
 }
 ```
 
-## Multi-timeframe strategy
-
-`multi_timeframe_trend` aggregates the normal event stream into independent fast and slow time buckets. Only closed aggregate frames update the corresponding EMA state, so the strategy does not require a second market-data feed.
-
-Example parameters:
-
-```json
-{
-  "fast_timeframe_seconds": 60,
-  "slow_timeframe_seconds": 300,
-  "ema_period": 8,
-  "threshold": 0.001
-}
-```
-
-## Portfolio risk overlay
-
-`PortfolioRiskManager` evaluates a proposed position against a portfolio snapshot and can reject it for:
-
-- maximum gross exposure
-- maximum per-asset exposure
-- maximum correlated exposure
-- daily drawdown limit
-- consecutive-loss limit
-- trades-per-hour limit
-
-It also produces a volatility-targeting size multiplier bounded by configured minimum and maximum multipliers.
-
 ## Portfolio research
 
-Build:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-```
-
-Run:
+`sentum_portfolio_research` evaluates multiple assets using the shared strategy factory and trading engine, then applies portfolio-level risk controls to the resulting candidate trades.
 
 ```bash
 cp config/portfolio-research.example.json config/portfolio-research.json
 ./build/sentum_portfolio_research config/portfolio-research.json
 ```
 
-The runner:
+The portfolio layer can enforce controls such as:
 
-1. loads each configured historical dataset,
-2. instantiates the same strategy definition for each asset through `StrategyFactory`,
-3. runs every asset through the normal deterministic `ReplayClock` + `TradeEngine` + `RiskManager` + simulated execution stack,
-4. calculates per-asset return volatility and cross-asset return correlations,
-5. merges candidate trades in entry-time order,
-6. applies portfolio-level exposure, correlation, drawdown, loss-streak and trade-rate limits,
-7. applies the volatility-targeted size multiplier to approved trades,
-8. compares raw combined metrics with portfolio-filtered metrics.
+- maximum gross exposure
+- per-asset exposure
+- correlated exposure
+- daily drawdown
+- consecutive-loss limits
+- trades per hour
+- volatility-targeted sizing
 
-Output:
+## Correlation
+
+Portfolio research derives return correlations for the selected assets and uses them when enforcing correlated-exposure limits. Datasets should use compatible sampling intervals and overlapping time periods for meaningful cross-asset comparisons.
+
+## Output
+
+The current portfolio result is written to:
 
 ```text
 log/portfolio_research_latest.json
 ```
 
-The artifact contains per-asset metrics, the correlation matrix, candidate/accepted/rejected trade counts and combined portfolio metrics.
+It includes per-asset metrics, candidate/accepted/rejected trades, realized volatility, correlation matrix, raw combined metrics and portfolio-filtered metrics.
 
-## Interpretation
-
-The portfolio layer is a research overlay, not an exchange account manager. It evaluates how a common strategy would have behaved across multiple assets under portfolio-level constraints. Production/Testnet execution continues to use the existing exchange-confirmed order pipeline.
-
-For meaningful correlation results, datasets should cover the same sampling interval and broadly aligned timestamps. A future dataset-management phase should align series explicitly by timestamp rather than relying on comparable historical streams.
+For reproducible versioned runs, use the experiment manager described in [EXPERIMENT_DATASET_MANAGEMENT.md](EXPERIMENT_DATASET_MANAGEMENT.md).
