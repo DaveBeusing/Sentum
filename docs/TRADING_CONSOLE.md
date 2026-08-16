@@ -29,6 +29,16 @@ The console is organized around seven views selectable with keys `1` through `7`
 
 The Market view is intentionally trading-first. Parser, event-dispatch, decision and SQLite latency telemetry live in the System view instead of dominating the main screen.
 
+## Terminal rendering
+
+The interactive console uses the terminal alternate-screen buffer, similar to tools such as `htop` or `vim`. The normal shell scrollback is restored when the TUI exits.
+
+Sentum clears the terminal only when the console starts, after a resize, or when a tab change requires a complete layout refresh. Normal runtime updates are rendered through a stateful frame buffer: the new frame is compared with the previous frame and only changed terminal rows are rewritten.
+
+`DashboardState` maintains a generation counter. The TUI polls for input at a short interval but does not render when runtime state, cached repository data, terminal dimensions and local UI state are unchanged. Orders, trades, models and equity history retain their slower two-second refresh cadence.
+
+This design minimizes terminal I/O and visible flicker, including over SSH, while keeping keyboard input responsive.
+
 ## Paper controls
 
 Paper mode supports interactive runtime controls:

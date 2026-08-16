@@ -29,7 +29,10 @@
 
 namespace sentum::ui {
 namespace {
-constexpr const char* clear = "\x1b[2J\x1b[H";
+constexpr const char* clear_screen = "\x1b[2J\x1b[H";
+constexpr const char* cursor_home = "\x1b[H";
+constexpr const char* enter_alt_screen = "\x1b[?1049h";
+constexpr const char* leave_alt_screen = "\x1b[?1049l";
 constexpr const char* hide_cursor = "\x1b[?25l";
 constexpr const char* show_cursor = "\x1b[?25h";
 constexpr const char* bold = "\x1b[1m";
@@ -67,6 +70,22 @@ int terminal_width() {
     if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) return std::max(80, static_cast<int>(size.ws_col));
     return 120;
 #endif
+}
+
+std::vector<std::string> split_lines(const std::string& frame) {
+    std::vector<std::string> lines;
+    std::size_t start = 0;
+    while (start < frame.size()) {
+        const auto end = frame.find('\n', start);
+        if (end == std::string::npos) {
+            lines.emplace_back(frame.substr(start));
+            break;
+        }
+        lines.emplace_back(frame.substr(start, end - start));
+        start = end + 1;
+    }
+    if (!frame.empty() && frame.back() == '\n') lines.emplace_back();
+    return lines;
 }
 
 std::string text(const nlohmann::json& j, const char* key, const std::string& fallback = "-") {
@@ -199,7 +218,12 @@ void TerminalUi::start() {
 #if !defined(_WIN32)
     enable_raw_input();
 #endif
-    std::cout << hide_cursor << std::flush;
+    previous_lines_.clear();
+    force_full_redraw_ = true;
+    ui_dirty_ = true;
+    last_terminal_width_ = terminal_width();
+    last_dashboard_generation_ = 0;
+    std::cout << enter_alt_screen << clear_screen << hide_cursor << std::flush;
     thread_ = std::thread(&TerminalUi::loop, this);
 }
 
@@ -209,13 +233,32 @@ void TerminalUi::stop() {
 #if !defined(_WIN32)
     restore_input();
 #endif
-    std::cout << show_cursor << reset << '\n' << std::flush;
+    std::cout << show_cursor << reset << leave_alt_screen << std::flush;
 }
 
 void TerminalUi::loop() {
     while (running_.load(std::memory_order_relaxed)) {
         poll_input();
-        draw();
+
+        auto& dashboard = sentum::dashboard::DashboardState::global();
+        const auto generation = dashboard.generation();
+        const int width = terminal_width();
+        const bool resized = width != last_terminal_width_;
+        const auto now = std::chrono::steady_clock::now();
+        const bool repository_due = last_repository_refresh_ == std::chrono::steady_clock::time_point{} ||
+                                    now - last_repository_refresh_ >= std::chrono::seconds(2);
+        const bool equity_due = last_equity_sample_ == std::chrono::steady_clock::time_point{} ||
+                                now - last_equity_sample_ >= std::chrono::seconds(2);
+        const bool state_changed = generation != last_dashboard_generation_;
+
+        if (ui_dirty_ || resized || state_changed || repository_due || equity_due) {
+            draw(force_full_redraw_ || resized);
+            last_dashboard_generation_ = dashboard.generation();
+            last_terminal_width_ = width;
+            ui_dirty_ = false;
+            force_full_redraw_ = false;
+        }
+
         std::this_thread::sleep_for(refresh_);
     }
 }
@@ -247,26 +290,28 @@ void TerminalUi::handle_key(char key) {
                 control.set_manual_symbol(symbol_buffer_);
                 notice_ = "Manual symbol requested: " + symbol_buffer_ + " (applies between positions)";
             }
-            symbol_buffer_.clear(); editing_symbol_ = false; return;
+            symbol_buffer_.clear(); editing_symbol_ = false; ui_dirty_ = true; return;
         }
-        if (key == 27) { symbol_buffer_.clear(); editing_symbol_ = false; notice_ = "Manual symbol edit cancelled"; return; }
-        if (key == 8 || key == 127) { if (!symbol_buffer_.empty()) symbol_buffer_.pop_back(); return; }
-        if (std::isalnum(static_cast<unsigned char>(key)) && symbol_buffer_.size() < 20) symbol_buffer_.push_back(key);
+        if (key == 27) { symbol_buffer_.clear(); editing_symbol_ = false; notice_ = "Manual symbol edit cancelled"; ui_dirty_ = true; return; }
+        if (key == 8 || key == 127) { if (!symbol_buffer_.empty()) symbol_buffer_.pop_back(); ui_dirty_ = true; return; }
+        if (std::isalnum(static_cast<unsigned char>(key)) && symbol_buffer_.size() < 20) { symbol_buffer_.push_back(key); ui_dirty_ = true; }
         return;
     }
 
     if (key >= '1' && key <= '7') {
         tab_ = static_cast<Tab>(key - '1');
         notice_.clear();
+        ui_dirty_ = true;
+        force_full_redraw_ = true;
         return;
     }
 
     switch (static_cast<char>(std::tolower(static_cast<unsigned char>(key)))) {
-        case 'p': control.pause_entries(!control.entries_paused()); notice_ = control.entries_paused() ? "New entries PAUSED; open position remains managed" : "New entries RESUMED"; break;
-        case 'c': control.request_manual_close(); notice_ = "Manual close requested through simulated execution"; break;
-        case 'a': control.set_auto_symbol(true); notice_ = "Scanner auto-selection requested"; break;
-        case 'm': editing_symbol_ = true; symbol_buffer_.clear(); notice_ = "Enter symbol and press Enter; Esc cancels"; break;
-        case 's': cycle_strategy(); break;
+        case 'p': control.pause_entries(!control.entries_paused()); notice_ = control.entries_paused() ? "New entries PAUSED; open position remains managed" : "New entries RESUMED"; ui_dirty_ = true; break;
+        case 'c': control.request_manual_close(); notice_ = "Manual close requested through simulated execution"; ui_dirty_ = true; break;
+        case 'a': control.set_auto_symbol(true); notice_ = "Scanner auto-selection requested"; ui_dirty_ = true; break;
+        case 'm': editing_symbol_ = true; symbol_buffer_.clear(); notice_ = "Enter symbol and press Enter; Esc cancels"; ui_dirty_ = true; break;
+        case 's': cycle_strategy(); ui_dirty_ = true; break;
         default: break;
     }
 }
@@ -299,7 +344,31 @@ void TerminalUi::sample_equity(const nlohmann::json& snapshot) {
     last_equity_sample_ = now;
 }
 
-void TerminalUi::draw() {
+void TerminalUi::render_frame(const std::string& frame, bool force_full) {
+    auto current_lines = split_lines(frame);
+    std::ostringstream terminal;
+
+    if (force_full || previous_lines_.empty()) {
+        terminal << cursor_home << "\x1b[2J" << frame;
+    } else {
+        const std::size_t rows = std::max(previous_lines_.size(), current_lines.size());
+        for (std::size_t i = 0; i < rows; ++i) {
+            const std::string current = i < current_lines.size() ? current_lines[i] : std::string{};
+            const std::string previous = i < previous_lines_.size() ? previous_lines_[i] : std::string{};
+            if (current == previous) continue;
+            terminal << "\x1b[" << (i + 1) << ";1H\x1b[2K" << current << reset;
+        }
+    }
+
+    const auto payload = terminal.str();
+    if (!payload.empty()) {
+        std::cout.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+        std::cout.flush();
+    }
+    previous_lines_ = std::move(current_lines);
+}
+
+void TerminalUi::draw(bool force_full) {
     const auto snapshot = sentum::dashboard::DashboardState::global().snapshot();
     refresh_repository_data(snapshot);
     sample_equity(snapshot);
@@ -322,7 +391,7 @@ void TerminalUi::draw() {
     }
 
     std::ostringstream out;
-    out << clear << bold << "SENTUM" << reset << "  " << cyan << mode << reset
+    out << bold << "SENTUM" << reset << "  " << cyan << mode << reset
         << "  " << health(status) << "  " << bold << symbol << reset;
     if (last_price > 0.0) out << "  " << format_number(last_price, last_price < 10.0 ? 5 : 2);
     out << "  Strategy " << bold << strategy << reset
@@ -520,7 +589,8 @@ void TerminalUi::draw() {
     if (editing_symbol_) out << yellow << "Manual symbol> " << symbol_buffer_ << "_" << reset << '\n';
     if (!notice_.empty()) out << dim << notice_ << reset << '\n';
     if (snapshot.contains("control_pending") && !snapshot["control_pending"].is_null()) out << yellow << "Pending: " << snapshot["control_pending"].dump() << reset << '\n';
-    std::cout << out.str() << std::flush;
+
+    render_frame(out.str(), force_full);
 }
 
 } // namespace sentum::ui
