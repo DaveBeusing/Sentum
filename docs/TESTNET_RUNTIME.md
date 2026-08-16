@@ -1,54 +1,56 @@
-# Testnet runtime
+# Binance Spot Testnet runtime
 
-Sentum exposes three explicit modes:
+Sentum supports Binance Spot Testnet execution with exchange-confirmed order state, startup reconciliation and a persistent kill switch. Production Binance endpoints are intentionally not used by this runtime.
 
-```bash
-./sentum paper
-./sentum replay data/btcusdt.csv BTCUSDT
-./sentum testnet BTCUSDT
-```
-
-The Testnet mode requires:
+## Start
 
 ```bash
 export SENTUM_ENABLE_SPOT_TESTNET=I_UNDERSTAND_TESTNET_ONLY
 export SENTUM_BINANCE_TESTNET_API_KEY='...'
 export SENTUM_BINANCE_TESTNET_API_SECRET='...'
+./sentum testnet BTCUSDT
 ```
 
-The API key must permit Spot trading only and must not have withdrawal permission.
+Use a Testnet API key with only the permissions required for Spot Testnet trading. Withdrawal permissions are neither required nor appropriate.
 
-## Execution authority
+## Order-state authority
 
-Strategy signals and REST acknowledgements do not create positions. `TestnetStrategyRuntime` changes confirmed position state only after an exchange `FILLED` update with a non-zero exchange order ID and positive executed quantity.
+Supported order states are:
+
+```text
+pending
+acknowledged
+partially filled
+filled
+cancelling
+cancelled
+rejected
+```
+
+A strategy signal or REST placement acknowledgement does not create an executed local position. Confirmed position state changes only after exchange-confirmed fills or reconciliation against exchange state.
 
 ## Startup and recovery
 
-1. Reconcile all open orders.
-2. Create a User Data Stream listen key.
-3. Start the stream.
-4. Enable submissions only after reconciliation completes.
-5. Keep the listen key alive.
-6. On keepalive failure, disable submissions, activate the kill switch, rebuild the stream, and reconcile again.
-7. A kill switch remains latched until process restart and operator review.
+The runtime reconciles open orders and balances before enabling submissions, then starts the Binance User Data Stream. Stream interruption or listen-key keepalive failure disables new submissions, activates recovery controls, rebuilds the stream and requires reconciliation again.
 
-## Persistence
+Ambiguous recovery remains blocked rather than guessing local state.
 
-Order transitions are appended to `order_events` in `log/klines.sqlite3`. Each row includes client/exchange IDs, state, quantities, fill price, source, exchange timestamp, and local timestamp.
+See [ACCOUNT_RECONCILIATION.md](ACCOUNT_RECONCILIATION.md) for the complete recovery model.
 
-## Observability
+## Persistence and observability
 
-Testnet mode atomically updates `log/status.json`. The file reports mode, symbol, stream state, reconciliation status, kill-switch state, latest price, last signal/risk decision, order state, confirmed position quantity, and exit reason.
+Order transitions are appended to `order_events` in the runtime SQLite database. Runtime and recovery activity is additionally recorded in operational audit tables.
 
-## Independent replay metric verification
+`log/status.json` provides machine-readable Testnet state including symbol, stream health, reconciliation status, kill-switch state, latest price, signal/risk information, order state and confirmed position quantity.
 
-A replay writes:
+The terminal console and web dashboard consume this operational state for read-only visibility.
 
-- `log/replay.sqlite3`
-- `log/replay_metrics.json`
+## Replay verification
 
-Validate the C++ metrics with the independent Python implementation:
+Replay writes deterministic trade history and metrics that can be checked with the independent verification tool:
 
 ```bash
 python3 tools/verify_metrics.py log/replay.sqlite3 log/replay_metrics.json
 ```
+
+Testnet behavior should be validated under partial fills, reconnects, process restart, balance mismatches and unresolved-order scenarios before it is treated as operationally reliable.
