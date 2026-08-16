@@ -241,7 +241,7 @@ void ExecutionEngine::start_trader_for(const std::string& symbol) {
     auto risk = load_risk_config(config.paperRiskConfigPath);
     if (paper_account) risk.max_total_capital = paper_account->equity();
     auto strategy = sentum::strategy::StrategyFactory::create(sentum::runtime::RuntimeControl::global().strategy());
-    trader = std::make_unique<TradeEngine>(symbol, *binance, risk, std::move(strategy), "log/klines.sqlite3");
+    trader = std::make_unique<TradeEngine>(symbol, *binance, risk, std::move(strategy), db_path);
     accounted_profit_ = 0.0;
     trader_active.store(true);
     sentum::dashboard::DashboardState::global().merge({
