@@ -2,20 +2,26 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 #include <sentum/core/RuntimeControl.hpp>
+#include <sentum/dashboard/DashboardRepository.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
 
 #if defined(_WIN32)
 #include <conio.h>
 #include <io.h>
 #else
+#include <sys/ioctl.h>
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
@@ -31,6 +37,7 @@ constexpr const char* dim = "\x1b[2m";
 constexpr const char* green = "\x1b[32m";
 constexpr const char* yellow = "\x1b[33m";
 constexpr const char* red = "\x1b[31m";
+constexpr const char* cyan = "\x1b[36m";
 constexpr const char* reset = "\x1b[0m";
 
 #if !defined(_WIN32)
@@ -44,33 +51,105 @@ void enable_raw_input() {
     raw.c_cc[VTIME] = 0;
     if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) raw_enabled = true;
 }
-void restore_input() { if (raw_enabled) { tcsetattr(STDIN_FILENO, TCSANOW, &saved_termios); raw_enabled = false; } }
+void restore_input() {
+    if (raw_enabled) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &saved_termios);
+        raw_enabled = false;
+    }
+}
 #endif
 
+int terminal_width() {
+#if defined(_WIN32)
+    return 120;
+#else
+    winsize size{};
+    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) return std::max(80, static_cast<int>(size.ws_col));
+    return 120;
+#endif
+}
+
 std::string text(const nlohmann::json& j, const char* key, const std::string& fallback = "-") {
-    if (!j.contains(key) || j[key].is_null()) return fallback;
+    if (!j.is_object() || !j.contains(key) || j[key].is_null()) return fallback;
     if (j[key].is_string()) return j[key].get<std::string>();
     return j[key].dump();
 }
 
 template <typename T>
 T number(const nlohmann::json& j, const char* key, T fallback = T{}) {
-    try { return j.contains(key) ? j[key].get<T>() : fallback; } catch (...) { return fallback; }
+    try { return j.is_object() && j.contains(key) ? j[key].get<T>() : fallback; }
+    catch (...) { return fallback; }
 }
 
-std::string state(bool active) { return active ? std::string(green) + "ACTIVE" + reset : std::string(red) + "STOPPED" + reset; }
+std::string clip(std::string value, std::size_t width) {
+    if (value.size() <= width) return value;
+    if (width <= 3) return value.substr(0, width);
+    return value.substr(0, width - 3) + "...";
+}
+
+std::string format_number(double value, int precision = 2) {
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(precision) << value;
+    return out.str();
+}
+
+std::string format_pct(double value, int precision = 2) {
+    std::ostringstream out;
+    if (value > 0.0) out << '+';
+    out << std::fixed << std::setprecision(precision) << value << '%';
+    return out.str();
+}
+
+std::string colored_value(double value, const std::string& formatted) {
+    if (value > 0.0) return std::string(green) + formatted + reset;
+    if (value < 0.0) return std::string(red) + formatted + reset;
+    return formatted;
+}
+
 std::string health(const std::string& value) {
     const char* color = value == "healthy" ? green : (value == "starting" ? yellow : red);
     return std::string(color) + value + reset;
 }
 
-void latency_line(std::ostringstream& out, const nlohmann::json& perf, const char* key, const char* label) {
-    if (!perf.contains(key) || !perf[key].is_object()) return;
-    const auto& p = perf[key];
-    out << "  " << std::left << std::setw(20) << label
-        << " p50 " << std::setw(8) << number<double>(p, "p50_us")
-        << " p95 " << std::setw(8) << number<double>(p, "p95_us")
-        << " p99 " << std::setw(8) << number<double>(p, "p99_us") << " us\n";
+std::string on_off(bool active) {
+    return active ? std::string(green) + "ON" + reset : std::string(red) + "OFF" + reset;
+}
+
+std::string timestamp_text(std::int64_t epoch_ms) {
+    if (epoch_ms <= 0) return "-";
+    const std::time_t seconds = static_cast<std::time_t>(epoch_ms / 1000);
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &seconds);
+#else
+    localtime_r(&seconds, &tm);
+#endif
+    char buffer[16]{};
+    std::strftime(buffer, sizeof(buffer), "%H:%M:%S", &tm);
+    return buffer;
+}
+
+std::string sparkline(const std::deque<double>& values, std::size_t width = 40) {
+    if (values.empty()) return std::string(width, '-');
+    const std::size_t count = std::min(width, values.size());
+    auto begin = values.end() - static_cast<std::ptrdiff_t>(count);
+    const auto [min_it, max_it] = std::minmax_element(begin, values.end());
+    const double lo = *min_it, hi = *max_it;
+    static constexpr char levels[] = ".:-=+*#@";
+    std::string out;
+    out.reserve(count);
+    for (auto it = begin; it != values.end(); ++it) {
+        const double normalized = hi > lo ? (*it - lo) / (hi - lo) : 0.5;
+        const auto index = static_cast<std::size_t>(std::clamp(normalized, 0.0, 1.0) * 7.0);
+        out.push_back(levels[index]);
+    }
+    return out;
+}
+
+std::string bar(double value, std::size_t width = 18) {
+    const double v = std::clamp(value, 0.0, 1.0);
+    const std::size_t filled = static_cast<std::size_t>(std::round(v * static_cast<double>(width)));
+    return std::string(filled, '#') + std::string(width - filled, '.');
 }
 
 nlohmann::json preset(const std::string& type) {
@@ -83,6 +162,24 @@ nlohmann::json preset(const std::string& type) {
         {{"type","trend"},{"weight",1.0},{"parameters",{{"fast_period",12},{"slow_period",26},{"threshold",0.001}}}}
     })}};
     return {{"type","momentum"},{"parameters",{{"lookback",20},{"entry_threshold",0.001}}}};
+}
+
+void separator(std::ostringstream& out, int width) {
+    out << dim << std::string(static_cast<std::size_t>(std::max(20, width)), '-') << reset << '\n';
+}
+
+void title(std::ostringstream& out, const std::string& value) {
+    out << bold << cyan << value << reset << '\n';
+}
+
+void latency_row(std::ostringstream& out, const nlohmann::json& perf, const char* key, const char* label) {
+    if (!perf.contains(key) || !perf[key].is_object()) return;
+    const auto& p = perf[key];
+    out << "  " << std::left << std::setw(18) << label
+        << std::right << std::setw(10) << format_number(number<double>(p, "p50_us"), 1)
+        << std::setw(10) << format_number(number<double>(p, "p95_us"), 1)
+        << std::setw(10) << format_number(number<double>(p, "p99_us"), 1)
+        << std::setw(10) << format_number(number<double>(p, "max_us"), 1) << '\n';
 }
 } // namespace
 
@@ -158,8 +255,14 @@ void TerminalUi::handle_key(char key) {
         return;
     }
 
+    if (key >= '1' && key <= '7') {
+        tab_ = static_cast<Tab>(key - '1');
+        notice_.clear();
+        return;
+    }
+
     switch (static_cast<char>(std::tolower(static_cast<unsigned char>(key)))) {
-        case 'p': control.pause_entries(!control.entries_paused()); notice_ = control.entries_paused() ? "New entries paused; open position remains managed" : "New entries resumed"; break;
+        case 'p': control.pause_entries(!control.entries_paused()); notice_ = control.entries_paused() ? "New entries PAUSED; open position remains managed" : "New entries RESUMED"; break;
         case 'c': control.request_manual_close(); notice_ = "Manual close requested through simulated execution"; break;
         case 'a': control.set_auto_symbol(true); notice_ = "Scanner auto-selection requested"; break;
         case 'm': editing_symbol_ = true; symbol_buffer_.clear(); notice_ = "Enter symbol and press Enter; Esc cancels"; break;
@@ -177,74 +280,246 @@ void TerminalUi::cycle_strategy() {
     notice_ = "Strategy requested: " + types[index] + " (applies between positions)";
 }
 
+void TerminalUi::refresh_repository_data(const nlohmann::json& snapshot) {
+    const auto now = std::chrono::steady_clock::now();
+    if (last_repository_refresh_ != std::chrono::steady_clock::time_point{} && now - last_repository_refresh_ < std::chrono::seconds(2)) return;
+    repository_db_path_ = text(snapshot, "db_path", "log/klines.sqlite3");
+    sentum::dashboard::DashboardRepository repository(repository_db_path_);
+    recent_trades_ = repository.recent_trades(12);
+    recent_orders_ = repository.recent_orders(12);
+    models_ = repository.models(12);
+    last_repository_refresh_ = now;
+}
+
+void TerminalUi::sample_equity(const nlohmann::json& snapshot) {
+    const auto now = std::chrono::steady_clock::now();
+    if (last_equity_sample_ != std::chrono::steady_clock::time_point{} && now - last_equity_sample_ < std::chrono::seconds(2)) return;
+    equity_history_.push_back(number<double>(snapshot, "balance"));
+    while (equity_history_.size() > 120) equity_history_.pop_front();
+    last_equity_sample_ = now;
+}
+
 void TerminalUi::draw() {
     const auto snapshot = sentum::dashboard::DashboardState::global().snapshot();
+    refresh_repository_data(snapshot);
+    sample_equity(snapshot);
+
+    const int width = terminal_width();
     const auto mode = text(snapshot, "mode", "idle");
     const auto status = text(snapshot, "health", "starting");
+    const auto symbol = text(snapshot, "current_symbol", text(snapshot, "symbol", "-"));
+    const auto strategy = text(snapshot, "strategy_name", "-");
+    const bool paused = number<bool>(snapshot, "entries_paused");
+    const double equity = number<double>(snapshot, "balance");
+    const double realized = number<double>(snapshot.value("paper_account", nlohmann::json::object()), "realized_profit");
+    const double total_profit = number<double>(snapshot, "total_profit");
+
+    double last_price = 0.0, unrealized = 0.0;
+    const bool has_position = snapshot.contains("active_position") && snapshot["active_position"].is_object();
+    if (has_position) {
+        last_price = number<double>(snapshot["active_position"], "current_price");
+        unrealized = number<double>(snapshot["active_position"], "unrealized_profit");
+    }
 
     std::ostringstream out;
-    out << clear << bold << "SENTUM" << reset << "  " << dim << "Interactive Paper Trading Console" << reset << "\n";
-    out << "Mode: " << bold << mode << reset << "   Health: " << health(status)
-        << "   Symbol: " << text(snapshot, "current_symbol", text(snapshot, "symbol", "-")) << "\n";
-    out << "Strategy: " << bold << text(snapshot, "strategy_name", "-") << reset
-        << "   Symbol mode: " << text(snapshot, "symbol_mode", "auto")
-        << "   Entries: " << (number<bool>(snapshot, "entries_paused") ? std::string(yellow)+"PAUSED"+reset : std::string(green)+"ENABLED"+reset) << "\n\n";
+    out << clear << bold << "SENTUM" << reset << "  " << cyan << mode << reset
+        << "  " << health(status) << "  " << bold << symbol << reset;
+    if (last_price > 0.0) out << "  " << format_number(last_price, last_price < 10.0 ? 5 : 2);
+    out << "  Strategy " << bold << strategy << reset
+        << "  Entries " << (paused ? std::string(yellow)+"PAUSED"+reset : std::string(green)+"RUNNING"+reset) << '\n';
 
-    out << bold << "Paper Account" << reset << '\n'
-        << "  Equity: " << std::fixed << std::setprecision(2) << number<double>(snapshot, "balance") << ' ' << text(snapshot, "quote_asset", "USDC")
-        << "   Realized P/L: " << number<double>(snapshot.value("paper_account", nlohmann::json::object()), "realized_profit") << '\n';
+    out << "Equity " << format_number(equity) << ' ' << text(snapshot, "quote_asset", "USDC")
+        << "  Realized " << colored_value(realized, format_number(realized))
+        << "  Runtime P/L " << colored_value(total_profit, format_number(total_profit));
+    if (has_position) out << "  Unrealized " << colored_value(unrealized, format_number(unrealized));
+    out << "  Market " << on_off(number<bool>(snapshot, "market_data_connected")) << '\n';
+    separator(out, width);
 
-    out << bold << "Services" << reset << '\n'
-        << "  Collector  " << state(number<bool>(snapshot, "collector_active"))
-        << "   Scanner  " << state(number<bool>(snapshot, "scanner_active"))
-        << "   Trader  " << state(number<bool>(snapshot, "trader_active")) << '\n';
+    static const char* tab_names[] = {"MARKET","SCANNER","ORDERS","TRADES","STRATEGY","MODELS","SYSTEM"};
+    for (int i = 0; i < 7; ++i) {
+        const bool selected = static_cast<int>(tab_) == i;
+        out << (selected ? std::string(bold)+cyan : std::string(dim)) << '[' << (i + 1) << "] " << tab_names[i] << reset;
+        if (i != 6) out << "   ";
+    }
+    out << '\n';
+    separator(out, width);
 
-    out << bold << "Market" << reset << '\n'
-        << "  Markets: " << number<std::size_t>(snapshot, "markets")
-        << "   Events/s: " << std::fixed << std::setprecision(1) << number<double>(snapshot, "events_per_second")
-        << "   Queue: " << number<std::size_t>(snapshot, "queue_depth")
-        << "   Drop: " << std::setprecision(4) << number<double>(snapshot, "drop_rate") * 100.0 << "%\n"
-        << "  Top: " << text(snapshot, "top_asset") << "  Return: " << std::setprecision(2) << number<double>(snapshot, "top_return_percent") << "%\n";
+    const auto scanner = snapshot.value("scanner", nlohmann::json::array());
+    const auto risk = snapshot.value("risk_config", nlohmann::json::object());
+    const auto strategy_config = snapshot.value("strategy_config", nlohmann::json::object());
 
-    out << bold << "Signal / Risk" << reset << '\n'
-        << "  Signal: " << text(snapshot, "last_signal") << "  Confidence: " << std::setprecision(3) << number<double>(snapshot, "signal_confidence")
-        << "  Risk: " << text(snapshot, "last_risk_decision") << '\n'
-        << "  Signal reason: " << text(snapshot, "signal_reason") << '\n'
-        << "  Risk reason:   " << text(snapshot, "risk_reason") << '\n';
+    if (tab_ == Tab::Market) {
+        title(out, "MARKET / POSITION / RISK");
+        const double spread = number<double>(risk, "spread_percent");
+        const double indicative_bid = last_price > 0.0 ? last_price * (1.0 - spread * 0.5) : 0.0;
+        const double indicative_ask = last_price > 0.0 ? last_price * (1.0 + spread * 0.5) : 0.0;
+        out << "  Symbol " << std::left << std::setw(12) << symbol
+            << "Last " << std::right << std::setw(14) << (last_price > 0.0 ? format_number(last_price, last_price < 10.0 ? 5 : 2) : "-")
+            << "   Fill-model Bid/Ask " << (indicative_bid > 0.0 ? format_number(indicative_bid, 2) + " / " + format_number(indicative_ask, 2) : "-") << '\n';
 
-    if (snapshot.contains("risk_config") && snapshot["risk_config"].is_object()) {
-        const auto& r = snapshot["risk_config"];
-        out << bold << "Risk" << reset << '\n'
-            << "  Capital " << number<double>(r,"max_total_capital") << "  Risk/trade " << number<double>(r,"risk_per_trade")*100.0 << "%"
-            << "  SL " << number<double>(r,"stop_loss_percent")*100.0 << "%  TP " << number<double>(r,"take_profit_percent")*100.0 << "%"
-            << "  Max hold " << number<long long>(r,"max_holding_seconds") << "s\n";
+        if (has_position) {
+            const auto& p = snapshot["active_position"];
+            out << "  " << green << bold << "LONG" << reset
+                << "   Entry " << format_number(number<double>(p,"entry_price"),2)
+                << "   Qty " << format_number(number<double>(p,"quantity"),6)
+                << "   U-P/L " << colored_value(unrealized, format_number(unrealized))
+                << "   SL " << format_number(number<double>(p,"stop_loss"),2)
+                << "   TP " << format_number(number<double>(p,"take_profit"),2) << '\n';
+        } else {
+            out << "  " << dim << "FLAT - no open paper position" << reset << '\n';
+        }
+
+        out << "  Risk/trade " << format_pct(number<double>(risk,"risk_per_trade") * 100.0)
+            << "   Stop " << format_pct(number<double>(risk,"stop_loss_percent") * 100.0)
+            << "   Target " << format_pct(number<double>(risk,"take_profit_percent") * 100.0)
+            << "   Max hold " << number<long long>(risk,"max_holding_seconds") << "s"
+            << "   Kill switch " << (number<bool>(snapshot,"kill_switch_active") ? std::string(red)+"ON"+reset : std::string(green)+"OFF"+reset) << '\n';
+
+        out << "  Equity curve  " << cyan << sparkline(equity_history_, static_cast<std::size_t>(std::min(60, width - 18))) << reset << '\n';
+        separator(out, width);
+        title(out, "MARKET WATCH");
+        out << "  " << std::left << std::setw(14) << "Symbol" << std::right << std::setw(12) << "1m Return" << std::setw(12) << "Rank" << std::setw(16) << "State" << '\n';
+        std::size_t rank = 1;
+        for (const auto& row : scanner) {
+            const double r = number<double>(row,"return") * 100.0;
+            const std::string row_symbol = text(row,"symbol");
+            out << "  " << std::left << std::setw(14) << row_symbol << std::right << std::setw(12) << format_pct(r)
+                << std::setw(12) << rank++ << std::setw(16) << (row_symbol == symbol ? "TRADING" : "WATCH") << '\n';
+        }
+        if (scanner.empty()) out << "  " << dim << "Waiting for scanner data..." << reset << '\n';
+
+        separator(out, width);
+        title(out, "RECENT TRADES");
+        out << "  " << std::left << std::setw(10) << "Time" << std::setw(12) << "Symbol" << std::setw(16) << "Strategy"
+            << std::right << std::setw(12) << "Entry" << std::setw(12) << "Exit" << std::setw(12) << "P/L" << "  Exit reason\n";
+        int shown = 0;
+        for (const auto& row : recent_trades_) {
+            if (shown++ >= 5) break;
+            const double pnl = number<double>(row,"net_profit");
+            out << "  " << std::left << std::setw(10) << timestamp_text(number<std::int64_t>(row,"exit_ts"))
+                << std::setw(12) << text(row,"symbol") << std::setw(16) << clip(text(row,"strategy"),15)
+                << std::right << std::setw(12) << format_number(number<double>(row,"entry_price"),2)
+                << std::setw(12) << format_number(number<double>(row,"exit_price"),2)
+                << std::setw(12) << format_number(pnl,2) << "  " << clip(text(row,"exit_reason"),22) << '\n';
+        }
+        if (recent_trades_.empty()) out << "  " << dim << "No completed trades yet." << reset << '\n';
     }
 
-    out << bold << "Trading" << reset << '\n'
-        << "  Trades: " << number<int>(snapshot, "total_trades") << "   W/L: " << number<int>(snapshot, "wins") << '/' << number<int>(snapshot, "losses")
-        << "   Win rate: " << std::setprecision(2) << number<double>(snapshot, "win_rate") << "%   P/L: " << number<double>(snapshot, "total_profit") << '\n';
-
-    if (snapshot.contains("active_position") && snapshot["active_position"].is_object()) {
-        const auto& p = snapshot["active_position"];
-        out << "  Position: " << text(p, "symbol") << "  entry " << number<double>(p, "entry_price")
-            << "  last " << number<double>(p, "current_price") << "  unrealized " << number<double>(p, "unrealized_profit")
-            << "  SL " << number<double>(p,"stop_loss") << "  TP " << number<double>(p,"take_profit") << '\n';
+    if (tab_ == Tab::Scanner) {
+        title(out, "SCANNER / WATCHLIST");
+        out << "  Markets " << number<std::size_t>(snapshot,"markets")
+            << "   Events/s " << format_number(number<double>(snapshot,"events_per_second"),1)
+            << "   Leader " << text(snapshot,"top_asset")
+            << "   Leader return " << format_pct(number<double>(snapshot,"top_return_percent")) << "\n\n";
+        out << "  " << std::left << std::setw(6) << "Rank" << std::setw(16) << "Symbol" << std::right << std::setw(14) << "1m Return" << std::setw(16) << "Role" << '\n';
+        std::size_t rank = 1;
+        for (const auto& row : scanner) {
+            const auto s = text(row,"symbol");
+            const double r = number<double>(row,"return") * 100.0;
+            out << "  " << std::left << std::setw(6) << rank++ << std::setw(16) << s
+                << std::right << std::setw(14) << format_pct(r) << std::setw(16) << (s == symbol ? "ACTIVE" : "CANDIDATE") << '\n';
+        }
+        if (scanner.empty()) out << "  Waiting for closed candles and ranking data.\n";
+        out << "\n  " << dim << "Scanner ranking is market-performance based; strategy approval happens only inside TradeEngine." << reset << '\n';
     }
 
-    if (snapshot.contains("performance") && snapshot["performance"].is_object()) {
-        out << bold << "Latency" << reset << '\n';
-        const auto& perf = snapshot["performance"];
-        latency_line(out, perf, "parse_latency", "Parser");
-        latency_line(out, perf, "event_dispatch_latency", "Event dispatch");
-        latency_line(out, perf, "strategy_decision_latency", "Decision");
-        latency_line(out, perf, "sqlite_batch_latency", "SQLite batch");
+    if (tab_ == Tab::Orders) {
+        title(out, "ORDER / EXECUTION HISTORY");
+        out << "  " << std::left << std::setw(10) << "Time" << std::setw(13) << "Symbol" << std::setw(8) << "Side"
+            << std::setw(18) << "State" << std::right << std::setw(14) << "Requested" << std::setw(14) << "Executed" << std::setw(14) << "Fill" << "  Source\n";
+        for (const auto& row : recent_orders_) {
+            out << "  " << std::left << std::setw(10) << timestamp_text(number<std::int64_t>(row,"local_ts"))
+                << std::setw(13) << text(row,"symbol") << std::setw(8) << text(row,"side") << std::setw(18) << clip(text(row,"state"),17)
+                << std::right << std::setw(14) << format_number(number<double>(row,"requested_quantity"),6)
+                << std::setw(14) << format_number(number<double>(row,"executed_quantity"),6)
+                << std::setw(14) << format_number(number<double>(row,"average_fill_price"),2) << "  " << clip(text(row,"source"),18) << '\n';
+        }
+        if (recent_orders_.empty()) out << "  " << dim << "No persisted order events." << reset << '\n';
     }
 
-    out << '\n' << bold << "Controls" << reset << "  [S] Strategy  [A] Auto symbol  [M] Manual symbol  [P] Pause/Resume entries  [C] Close paper position\n";
+    if (tab_ == Tab::Trades) {
+        title(out, "TRADE HISTORY / P&L");
+        out << "  Total " << number<int>(snapshot,"total_trades") << "   Wins " << number<int>(snapshot,"wins")
+            << "   Losses " << number<int>(snapshot,"losses") << "   Win rate " << format_pct(number<double>(snapshot,"win_rate"))
+            << "   Avg P/L " << format_number(number<double>(snapshot,"average_profit")) << "\n\n";
+        out << "  " << std::left << std::setw(10) << "Time" << std::setw(13) << "Symbol" << std::setw(18) << "Strategy"
+            << std::right << std::setw(13) << "Entry" << std::setw(13) << "Exit" << std::setw(13) << "Fees" << std::setw(13) << "Net P/L" << "  Reason\n";
+        for (const auto& row : recent_trades_) {
+            out << "  " << std::left << std::setw(10) << timestamp_text(number<std::int64_t>(row,"exit_ts"))
+                << std::setw(13) << text(row,"symbol") << std::setw(18) << clip(text(row,"strategy"),17)
+                << std::right << std::setw(13) << format_number(number<double>(row,"entry_price"),2)
+                << std::setw(13) << format_number(number<double>(row,"exit_price"),2)
+                << std::setw(13) << format_number(number<double>(row,"fees"),2)
+                << std::setw(13) << format_number(number<double>(row,"net_profit"),2) << "  " << clip(text(row,"exit_reason"),20) << '\n';
+        }
+        if (recent_trades_.empty()) out << "  " << dim << "No completed trades yet." << reset << '\n';
+        out << "\n  Equity  " << cyan << sparkline(equity_history_, static_cast<std::size_t>(std::min(70, width - 12))) << reset << '\n';
+    }
+
+    if (tab_ == Tab::Strategy) {
+        title(out, "STRATEGY DECISION MATRIX");
+        const double confidence = number<double>(snapshot,"signal_confidence");
+        const auto signal_reason = text(snapshot,"signal_reason");
+        out << "  Active strategy  " << bold << strategy << reset << '\n'
+            << "  Last signal      " << text(snapshot,"last_signal") << '\n'
+            << "  Aggregate score  " << format_number(confidence,3) << "  [" << bar(confidence) << "]\n"
+            << "  Risk decision    " << text(snapshot,"last_risk_decision") << '\n'
+            << "  Signal reason    " << signal_reason << '\n'
+            << "  Risk reason      " << text(snapshot,"risk_reason") << "\n\n";
+
+        if (strategy_config.value("type", std::string{}) == "ensemble" && strategy_config.contains("members")) {
+            out << "  " << std::left << std::setw(24) << "Member" << std::setw(12) << "Weight" << std::setw(16) << "Last confirm" << '\n';
+            for (const auto& member : strategy_config["members"]) {
+                const auto member_name = member.value("type", std::string("unknown"));
+                const bool confirmed = signal_reason.find(member_name) != std::string::npos;
+                out << "  " << std::left << std::setw(24) << member_name << std::setw(12) << format_number(member.value("weight",1.0),2)
+                    << std::setw(16) << (confirmed ? "YES" : "-") << '\n';
+            }
+            out << "\n  " << dim << "Member confirmation is derived from the actual ensemble signal reason; aggregate confidence is the engine score." << reset << '\n';
+        } else {
+            out << "  Configuration: " << strategy_config.dump() << '\n';
+        }
+        out << "\n  Controls: [S] cycle preset   [P] pause/resume entries   [A] scanner symbol   [M] manual symbol\n";
+    }
+
+    if (tab_ == Tab::Models) {
+        title(out, "MODEL LIFECYCLE");
+        out << "  " << std::left << std::setw(24) << "Model" << std::setw(13) << "Symbol" << std::setw(13) << "Stage" << "Promotion path\n";
+        for (const auto& row : models_) {
+            const auto stage = text(row,"stage");
+            std::string path = "research -> shadow -> paper -> testnet";
+            out << "  " << std::left << std::setw(24) << clip(text(row,"name",text(row,"model_id")),23)
+                << std::setw(13) << text(row,"symbol") << std::setw(13) << stage << path << '\n';
+        }
+        if (models_.empty()) out << "  " << dim << "No registered models in log/models.sqlite3." << reset << '\n';
+        out << "\n  Active paper model: " << text(snapshot,"paper_model_id","-") << '\n';
+        out << "  " << dim << "Promotion remains CLI-controlled and is intentionally not writable from the TUI." << reset << '\n';
+    }
+
+    if (tab_ == Tab::System) {
+        title(out, "SYSTEM / LATENCY / DATA PATH");
+        out << "  Collector " << on_off(number<bool>(snapshot,"collector_active"))
+            << "   Scanner " << on_off(number<bool>(snapshot,"scanner_active"))
+            << "   Trader " << on_off(number<bool>(snapshot,"trader_active"))
+            << "   Queue " << number<std::size_t>(snapshot,"queue_depth")
+            << "   Drop " << format_pct(number<double>(snapshot,"drop_rate") * 100.0,4)
+            << "   Events/s " << format_number(number<double>(snapshot,"events_per_second"),1) << '\n';
+        out << "  DB " << text(snapshot,"db_path") << "   Size " << format_number(number<double>(snapshot,"db_size_bytes") / 1024.0 / 1024.0,2) << " MiB\n\n";
+        out << "  " << std::left << std::setw(18) << "Pipeline" << std::right << std::setw(10) << "p50 us" << std::setw(10) << "p95 us" << std::setw(10) << "p99 us" << std::setw(10) << "max us" << '\n';
+        const auto perf = snapshot.value("performance", nlohmann::json::object());
+        latency_row(out, perf, "parse_latency", "Parser");
+        latency_row(out, perf, "event_dispatch_latency", "Event dispatch");
+        latency_row(out, perf, "strategy_decision_latency", "Decision");
+        latency_row(out, perf, "sqlite_batch_latency", "SQLite batch");
+        out << "\n  Dashboard bind: " << text(snapshot,"dashboard_host","-") << ':' << number<int>(snapshot,"dashboard_port") << '\n';
+    }
+
+    separator(out, width);
+    out << bold << "TRADING CONTROLS" << reset
+        << "  [S] Strategy  [A] Auto  [M] Manual symbol  [P] Pause/Resume  [C] Close paper position  [Ctrl+C] Quit\n";
     if (editing_symbol_) out << yellow << "Manual symbol> " << symbol_buffer_ << "_" << reset << '\n';
     if (!notice_.empty()) out << dim << notice_ << reset << '\n';
-    if (snapshot.contains("control_pending") && !snapshot["control_pending"].is_null()) out << yellow << "Pending control: " << snapshot["control_pending"].dump() << reset << '\n';
-    out << dim << "Strategy/symbol changes are applied only between positions. Ctrl+C stops Sentum." << reset;
+    if (snapshot.contains("control_pending") && !snapshot["control_pending"].is_null()) out << yellow << "Pending: " << snapshot["control_pending"].dump() << reset << '\n';
     std::cout << out.str() << std::flush;
 }
 
