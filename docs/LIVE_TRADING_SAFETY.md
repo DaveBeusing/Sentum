@@ -1,35 +1,39 @@
-# Live execution safety
+# Execution safety
 
-Phase 5 is hard-wired to Binance Spot Testnet (`testnet.binance.vision` and `stream.testnet.binance.vision`). Production endpoints are intentionally absent from the execution client.
+Sentum is designed around simulated execution, Binance Spot Testnet and explicit safety boundaries. Production Binance order routing and withdrawal functionality are not part of the supported runtime described by this repository.
 
-## Required environment
+## Paper and research
 
-```bash
-export SENTUM_ENABLE_SPOT_TESTNET=I_UNDERSTAND_TESTNET_ONLY
-export SENTUM_BINANCE_TESTNET_API_KEY='...'
-export SENTUM_BINANCE_TESTNET_API_SECRET='...'
+Paper, replay, shadow and research use `SimulatedExecutionVenue`. Paper consumes live public market data but does not submit exchange orders. Simulated fills account for configured fees, spread and slippage.
+
+Paper trading uses a persistent simulated account rather than the authenticated Binance account balance.
+
+## Testnet
+
+Binance Spot Testnet uses exchange-confirmed order state. A local signal or REST acknowledgement is never treated as an executed position without a confirmed fill or successful reconciliation.
+
+New Testnet submissions remain blocked until startup reconciliation and the User Data Stream are healthy. Stream failures, unresolved orders or balance mismatches keep trading blocked and can latch the kill switch.
+
+## Model promotion
+
+Model promotion is intentionally staged:
+
+```text
+research -> shadow -> paper -> testnet
 ```
 
-Create an API key that permits Spot trading only. Never enable withdrawals. Sentum neither needs nor implements withdrawal endpoints.
+Each transition requires evidence that passes configured policy gates plus explicit operator confirmation. The lifecycle does not contain an automatic production-money stage.
 
-## State authority
+## Credentials
 
-A local order request starts as `pending`. A successful REST response moves it only to `acknowledged`. Positions are created or changed only after an exchange event reports `FILLED` with a non-zero exchange order id and executed quantity.
+Do not commit API credentials. Testnet keys should have only the permissions required for Spot Testnet trading and should not have withdrawal rights.
 
-`PARTIALLY_FILLED` remains an order state and does not create a completed local position. Cancellation remains `cancelling` until the User Data Stream or a later reconciliation confirms `CANCELED`/`EXPIRED`.
+## Dashboard and terminal UI
 
-## Startup
+The web dashboard remains read-only. The terminal Paper controls can select strategy/symbol, pause new entries and request a simulated close, but they do not enable production exchange execution.
 
-`LiveOrderSession::start()` performs open-order reconciliation before accepting any new order. If reconciliation fails, startup fails closed.
+## Operational expectations
 
-## Kill switch
+Before relying on Sentum even in Testnet, validate long-running Paper behavior, queue/drop limits, sanitizer builds, User Data Stream interruption, partial fills, restart reconciliation, balance mismatches and kill-switch recovery.
 
-The kill switch:
-
-1. rejects new orders,
-2. attempts to cancel every pending, acknowledged, or partially-filled order,
-3. leaves final status unresolved until confirmed by Binance,
-4. activates automatically if listen-key keepalive fails,
-5. activates during orderly shutdown.
-
-After testnet soak testing, production support must be introduced as a separate reviewed change with an explicit capital cap, production-specific credentials, account/balance reconciliation, and operational runbook. Do not repoint the testnet constants.
+Sentum remains experimental trading-system software. Historical or simulated performance must not be interpreted as a guarantee of future results.
