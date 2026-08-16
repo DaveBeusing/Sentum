@@ -1,72 +1,49 @@
-# Sentum Dashboard
+# Web dashboard
 
-Phase 9 adds a lightweight read-only web dashboard directly to the Sentum C++ runtime.
+Sentum includes a lightweight read-only web dashboard served directly by the C++ runtime. Paper and Testnet modes start it automatically; it can also run standalone against persisted Sentum data.
 
-## Security model
-
-The server binds only to loopback:
-
-```text
-127.0.0.1
-```
-
-It intentionally exposes no order placement, cancel, kill-switch reset, credential, configuration-write, or live-trading enable endpoints. Trading control remains outside the browser UI.
-
-The default port is `8080` and can be changed with:
-
-```bash
-export SENTUM_DASHBOARD_PORT=8090
-```
-
-## Runtime modes
-
-Paper mode starts the dashboard automatically:
-
-```bash
-./sentum paper
-```
-
-Testnet mode also starts it automatically:
-
-```bash
-./sentum testnet BTCUSDT
-```
-
-The dashboard can be run independently against persisted Sentum data:
+## Start
 
 ```bash
 ./sentum dashboard
 ```
 
-Open:
+Dashboard bind settings are controlled by `config/config.json`:
 
-```text
-http://127.0.0.1:8080
+```json
+{
+  "dashboardHost": "127.0.0.1",
+  "dashboardPort": 8080
+}
 ```
 
-Replay writes `log/replay_metrics.json`; standalone dashboard mode can display the most recent replay metrics.
+Use `127.0.0.1` for local-only access. Binding to `0.0.0.0` exposes the service on available network interfaces and should only be used when network/firewall controls are appropriate.
 
-## Views
+A one-off port override remains available:
 
-The initial dashboard provides:
+```bash
+./sentum dashboard --dashboard-port 8090
+```
 
-- runtime mode and health
-- quote balance
-- net P&L, completed trades, and win rate
-- current trading symbol
-- market persistence drop rate
-- market-data, user-stream, reconciliation, kill-switch, collector, and scanner health
-- current scanner top ranking
-- cumulative realized-equity curve
-- recent completed trades
-- recent exchange/order-state events
-- latest replay/backtest metrics
+## Runtime and research views
 
-The browser refreshes read-only API data every two seconds.
+The dashboard combines current runtime state with persisted history and research artifacts. It exposes:
+
+- Paper/Testnet health and service status
+- account/equity and P/L information
+- active symbol and position state
+- scanner rankings
+- trade and order history
+- runtime performance and persistence health
+- replay/backtest metrics
+- experiment history and research comparison
+- holdout equity/drawdown visualization
+- parameter landscapes and robustness statistics
+- registered model lifecycle state
 
 ## API
 
-All endpoints are GET-only:
+The browser surface is GET-only. Important endpoints include:
 
 ```text
 GET /api/health
@@ -75,41 +52,22 @@ GET /api/trades?limit=100
 GET /api/orders?limit=100
 GET /api/equity?limit=500
 GET /api/replay
+GET /api/research
+GET /api/experiments?limit=200
+GET /api/experiment?run_id=<run-id>
+GET /api/experiment/trials?run_id=<run-id>&limit=10000
+GET /api/models
+GET /api/model?model_id=<model-id>
 ```
 
-Non-GET requests return HTTP 405.
+Non-GET requests are rejected. The web dashboard does not expose order placement, cancellation, model promotion, configuration writes, credential access, kill-switch reset or production-trading activation.
 
 ## Data sources
 
-Live in-process paper state is published through `DashboardState`.
+Live process state comes from `DashboardState`. Historical trades/orders are read through independent read-only SQLite connections. Testnet operational state can additionally be read from `log/status.json`. Research views use `log/experiments.sqlite3` and immutable experiment artifacts.
 
-Testnet state additionally reuses the existing atomic `log/status.json` runtime status written by the testnet execution layer.
+The dashboard remains outside the market-data and execution hot path. Browser reads do not use the SQLite writer connection.
 
-Persistent history is read using a separate read-only SQLite connection from:
+## Security
 
-```text
-log/klines.sqlite3
-```
-
-This keeps dashboard reads outside the market-data and execution hot paths. SQLite busy timeout is limited to one second and unavailable/missing tables produce empty dashboard datasets instead of stopping the trading runtime.
-
-## Architecture
-
-```text
-Sentum Core
-   |-- DashboardState (in-process snapshot)
-   |-- status.json (testnet runtime state)
-   |-- SQLite WAL (trades/order events)
-   |-- replay_metrics.json
-   |
-   +--> DashboardServer / Boost.Beast
-           |
-           +--> embedded HTML/CSS/JS
-           +--> read-only JSON API
-```
-
-The dashboard has no CDN or external JavaScript dependency, so it remains usable on an isolated trading host.
-
-## Future dashboard work
-
-Good follow-up additions include WebSocket/SSE push telemetry, richer position/risk cards, latency histograms, strategy comparison, replay-run history, and Prometheus-compatible metrics. Browser-side trading controls should remain gated behind a separate security design rather than being added casually to this read-only server.
+The dashboard is not an authenticated remote-control plane. If it is bound beyond loopback, protect it with host/network controls and treat all exposed runtime and research information as operational data.
