@@ -38,9 +38,17 @@ Paper mode supports interactive runtime controls:
 - `M` — enter a manual symbol and press Enter; Escape cancels.
 - `P` — pause or resume new entries. Existing positions remain managed.
 - `C` — request a manual Paper close through `SimulatedExecutionVenue`.
-- `Ctrl+C` — stop Sentum.
+- `Ctrl+C` — begin a graceful Sentum shutdown.
 
 Strategy and symbol changes are deferred while a position is open. They are applied only after the current position exits.
+
+## Graceful shutdown
+
+`Ctrl+C` does not terminate worker threads abruptly. Sentum switches from the trading workstation to a dedicated shutdown screen and reports the current cleanup step and overall progress.
+
+Paper shutdown proceeds through the trader, market stream/database writer, runtime coordinator, scanner worker, final runtime-state update and dashboard shutdown. Buffered market data is allowed to flush before the process exits.
+
+The runtime coordinator wait is interruptible, so shutdown no longer waits for the normal one-second refresh sleep to expire. In non-interactive/headless execution the same stages are emitted as plain log-style lines instead of ANSI redraws.
 
 ## Strategy runtime
 
