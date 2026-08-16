@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -41,6 +42,30 @@ void handle_signal(int) noexcept { shutdown_requested.store(true, std::memory_or
 struct ReplayResult { BacktestMetrics metrics; double net_profit = 0.0; };
 struct DashboardConfig { std::string host{"127.0.0.1"}; std::uint16_t port{8080}; };
 
+void render_shutdown_progress(std::size_t step, std::size_t total, const std::string& detail,
+                              std::chrono::steady_clock::time_point started) {
+    if (!sentum::ui::stdout_is_terminal()) {
+        std::cout << "[shutdown " << step << '/' << total << "] " << detail << '\n' << std::flush;
+        return;
+    }
+
+    constexpr std::size_t bar_width = 36;
+    const double fraction = total == 0 ? 0.0 : static_cast<double>(step) / static_cast<double>(total);
+    const auto filled = static_cast<std::size_t>(fraction * static_cast<double>(bar_width));
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started).count();
+
+    std::ostringstream out;
+    out << "\x1b[2J\x1b[H\x1b[1mSENTUM\x1b[0m  Graceful shutdown\n\n";
+    out << "  [" << std::string(filled, '#') << std::string(bar_width - filled, '.') << "] "
+        << std::setw(3) << static_cast<int>(fraction * 100.0) << "%\n\n";
+    out << "  Step " << step << " of " << total << "\n";
+    out << "  " << detail << "\n\n";
+    out << "  Elapsed: " << std::fixed << std::setprecision(1) << (static_cast<double>(elapsed_ms) / 1000.0) << " s\n";
+    out << "  Please wait while runtime state and buffered market data are closed safely.\n";
+    std::cout << out.str() << std::flush;
+}
+
 DashboardConfig load_dashboard_config(const sentum::cli::Options& options) {
     DashboardConfig config;
     std::ifstream file("config/config.json");
@@ -60,7 +85,7 @@ DashboardConfig load_dashboard_config(const sentum::cli::Options& options) {
             throw std::runtime_error("config.json dashboardPort must be between 1 and 65535");
         config.port = static_cast<std::uint16_t>(port);
     }
-    // Keep the Phase-17 CLI override for scripts and one-off runs.
+    // CLI port override remains available for scripts and one-off runs.
     if (options.dashboard_port) config.port = *options.dashboard_port;
     return config;
 }
@@ -141,7 +166,18 @@ int paper_main(const sentum::cli::Options& options) {
     std::unique_ptr<sentum::ui::TerminalUi> tui;
     if (options.tui && sentum::ui::stdout_is_terminal()) { tui = std::make_unique<sentum::ui::TerminalUi>(); tui->start(); }
     while (engine->is_running() && !shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    if (tui) tui->stop(); engine->stop(); dashboard->stop(); return EXIT_SUCCESS;
+
+    const auto shutdown_started = std::chrono::steady_clock::now();
+    if (tui) tui->stop();
+    auto progress = [shutdown_started](std::size_t step, std::size_t, const std::string& detail) {
+        render_shutdown_progress(step, 7, detail, shutdown_started);
+    };
+    engine->stop(progress);
+    render_shutdown_progress(7, 7, "Stopping local web dashboard", shutdown_started);
+    dashboard->stop();
+    render_shutdown_progress(7, 7, "Shutdown complete", shutdown_started);
+    if (sentum::ui::stdout_is_terminal()) std::cout << "\n";
+    return EXIT_SUCCESS;
 }
 
 int testnet_main(const sentum::cli::Options& options) {
@@ -155,13 +191,28 @@ int testnet_main(const sentum::cli::Options& options) {
     std::unique_ptr<sentum::ui::TerminalUi> tui;
     if (options.tui && sentum::ui::stdout_is_terminal()) { tui = std::make_unique<sentum::ui::TerminalUi>(); tui->start(); }
     while(runtime.running()&&!shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    if (tui) tui->stop(); runtime.stop(); dashboard.merge({{"health","stopped"},{"trader_active",false}}); dashboard_server->stop(); return EXIT_SUCCESS;
+    const auto shutdown_started = std::chrono::steady_clock::now();
+    if (tui) tui->stop();
+    render_shutdown_progress(1, 3, "Stopping Testnet strategy runtime", shutdown_started);
+    runtime.stop();
+    dashboard.merge({{"health","stopping"},{"trader_active",false}});
+    render_shutdown_progress(2, 3, "Stopping local web dashboard", shutdown_started);
+    dashboard_server->stop();
+    dashboard.set("health","stopped");
+    render_shutdown_progress(3, 3, "Shutdown complete", shutdown_started);
+    if (sentum::ui::stdout_is_terminal()) std::cout << "\n";
+    return EXIT_SUCCESS;
 }
 
 int dashboard_main(const sentum::cli::Options& options) {
     auto dashboard=start_dashboard(options); std::cout<<"Read-only dashboard mode. Press Ctrl+C to stop.\n";
     while(!shutdown_requested.load(std::memory_order_relaxed))std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    dashboard->stop(); return EXIT_SUCCESS;
+    const auto shutdown_started = std::chrono::steady_clock::now();
+    render_shutdown_progress(1, 2, "Stopping local web dashboard", shutdown_started);
+    dashboard->stop();
+    render_shutdown_progress(2, 2, "Shutdown complete", shutdown_started);
+    if (sentum::ui::stdout_is_terminal()) std::cout << "\n";
+    return EXIT_SUCCESS;
 }
 }
 

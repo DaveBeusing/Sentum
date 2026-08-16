@@ -33,19 +33,41 @@ void ExecutionEngine::start() {
     main_thread = std::thread(&ExecutionEngine::run_main_loop, this);
 }
 
-void ExecutionEngine::stop() {
+void ExecutionEngine::stop(ShutdownProgressCallback progress) {
+    constexpr std::size_t total_steps = 6;
+    const auto report = [&](std::size_t step, const std::string& detail) {
+        sentum::dashboard::DashboardState::global().merge({
+            {"health", step == total_steps ? "stopped" : "stopping"},
+            {"shutdown_step", step}, {"shutdown_total_steps", total_steps}, {"shutdown_detail", detail}
+        });
+        if (progress) progress(step, total_steps, detail);
+    };
+
     const bool was_running = running.exchange(false);
     scanner_signal_cv.notify_all();
+    shutdown_wait_cv.notify_all();
     if (!was_running && !main_thread.joinable() && !scanner_thread.joinable() && !trader_thread.joinable()) return;
+
+    report(1, "Stopping strategy and paper trader");
     stop_trader();
+
+    report(2, "Disconnecting market stream and flushing database writer");
     if (collector) { collector->stop(); collector_active.store(false); }
+
+    report(3, "Joining runtime coordinator");
     if (main_thread.joinable() && main_thread.get_id() != std::this_thread::get_id()) main_thread.join();
+
+    report(4, "Joining scanner worker");
     if (scanner_thread.joinable() && scanner_thread.get_id() != std::this_thread::get_id()) scanner_thread.join();
     scanner_active.store(false);
+
+    report(5, "Finalizing runtime state");
     sentum::dashboard::DashboardState::global().merge({
         {"collector_active", false}, {"scanner_active", false}, {"trader_active", false},
-        {"market_data_connected", false}, {"health", "stopped"}
+        {"market_data_connected", false}
     });
+
+    report(6, "Shutdown complete");
 }
 
 void ExecutionEngine::init_config() {
@@ -205,12 +227,13 @@ void ExecutionEngine::run_main_loop() {
                 runtime["wins"] = 0; runtime["losses"] = 0; runtime["average_profit"] = 0.0; runtime["active_position"] = nullptr;
             }
             sentum::dashboard::DashboardState::global().merge(runtime);
-            std::this_thread::sleep_for(1s);
+            std::unique_lock<std::mutex> wait_lock(shutdown_wait_mutex);
+            shutdown_wait_cv.wait_for(wait_lock, 1s, [this] { return !running.load(); });
         }
     } catch (const std::exception& e) {
         logger.log("[ERROR] ExecutionEngine::run_main_loop: " + std::string(e.what()));
         sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", e.what()}});
-        running.store(false); scanner_signal_cv.notify_all();
+        running.store(false); scanner_signal_cv.notify_all(); shutdown_wait_cv.notify_all();
     }
 }
 
@@ -233,7 +256,7 @@ void ExecutionEngine::monitor_scanner() {
             { std::lock_guard<std::mutex> lock(symbol_mutex); current_symbol = symbol; }
             start_trader_for(symbol);
         }
-    } catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::monitor_scanner: " + std::string(e.what())); running.store(false); }
+    } catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::monitor_scanner: " + std::string(e.what())); running.store(false); shutdown_wait_cv.notify_all(); }
 }
 
 void ExecutionEngine::start_trader_for(const std::string& symbol) {

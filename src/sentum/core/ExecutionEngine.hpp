@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -26,10 +27,12 @@
 
 class ExecutionEngine {
 public:
+    using ShutdownProgressCallback = std::function<void(std::size_t, std::size_t, const std::string&)>;
+
     ExecutionEngine();
     ~ExecutionEngine();
     void start();
-    void stop();
+    void stop(ShutdownProgressCallback progress = {});
     bool is_running() const;
 
 private:
@@ -38,6 +41,8 @@ private:
     std::mutex symbol_mutex;
     std::mutex scanner_signal_mutex;
     std::condition_variable scanner_signal_cv;
+    std::mutex shutdown_wait_mutex;
+    std::condition_variable shutdown_wait_cv;
     std::string pending_scanner_symbol;
 
     std::unique_ptr<Database> db;
