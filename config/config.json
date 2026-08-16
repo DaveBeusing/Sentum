@@ -1,7 +1,7 @@
 {
 	"quoteAsset" : "USDC",
 	"minCumulativeReturn" : 0.0,
-	"databasePath" : "log/sentum.sqlite3",
+	"databasePath" : "log/klines.sqlite3",
 	"paperTrading" : true,
 	"dashboardHost" : "127.0.0.1",
 	"dashboardPort" : 8080
