@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <sentum/ui/OperatorActionFlow.hpp>
 #include <sentum/ui/OperatorAlertCenterView.hpp>
+#include <sentum/ui/OperatorAlertEscalationTimeline.hpp>
 #include <sentum/ui/OperatorAuditQueueView.hpp>
 #include <sentum/ui/OperatorNavigationPolicy.hpp>
 #include <sentum/ui/OperatorWorkflowView.hpp>
@@ -23,7 +24,7 @@ inline std::string operator_surface_frame_lines(
 		surface.banner.size() + surface.navigation.size() + surface.workspace_help.size() +
 		surface.governance_state.size() + surface.maintenance_state.size() +
 		surface.incident_state.size() + surface.recovery_state.size() +
-		surface.approval_summary.size() + surface.audit_summary.size() + 3000);
+		surface.approval_summary.size() + surface.audit_summary.size() + 3800);
 
 	frame += "OPERATOR ";
 	frame += surface.banner;
@@ -81,6 +82,8 @@ inline std::string operator_surface_frame_lines(
 		frame += std::to_string(alert_center.suppressed);
 		frame += " low-severity alert(s) suppressed by attention policy\n";
 	}
+
+	frame += operator_alert_escalation_timeline_text(snapshot, 6);
 
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
 	const auto action_state = control_plane.value("operator_action", nlohmann::json::object());
