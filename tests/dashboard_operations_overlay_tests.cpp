@@ -18,7 +18,6 @@ void test_overlay_is_injected_before_body_end() {
 	require(overlay != std::string::npos, "operations overlay script missing");
 	require(body_end != std::string::npos && overlay < body_end, "operations overlay not injected before body end");
 	require(html.find("/api/operations") != std::string::npos, "operations endpoint not consumed by overlay");
-	require(html.find("READ_ONLY_PRESENTATION") == std::string::npos, "overlay must render server authority instead of hardcoding it");
 }
 
 void test_overlay_is_idempotent() {
@@ -44,6 +43,14 @@ void test_overlay_exposes_no_write_routes() {
 	require(overlay.find("method:'DELETE'") == std::string::npos, "overlay introduced DELETE request");
 }
 
+void test_overlay_validates_cross_surface_contract() {
+	const std::string overlay(sentum::dashboard::kOperationsDashboardOverlay);
+	require(overlay.find("OPERATIONS_SCHEMA_VERSION=1") != std::string::npos, "overlay does not validate operations schema version");
+	require(overlay.find("sentum.operations.v1") != std::string::npos, "overlay does not validate operations contract id");
+	require(overlay.find("READ_ONLY_PRESENTATION") != std::string::npos, "overlay does not validate read-only authority");
+	require(overlay.find("Operations contract mismatch - fail closed") != std::string::npos, "contract mismatch does not fail closed visibly");
+}
+
 } // namespace
 
 int main() {
@@ -52,6 +59,7 @@ int main() {
 		test_overlay_is_idempotent();
 		test_overlay_falls_back_without_body_tag();
 		test_overlay_exposes_no_write_routes();
+		test_overlay_validates_cross_surface_contract();
 		std::cout << "dashboard operations overlay tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {
