@@ -126,6 +126,11 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_terminal_render_pipeline_tests PRIVATE sentum_core)
 	add_test(NAME terminal_render_pipeline COMMAND sentum_terminal_render_pipeline_tests)
 	set_tests_properties(terminal_render_pipeline PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_terminal_workspace_policy_tests tests/terminal_workspace_policy_tests.cpp)
+	target_link_libraries(sentum_terminal_workspace_policy_tests PRIVATE sentum_core)
+	add_test(NAME terminal_workspace_policy COMMAND sentum_terminal_workspace_policy_tests)
+	set_tests_properties(terminal_workspace_policy PROPERTIES TIMEOUT 60)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
