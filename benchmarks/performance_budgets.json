@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "measurement_policy": {
+    "repetitions": 5,
+    "market_gate_statistic": "median",
+    "market_guardrail_statistic": "worst",
+    "notes": "Budgets are regression guardrails for the GitHub-hosted Release CI environment, not production latency SLAs."
+  },
+  "baseline_evidence": {
+    "workflow_run_id": 35090140340,
+    "source_head": "ff6fe957d9c9b57ef150dc26faea216609ec3714",
+    "runner_image": "ubuntu-24.04",
+    "compiler": "GNU 13.3.0",
+    "observed_market_path_ns_per_event": {
+      "500x2000": 62.10,
+      "1000x1000": 77.74,
+      "2000x500": 63.64
+    },
+    "observed_parser_allocations_per_parse": 0.0
+  },
+  "market_path": [
+    {
+      "name": "500x2000",
+      "symbols": 500,
+      "events_per_symbol": 2000,
+      "max_median_ns_per_event": 250.0,
+      "max_worst_ns_per_event": 400.0
+    },
+    {
+      "name": "1000x1000",
+      "symbols": 1000,
+      "events_per_symbol": 1000,
+      "max_median_ns_per_event": 250.0,
+      "max_worst_ns_per_event": 400.0
+    },
+    {
+      "name": "2000x500",
+      "symbols": 2000,
+      "events_per_symbol": 500,
+      "max_median_ns_per_event": 250.0,
+      "max_worst_ns_per_event": 400.0
+    }
+  ],
+  "parser": {
+    "max_allocations_per_parse": 0.0
+  }
+}

@@ -34,12 +34,30 @@ jobs:
           ./sentum --version | grep 'Sentum '
           if ./sentum unknown-command >/tmp/cli-invalid.log 2>&1; then exit 1; fi
           grep 'unknown command' /tmp/cli-invalid.log
-      - name: Run performance benchmarks
+      - name: Enforce performance budgets
+        shell: bash
         run: |
-          ./build/sentum_market_benchmark 500 2000
-          ./build/sentum_market_benchmark 1000 1000
-          ./build/sentum_market_benchmark 2000 500
-          ./build/sentum_parser_allocation_benchmark
+          set +e
+          python3 tools/ci/performance_gate.py \
+            --build-dir build \
+            --budget-file benchmarks/performance_budgets.json \
+            --report log/performance_gate.json \
+            --summary log/performance_gate.md
+          status=$?
+          if [[ -f log/performance_gate.md ]]; then
+            cat log/performance_gate.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+      - name: Upload performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentum-performance-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            log/performance_gate.json
+            log/performance_gate.md
       - name: Smoke test quant research
         shell: bash
         run: |
