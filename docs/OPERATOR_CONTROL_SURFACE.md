@@ -22,7 +22,8 @@ The presentation contract consumes existing authoritative or already-derived sta
 - recovery state;
 - pending approval count;
 - last governed audit action and actor;
-- optional governed operator action and upstream action classification.
+- optional governed operator action and upstream action classification;
+- optional structured maintenance, incident and recovery workflow records.
 
 The control surface does not recompute governance classes. Action classification must be supplied by the upstream control-plane contract.
 
@@ -37,7 +38,8 @@ The always-visible operator surface presents information in this order:
 5. pending approvals;
 6. last governed audit action;
 7. governed operator-action state;
-8. workspace-specific operational detail.
+8. structured maintenance, incident and recovery workflow detail;
+9. workspace-specific operational detail.
 
 Critical runtime and safety status always outranks informational governance detail.
 
@@ -63,6 +65,36 @@ The flow deliberately has no executable or authorized state. `execution_authoriz
 
 The regression suite covers approval-required, forbidden, unknown, automated and cancelled flows and verifies that none authorizes execution locally.
 
+## Maintenance, incident and recovery workflows
+
+`OperatorWorkflowView.hpp` provides one common presentation contract for governed operational workflows. Each workflow may expose:
+
+- state;
+- requested action;
+- upstream governance classification;
+- request identifier;
+- reason;
+- actor / initiator;
+- approval-required or blocked presentation state.
+
+The supported workflow views are:
+
+- `maintenance_workflow` for entering or leaving controlled maintenance states;
+- `incident_workflow` for acknowledgement and governed incident-response steps;
+- `recovery_workflow` for recovery-candidate and reconciliation-related approval paths.
+
+These records are views only. They do not execute transitions, acknowledge incidents, promote recovery candidates or resume entries.
+
+Any active workflow action without an upstream classification fails closed as `FORBIDDEN / BLOCKED`. `execution_authorized` remains false for every maintenance, incident and recovery view.
+
+The regression suite verifies:
+
+- maintenance transitions remain approval-gated;
+- incident acknowledgement remains governed;
+- recovery promotion requires explicit approval;
+- missing classifications fail closed;
+- absent workflows remain visible as `IDLE` rather than being inferred as approved.
+
 ## Missing governance evidence
 
 Missing operations-control-plane evidence remains visible as `UNAVAILABLE`.
@@ -72,6 +104,8 @@ The presentation must not silently substitute `CONTROLLED`, zero pending approva
 ## Audit presentation
 
 When audit evidence exists, the operator surface presents the most recent governed action and actor. A full immutable audit chain remains an operations-control-plane concern; the terminal is a viewer, not the audit authority.
+
+Workflow request IDs, reasons and actors are included as operator context when provided. They are presentation evidence only and do not replace the immutable upstream audit record.
 
 ## Terminal integration
 
@@ -84,11 +118,12 @@ The generated surface contains:
 3. workspace purpose/context;
 4. governance, maintenance, incident and recovery state;
 5. pending-approval summary and most recent governed audit action;
-6. optional governed action state from `operations_control_plane.operator_action`.
+6. optional governed action state from `operations_control_plane.operator_action`;
+7. structured maintenance, incident and recovery workflow summaries.
 
 The production `TerminalUi` hook combines these lines with the existing terminal frame before the AP-06 diff is calculated. It reuses the cached dashboard snapshot and active tab and introduces no second snapshot read, polling path or output stream.
 
-The terminal-render regression suite requires an identical second operator frame to produce zero payload bytes and zero changed rows.
+The terminal-render regression suite requires an identical second operator frame, including workflow rows, to produce zero payload bytes and zero changed rows.
 
 ## Performance and rendering invariant
 
@@ -107,6 +142,8 @@ This package does not:
 - clear kill switches;
 - resume entries directly;
 - approve maintenance or recovery transitions locally;
+- acknowledge or resolve incidents locally;
+- promote recovery candidates locally;
 - create or accept reconciliation truth;
 - synthesize fills;
 - mutate Risk or Execution state;
