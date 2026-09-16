@@ -79,11 +79,13 @@ inline TerminalFrameDiff build_terminal_ui_frame_diff(
 	const std::string& frame,
 	bool force_full,
 	const nlohmann::json& snapshot,
-	int workspace_index) {
+	int workspace_index,
+	const OperatorNavigationState& navigation) {
 	std::string combined;
 	const auto operator_surface = operator_surface_frame_lines(
 		snapshot,
-		terminal_workspace_name_from_index(workspace_index));
+		terminal_workspace_name_from_index(workspace_index),
+		navigation);
 	combined.reserve(operator_surface.size() + frame.size());
 	combined += operator_surface;
 	combined += frame;
@@ -92,7 +94,7 @@ inline TerminalFrameDiff build_terminal_ui_frame_diff(
 
 #define build_terminal_frame_diff(previous_lines, frame, force_full) \
 	build_terminal_ui_frame_diff( \
-		previous_lines, frame, force_full, cached_snapshot_, static_cast<int>(tab_))
+		previous_lines, frame, force_full, cached_snapshot_, static_cast<int>(tab_), operator_navigation_)
 #endif
 
 class TerminalFramePacer {
