@@ -140,6 +140,11 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_operational_safety_policy_tests PRIVATE sentum_core)
 	add_test(NAME operational_safety_policy COMMAND sentum_operational_safety_policy_tests)
 	set_tests_properties(operational_safety_policy PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_operator_action_flow_tests tests/operator_action_flow_tests.cpp)
+	target_link_libraries(sentum_operator_action_flow_tests PRIVATE sentum_core)
+	add_test(NAME operator_action_flow COMMAND sentum_operator_action_flow_tests)
+	set_tests_properties(operator_action_flow PROPERTIES TIMEOUT 60)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
