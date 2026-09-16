@@ -37,6 +37,9 @@ void test_cross_surface_alert_contract_matches_shared_view() {
 	require(alerts.at("active").get<std::size_t>() == center.active, "active count drifted across surfaces");
 	require(alerts.at("warning").get<std::size_t>() == center.warning, "warning count drifted across surfaces");
 	require(alerts.at("attention").get<std::size_t>() == center.attention, "attention count drifted across surfaces");
+	require(alerts.at("suppressed").get<std::size_t>() == center.suppressed, "suppression count drifted across surfaces");
+	require(alerts.at("flapping").get<std::size_t>() == center.flapping, "flapping count drifted across surfaces");
+	require(alerts.at("storm_limited").get<bool>() == center.storm_limited, "storm state drifted across surfaces");
 	require(alerts.at("items").size() == center.items.size(), "alert item count drifted across surfaces");
 	for (std::size_t index = 0; index < center.items.size(); ++index) {
 		const auto& expected = center.items[index];
@@ -44,6 +47,8 @@ void test_cross_surface_alert_contract_matches_shared_view() {
 		require(actual.at("id") == expected.id, "alert id drifted across surfaces");
 		require(actual.at("severity") == expected.severity, "alert severity drifted across surfaces");
 		require(actual.at("state") == expected.state, "alert state drifted across surfaces");
+		require(actual.at("attention") == expected.attention, "alert attention class drifted across surfaces");
+		require(actual.at("flapping") == expected.flapping, "alert flapping state drifted across surfaces");
 		require(actual.at("execution_authorized") == false, "web alert contract granted execution authority");
 	}
 }
@@ -56,6 +61,7 @@ void test_terminal_renders_same_alerts() {
 	for (const auto& item : center.items) {
 		require(frame.find(item.id) != std::string::npos, "terminal omitted shared alert id");
 		require(frame.find(item.state) != std::string::npos, "terminal omitted shared alert lifecycle state");
+		require(frame.find(item.attention) != std::string::npos, "terminal omitted shared alert attention class");
 	}
 }
 
@@ -74,6 +80,38 @@ void test_acknowledged_and_cleared_states_cross_surfaces() {
 	require(frame.find("CLEARED") != std::string::npos, "terminal did not render cleared state");
 }
 
+void test_noise_control_is_cross_surface_and_high_severity_safe() {
+	auto snapshot = snapshot_with_alerts();
+	nlohmann::json lifecycle = nlohmann::json::array();
+	lifecycle.push_back({{"id", "critical"}, {"severity", "CRITICAL"}, {"state", "ACTIVE"}, {"title", "Critical"}});
+	lifecycle.push_back({{"id", "warning"}, {"severity", "WARNING"}, {"state", "ACKNOWLEDGED"}, {"title", "Warning"}});
+	lifecycle.push_back({{"id", "flapping"}, {"severity", "ATTENTION"}, {"state", "ACTIVE"}, {"generation", 3}, {"title", "Flapping"}});
+	for (int index = 0; index < 8; ++index) {
+		lifecycle.push_back({{"id", "attention-" + std::to_string(index)}, {"severity", "ATTENTION"}, {"state", "ACTIVE"}, {"title", "Attention"}});
+	}
+	snapshot["operations_control_plane"]["alert_lifecycle"] = std::move(lifecycle);
+	const auto center = sentum::ui::derive_operator_alert_center_view(snapshot, 2);
+	const auto operations = sentum::ui::derive_cross_surface_operations_view(snapshot, 8, 12, 2);
+	const auto alerts = operations.at("alerts");
+	require(center.suppressed > 0 && center.storm_limited, "attention storm was not limited");
+	require(center.flapping == 1, "flapping alert count mismatch");
+	require(alerts.at("suppressed") == center.suppressed, "web suppression count drifted");
+	require(alerts.at("flapping") == center.flapping, "web flapping count drifted");
+	bool critical_visible = false;
+	bool warning_visible = false;
+	bool flapping_visible = false;
+	for (const auto& item : center.items) {
+		critical_visible = critical_visible || item.id == "critical";
+		warning_visible = warning_visible || item.id == "warning";
+		flapping_visible = flapping_visible || item.id == "flapping";
+	}
+	require(critical_visible && warning_visible, "high-severity alert was hidden by noise control");
+	require(flapping_visible, "flapping alert was hidden by noise control");
+	const auto frame = sentum::ui::operator_surface_frame_lines(snapshot, "SYSTEM");
+	require(frame.find("suppressed=") != std::string::npos, "terminal suppression summary missing");
+	require(frame.find("FLAPPING") != std::string::npos, "terminal flapping marker missing");
+}
+
 } // namespace
 
 int main() {
@@ -81,6 +119,7 @@ int main() {
 		test_cross_surface_alert_contract_matches_shared_view();
 		test_terminal_renders_same_alerts();
 		test_acknowledged_and_cleared_states_cross_surfaces();
+		test_noise_control_is_cross_surface_and_high_severity_safe();
 		std::cout << "operator alert center integration tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {
