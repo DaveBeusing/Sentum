@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <sentum/ui/OperatorAlertAttentionPolicy.hpp>
 #include <sentum/ui/OperatorAlertLifecycle.hpp>
 
 namespace sentum::ui {
@@ -26,6 +27,10 @@ struct OperatorAlertCenterItem {
 	bool acknowledgement_required = false;
 	bool notification_candidate = false;
 	bool active = true;
+	std::string attention = "VISIBLE";
+	bool suppressed = false;
+	bool flapping = false;
+	std::string attention_reason;
 	bool execution_authorized = false;
 };
 
@@ -38,6 +43,9 @@ struct OperatorAlertCenterView {
 	std::size_t critical = 0;
 	std::size_t warning = 0;
 	std::size_t attention = 0;
+	std::size_t suppressed = 0;
+	std::size_t flapping = 0;
+	bool storm_limited = false;
 	bool truncated = false;
 	bool execution_authorized = false;
 };
@@ -149,10 +157,15 @@ inline OperatorAlertCenterView derive_operator_alert_center_view(
 		else if (item.alert.severity == OperatorAlertSeverity::Attention) ++view.attention;
 	}
 
-	const auto visible = std::min(limit, lifecycle.size());
-	view.items.reserve(visible);
-	for (std::size_t index = 0; index < visible; ++index) {
+	const auto attention_view = derive_operator_alert_attention_view(lifecycle, limit);
+	view.suppressed = attention_view.suppressed;
+	view.flapping = attention_view.flapping;
+	view.storm_limited = attention_view.storm_limited;
+	view.items.reserve(lifecycle.size() - std::min(lifecycle.size(), view.suppressed));
+	for (std::size_t index = 0; index < lifecycle.size(); ++index) {
 		const auto& item = lifecycle[index];
+		const auto& decision = attention_view.decisions[index];
+		if (decision.suppressed) continue;
 		view.items.push_back({
 			item.alert.id,
 			item.alert.source,
@@ -169,16 +182,21 @@ inline OperatorAlertCenterView derive_operator_alert_center_view(
 			item.alert.acknowledgement_required,
 			item.alert.notification_candidate,
 			item.active,
+			operator_alert_attention_name(decision.attention),
+			decision.suppressed,
+			decision.flapping,
+			decision.reason,
 			false
 		});
 	}
-	view.truncated = lifecycle.size() > visible;
+	view.truncated = view.suppressed > 0;
 	view.execution_authorized = false;
 	return view;
 }
 
 inline std::string operator_alert_center_item_text(const OperatorAlertCenterItem& item) {
-	std::string text = item.severity + " | " + item.state + " | " + item.id + " | " + item.title;
+	std::string text = item.severity + " | " + item.state + " | " + item.attention + " | " + item.id + " | " + item.title;
+	if (item.flapping) text += " | FLAPPING";
 	if (!item.acknowledged_by.empty()) text += " | ack " + item.acknowledged_by;
 	return text;
 }
