@@ -38,7 +38,29 @@ Queue depth, high-water mark and drop rate are observable at runtime. The queue 
 
 ## In-memory market store
 
-Each symbol uses a fixed-capacity ring buffer with per-buffer synchronization. Scanner calculations operate on in-memory data rather than querying SQLite. The scanner is event driven and maintains rankings from completed market updates instead of periodically copying large historical windows.
+Each symbol uses a fixed-capacity ring buffer with per-buffer synchronization. Scanner calculations operate on in-memory data rather than querying SQLite.
+
+The `SymbolId` hot path uses an immutable ID-to-buffer snapshot published during symbol registration. Normal ID-based reads and writes therefore do not acquire the global symbol-map `shared_mutex` and do not increment a per-symbol `shared_ptr` reference count on every event. The underlying ring buffer remains lifetime-owned by the store's symbol map.
+
+When the scanner needs both 30- and 60-sample cumulative returns, `MarketDataStore::cumulative_returns()` computes both from one consistent ring-buffer snapshot while holding the per-symbol mutex once. String-based lookup remains available as a compatibility path for events without a valid `SymbolId`.
+
+## Scanner hot path
+
+The event-driven scanner maintains compact return state by `SymbolId`. The normal valid-ID path no longer hashes and scans the full symbol-return map for every market event.
+
+For 30-sample top-symbol selection, Sentum maintains an ordered incremental ranking:
+
+```text
+closed candle
+    -> one ring-buffer lock for 30/60 returns
+    -> update only the changed SymbolId cache entry
+    -> erase/insert one ordered ranking entry
+    -> read current top from ranking begin()
+```
+
+The update cost is therefore O(log N) for the ranking rather than an O(N) full-market top search on every closed candle. Dashboard/top-N reads may still perform broader collection/sorting because they are not on the market producer hot path.
+
+Events without a valid `SymbolId` retain the string-keyed compatibility path; that path is not treated as the optimized normal runtime route.
 
 ## Runtime telemetry
 
@@ -90,6 +112,16 @@ The parser-allocation benchmark performs repeated kline parsing and checks the h
 
 A healthy optimized build should report zero allocations per normal parser invocation.
 
+The scanner benchmark exercises the production `MarketDataStore -> MarketEventBus -> SymbolScanner` path after a 60-candle warm-up per symbol:
+
+```bash
+./build-perf/sentum_scanner_hot_path_benchmark 500 200
+./build-perf/sentum_scanner_hot_path_benchmark 1000 100
+./build-perf/sentum_scanner_hot_path_benchmark 2000 50
+```
+
+These scanner measurements are initially **OBSERVED** evidence. CI records all three universe sizes so scaling can be evaluated before a stable scanner-specific budget is promoted to **ENFORCED**.
+
 ## Enforced CI performance gate
 
 `benchmarks/performance_budgets.json` is the controlled CI budget definition. `tools/ci/performance_gate.py` executes the Release microbenchmarks, validates benchmark correctness, evaluates the budgets and writes machine-readable evidence.
@@ -117,7 +149,7 @@ Every market run must also deliver exactly the number of events it generated. Co
 
 The initial gate values were derived from successful GitHub-hosted Release evidence on workflow run `35090140340` (`ubuntu-24.04`, GNU 13.3.0), where the three market-path cases measured approximately 62.10, 77.74 and 63.64 ns/event and the parser reported zero allocations per parse. The enforced limits deliberately preserve substantial hosted-runner headroom; their purpose is to detect material regressions, not normal machine variance.
 
-CI stores `performance_gate.json` and `performance_gate.md` as short-lived workflow evidence and publishes the Markdown result in the job summary.
+CI stores `performance_gate.json` and `performance_gate.md` as short-lived workflow evidence and publishes the Markdown result in the job summary. Scanner hot-path observations are stored beside this evidence without changing the AP-02 gate thresholds.
 
 ## Budget change policy
 
@@ -139,6 +171,8 @@ Performance should be evaluated with measurable criteria rather than absolute cl
 - parser and decision p99 latency visible at runtime
 - no routine heap-allocation hotspot in kline parsing
 - stable behavior under 500, 1,000 and 2,000-symbol synthetic benchmark universes
+- scanner event cost does not contain an unconditional full-market top search
+- valid `SymbolId` store access does not require the global symbol-map lock
 - Release, ThreadSanitizer and long-running Paper soak tests after material concurrency changes
 - material market-path regressions fail CI through the repository performance budget gate
 
