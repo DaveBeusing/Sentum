@@ -111,6 +111,11 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_runtime_observability_tests PRIVATE sentum_core)
 	add_test(NAME runtime_observability COMMAND sentum_runtime_observability_tests)
 	set_tests_properties(runtime_observability PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_dashboard_snapshot_tests tests/dashboard_snapshot_tests.cpp)
+	target_link_libraries(sentum_dashboard_snapshot_tests PRIVATE sentum_core)
+	add_test(NAME dashboard_snapshot COMMAND sentum_dashboard_snapshot_tests)
+	set_tests_properties(dashboard_snapshot PROPERTIES TIMEOUT 60)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
@@ -123,6 +128,9 @@ if(SENTUM_BUILD_BENCHMARKS)
 
 	add_executable(sentum_scanner_hot_path_benchmark benchmarks/scanner_hot_path_benchmark.cpp)
 	target_link_libraries(sentum_scanner_hot_path_benchmark PRIVATE sentum_core)
+
+	add_executable(sentum_dashboard_snapshot_benchmark benchmarks/dashboard_snapshot_benchmark.cpp)
+	target_link_libraries(sentum_dashboard_snapshot_benchmark PRIVATE sentum_core)
 endif()
 
 if(NOT SENTUM_ENABLE_ASAN AND NOT SENTUM_ENABLE_UBSAN AND NOT SENTUM_ENABLE_TSAN)
