@@ -40,6 +40,15 @@ jobs:
             --report log/production_operations_gate.json \
             --summary log/production_operations_gate.md
           cat log/production_operations_gate.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Run operational validation rehearsals
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          python3 tools/ci/operational_validation_rehearsal.py \
+            --report log/operational_validation_rehearsal.json \
+            --summary log/operational_validation_rehearsal.md
+          cat log/operational_validation_rehearsal.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload production operations evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -50,3 +59,5 @@ jobs:
           path: |
             log/production_operations_gate.json
             log/production_operations_gate.md
+            log/operational_validation_rehearsal.json
+            log/operational_validation_rehearsal.md
