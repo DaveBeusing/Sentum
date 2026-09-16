@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "window_minutes": 43200,
+  "availability_target": 0.999,
+  "warning_budget_consumed_fraction": 0.5,
+  "critical_budget_consumed_fraction": 0.8,
+  "block_budget_consumed_fraction": 1.0,
+  "required_continuous_readiness_status": "PASS",
+  "required_environment_class": "ci_rehearsal"
+}
