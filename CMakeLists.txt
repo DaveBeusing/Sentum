@@ -145,6 +145,11 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_operator_action_flow_tests PRIVATE sentum_core)
 	add_test(NAME operator_action_flow COMMAND sentum_operator_action_flow_tests)
 	set_tests_properties(operator_action_flow PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_operator_workflow_view_tests tests/operator_workflow_view_tests.cpp)
+	target_link_libraries(sentum_operator_workflow_view_tests PRIVATE sentum_core)
+	add_test(NAME operator_workflow_view COMMAND sentum_operator_workflow_view_tests)
+	set_tests_properties(operator_workflow_view PROPERTIES TIMEOUT 60)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
