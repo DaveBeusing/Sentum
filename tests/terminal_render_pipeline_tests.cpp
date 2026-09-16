@@ -1,3 +1,4 @@
+#include <sentum/ui/TerminalOperatorSurfaceRenderer.hpp>
 #include <sentum/ui/TerminalRenderPipeline.hpp>
 
 #include <chrono>
@@ -60,6 +61,37 @@ void test_frame_pacer_prevents_drift_and_catchup_bursts() {
 	require(recovered == start + 550ms, "late frame did not rebase without catch-up burst");
 }
 
+void test_operator_surface_preserves_zero_write_contract() {
+	const nlohmann::json snapshot = {
+		{"health", "healthy"},
+		{"kill_switch_active", false},
+		{"market_data_connected", true},
+		{"entries_paused", false},
+		{"performance", {{"queue_pressure", "normal"}}},
+		{"operations_control_plane", {
+			{"governance_state", "CONTROLLED"},
+			{"maintenance_state", "NORMAL"},
+			{"incident_state", "NONE"},
+			{"recovery_state", "IDLE"},
+			{"pending_approvals", 1},
+			{"last_audit_action", "enter_maintenance"},
+			{"last_audit_actor", "operator-a"}
+		}}
+	};
+
+	const auto frame = sentum::ui::operator_surface_frame_lines(snapshot, "SYSTEM");
+	require(frame.find("OPERATOR NORMAL") != std::string::npos, "operator banner missing from surface frame");
+	require(frame.find("[7] SYSTEM*") != std::string::npos, "active workspace missing from surface frame");
+	require(frame.find("Governance CONTROLLED") != std::string::npos, "governance state missing from surface frame");
+	require(frame.find("1 approval(s) pending") != std::string::npos, "approval summary missing from surface frame");
+	require(frame.find("Last action: enter_maintenance by operator-a") != std::string::npos, "audit summary missing from surface frame");
+
+	const auto previous = sentum::ui::split_terminal_lines(frame);
+	const auto diff = sentum::ui::build_terminal_frame_diff(previous, frame, false);
+	require(diff.payload.empty(), "unchanged operator surface emitted terminal payload");
+	require(diff.changed_rows == 0, "unchanged operator surface reported dirty rows");
+}
+
 } // namespace
 
 int main() {
@@ -69,6 +101,7 @@ int main() {
 		test_removed_row_is_cleared();
 		test_full_redraw_is_explicit();
 		test_frame_pacer_prevents_drift_and_catchup_bursts();
+		test_operator_surface_preserves_zero_write_contract();
 		std::cout << "terminal render pipeline tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {
