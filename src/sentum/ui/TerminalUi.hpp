@@ -12,6 +12,8 @@
 
 namespace sentum::ui {
 
+struct TerminalUiTestAccess;
+
 class TerminalUi {
 public:
     explicit TerminalUi(std::chrono::milliseconds refresh = std::chrono::milliseconds(150));
@@ -24,6 +26,8 @@ public:
     bool running() const noexcept { return running_.load(std::memory_order_relaxed); }
 
 private:
+    friend struct TerminalUiTestAccess;
+
     enum class Tab { Market = 0, Scanner, Orders, Trades, Strategy, Models, System };
 
     void loop();
