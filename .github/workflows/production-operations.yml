@@ -70,6 +70,18 @@ jobs:
             --report log/reliability_gate.json \
             --summary log/reliability_gate.md
           cat log/reliability_gate.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce resilience recovery guardrails
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          python3 tools/ci/resilience_guardrail_gate.py \
+            --policy config/resilience_policy.json \
+            --reliability log/reliability_gate.json \
+            --expected-sha "${GITHUB_SHA}" \
+            --report log/resilience_guardrail_gate.json \
+            --summary log/resilience_guardrail_gate.md
+          cat log/resilience_guardrail_gate.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload production operations evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -86,3 +98,5 @@ jobs:
             log/continuous_readiness_rehearsal.md
             log/reliability_gate.json
             log/reliability_gate.md
+            log/resilience_guardrail_gate.json
+            log/resilience_guardrail_gate.md
