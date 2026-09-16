@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -28,6 +29,9 @@ struct TerminalUiTestAccess {
     }
     static void mark_equity_sampled(TerminalUi& ui, std::chrono::steady_clock::time_point when) {
         ui.last_equity_sample_ = when;
+    }
+    static void render_frame(TerminalUi& ui, const std::string& frame, bool force_full) {
+        ui.render_frame(frame, force_full);
     }
 };
 
@@ -78,11 +82,33 @@ void test_workspace_refresh_policy() {
     TerminalUiTestAccess::select_system(ui);
     require(!TerminalUiTestAccess::uses_repository(ui), "system workspace must not poll repository history");
 }
+
+void test_renderer_uses_zero_write_diff_contract() {
+    TerminalUi ui;
+    std::ostringstream captured;
+    auto* previous_buffer = std::cout.rdbuf(captured.rdbuf());
+
+    TerminalUiTestAccess::render_frame(ui, "header\nvalue\n", true);
+    const auto full_size = captured.str().size();
+    require(full_size > 0, "forced terminal frame did not emit output");
+
+    TerminalUiTestAccess::render_frame(ui, "header\nvalue\n", false);
+    const auto unchanged_size = captured.str().size();
+    require(unchanged_size == full_size, "unchanged terminal frame emitted output");
+
+    TerminalUiTestAccess::render_frame(ui, "header\nchanged\n", false);
+    const auto changed_size = captured.str().size();
+    require(changed_size > unchanged_size, "changed terminal row did not emit output");
+
+    std::cout.rdbuf(previous_buffer);
+}
+
 } // namespace
 
 int main() {
     try {
         test_workspace_refresh_policy();
+        test_renderer_uses_zero_write_diff_contract();
         std::cout << "terminal UI policy tests passed\n";
         return 0;
     } catch (const std::exception& error) {
