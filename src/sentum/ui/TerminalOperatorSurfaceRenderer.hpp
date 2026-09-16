@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 #include <sentum/ui/OperatorActionFlow.hpp>
+#include <sentum/ui/OperatorAlertCenterView.hpp>
 #include <sentum/ui/OperatorAuditQueueView.hpp>
 #include <sentum/ui/OperatorNavigationPolicy.hpp>
 #include <sentum/ui/OperatorWorkflowView.hpp>
@@ -22,7 +23,7 @@ inline std::string operator_surface_frame_lines(
 		surface.banner.size() + surface.navigation.size() + surface.workspace_help.size() +
 		surface.governance_state.size() + surface.maintenance_state.size() +
 		surface.incident_state.size() + surface.recovery_state.size() +
-		surface.approval_summary.size() + surface.audit_summary.size() + 1600);
+		surface.approval_summary.size() + surface.audit_summary.size() + 2800);
 
 	frame += "OPERATOR ";
 	frame += surface.banner;
@@ -44,6 +45,33 @@ inline std::string operator_surface_frame_lines(
 	frame += "  |  ";
 	frame += surface.audit_summary;
 	frame += '\n';
+
+	const auto alert_center = derive_operator_alert_center_view(snapshot, 6);
+	frame += "ALERT CENTER total=";
+	frame += std::to_string(alert_center.total);
+	frame += " active=";
+	frame += std::to_string(alert_center.active);
+	frame += " ack=";
+	frame += std::to_string(alert_center.acknowledged);
+	frame += " cleared=";
+	frame += std::to_string(alert_center.cleared);
+	frame += " critical=";
+	frame += std::to_string(alert_center.critical);
+	frame += " warning=";
+	frame += std::to_string(alert_center.warning);
+	frame += " attention=";
+	frame += std::to_string(alert_center.attention);
+	frame += '\n';
+	if (alert_center.items.empty()) {
+		frame += "   No operator alerts\n";
+	} else {
+		for (const auto& item : alert_center.items) {
+			frame += "   Alert ";
+			frame += operator_alert_center_item_text(item);
+			frame += '\n';
+		}
+	}
+	if (alert_center.truncated) frame += "   Additional alerts omitted from terminal view\n";
 
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
 	const auto action_state = control_plane.value("operator_action", nlohmann::json::object());
