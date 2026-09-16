@@ -22,7 +22,7 @@ inline std::string operator_surface_frame_lines(
 		surface.banner.size() + surface.navigation.size() + surface.workspace_help.size() +
 		surface.governance_state.size() + surface.maintenance_state.size() +
 		surface.incident_state.size() + surface.recovery_state.size() +
-		surface.approval_summary.size() + surface.audit_summary.size() + 1280);
+		surface.approval_summary.size() + surface.audit_summary.size() + 1600);
 
 	frame += "OPERATOR ";
 	frame += surface.banner;
@@ -59,29 +59,66 @@ inline std::string operator_surface_frame_lines(
 	frame += operator_workflows_text(control_plane);
 
 	const auto audit_queue = derive_operator_audit_queue_view(snapshot, 4, 5);
-	frame += "NAVIGATION ";
-	frame += operator_navigation_text(navigation);
+	const auto reconciled_navigation = reconcile_operator_navigation(navigation, audit_queue);
+	frame += "EVIDENCE ";
+	frame += audit_queue.evidence_status;
+	if (audit_queue.evidence_state == OperatorEvidenceState::Stale) {
+		frame += " - operator approvals are fail-closed";
+	} else if (audit_queue.evidence_state == OperatorEvidenceState::Missing) {
+		frame += " - operator evidence unavailable";
+	}
 	frame += '\n';
-	if (!audit_queue.approvals.empty()) {
-		frame += "APPROVAL QUEUE ";
-		frame += std::to_string(audit_queue.approval_total);
-		frame += '\n';
+
+	frame += "NAVIGATION ";
+	frame += operator_navigation_text(reconciled_navigation);
+	frame += '\n';
+
+	frame += "APPROVAL QUEUE ";
+	frame += std::to_string(audit_queue.approval_total);
+	frame += '\n';
+	if (audit_queue.approvals.empty()) {
+		frame += "   No approval evidence available\n";
+	} else {
 		for (std::size_t index = 0; index < audit_queue.approvals.size(); ++index) {
-			frame += navigation.focus == OperatorFocusRegion::ApprovalQueue && navigation.approval_index == index ? " > Approval " : "   Approval ";
+			frame += reconciled_navigation.focus == OperatorFocusRegion::ApprovalQueue && reconciled_navigation.approval_index == index
+				? " > Approval "
+				: "   Approval ";
 			frame += operator_approval_item_text(audit_queue.approvals[index]);
 			frame += '\n';
 		}
 	}
-	if (!audit_queue.audit.empty()) {
-		frame += "AUDIT TIMELINE ";
-		frame += std::to_string(audit_queue.audit_total);
-		frame += '\n';
+
+	frame += "AUDIT TIMELINE ";
+	frame += std::to_string(audit_queue.audit_total);
+	frame += '\n';
+	if (audit_queue.audit.empty()) {
+		frame += "   No audit evidence available\n";
+	} else {
 		for (std::size_t index = 0; index < audit_queue.audit.size(); ++index) {
-			frame += navigation.focus == OperatorFocusRegion::AuditTimeline && navigation.audit_index == index ? " > Audit " : "   Audit ";
+			frame += reconciled_navigation.focus == OperatorFocusRegion::AuditTimeline && reconciled_navigation.audit_index == index
+				? " > Audit "
+				: "   Audit ";
 			frame += operator_audit_item_text(audit_queue.audit[index]);
 			frame += '\n';
 		}
 	}
+
+	if (reconciled_navigation.confirmation_open) {
+		frame += "CONFIRMATION OPEN | request ";
+		frame += reconciled_navigation.selected_request_id;
+		frame += " | action ";
+		frame += reconciled_navigation.selected_action;
+		frame += " | Enter cannot execute; Esc cancels\n";
+	}
+	if (reconciled_navigation.status == "BLOCKED" ||
+		reconciled_navigation.status.find("BLOCKED") != std::string::npos ||
+		reconciled_navigation.status.find("MISSING") != std::string::npos ||
+		reconciled_navigation.status.find("CANCELLED") != std::string::npos) {
+		frame += "OPERATOR NOTICE ";
+		frame += reconciled_navigation.status;
+		frame += '\n';
+	}
+
 	if (audit_queue.truncated) frame += "  Additional operator evidence omitted from terminal view\n";
 	return frame;
 }
