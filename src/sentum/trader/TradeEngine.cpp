@@ -7,6 +7,10 @@
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/trader/strategy/MomentumStrategy.hpp>
 
+namespace {
+constexpr std::uint32_t kStrategyLatencySampleEvery = 64;
+}
+
 TradeEngine::TradeEngine(const std::string& symbol_, BinanceRestClient& api_, bool paper_)
     : symbol(symbol_), api(&api_), isPaperTrading(paper_), engine_logger("log/engine.log"),
       clock(std::make_shared<SystemClock>()) {}
@@ -110,8 +114,10 @@ sentum::order::Snapshot TradeEngine::execute(sentum::order::Side side, double qu
 }
 
 TradeAction TradeEngine::process_event(const MarketEvent& event) {
-    sentum::market::ScopedLatency decision_latency(
-        sentum::market::RuntimePerformanceMetrics::global().strategy_decision_latency);
+    thread_local sentum::market::LatencySampler decision_sampler(kStrategyLatencySampleEvery);
+    sentum::market::SampledScopedLatency decision_latency(
+        sentum::market::RuntimePerformanceMetrics::global().strategy_decision_latency,
+        decision_sampler);
     if (event.symbol != symbol || event.price <= 0.0) return TradeAction::NONE;
     const auto age = clock->now() - event.timestamp;
     if (age > std::chrono::milliseconds(risk.max_data_age_ms)) {
@@ -123,8 +129,10 @@ TradeAction TradeEngine::process_event(const MarketEvent& event) {
 }
 
 TradeAction TradeEngine::evaluate(double price) {
-    sentum::market::ScopedLatency decision_latency(
-        sentum::market::RuntimePerformanceMetrics::global().strategy_decision_latency);
+    thread_local sentum::market::LatencySampler decision_sampler(kStrategyLatencySampleEvery);
+    sentum::market::SampledScopedLatency decision_latency(
+        sentum::market::RuntimePerformanceMetrics::global().strategy_decision_latency,
+        decision_sampler);
     return evaluate_at(price, clock->now(), api ? "binance-websocket" : "replay", nullptr);
 }
 
