@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Dave Beusing <david.beusing@gmail.com>
+# SPDX-License-Identifier: MIT
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -67,18 +71,23 @@ def main():
 			break
 
 	payload = {
+		"schema_version": 1,
+		"generated_at": datetime.now(timezone.utc).isoformat(),
 		"status": "PASS" if passed else "FAIL",
+		"git_sha": os.environ.get("GITHUB_SHA", "unknown"),
+		"workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
 		"cycles_requested": args.cycles,
 		"cycles_completed": len(results),
 		"timeout_seconds": args.timeout_seconds,
 		"results": results,
 	}
-	report_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+	report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 	lines = [
 		"# Operational acceptance",
 		"",
 		f"Status: **{payload['status']}**",
+		f"Commit: `{payload['git_sha']}`",
 		f"Cycles: {payload['cycles_completed']}/{payload['cycles_requested']}",
 		"",
 		"| Cycle | Check | Result | Elapsed (s) |",

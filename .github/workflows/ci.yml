@@ -126,7 +126,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sentum-performance-${{ github.sha }}
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
           path: |
             log/performance_gate.json
@@ -212,3 +212,42 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           TSAN_OPTIONS: halt_on_error=1
         run: ctest --test-dir build-sanitizer --output-on-failure --timeout 60
+
+  release_readiness:
+    name: Release readiness
+    needs:
+      - build
+      - sanitizers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download performance evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: sentum-performance-${{ github.sha }}
+          path: evidence/performance
+      - name: Download operational acceptance evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: sentum-operational-acceptance-${{ github.sha }}
+          path: evidence/operational
+      - name: Enforce release readiness
+        run: |
+          python3 tools/ci/release_readiness.py \
+            --performance evidence/performance/performance_gate.json \
+            --operational evidence/operational/operational_acceptance.json \
+            --report log/release_readiness.json \
+            --summary log/release_readiness.md \
+            --expected-sha "${GITHUB_SHA}"
+          cat log/release_readiness.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload release readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentum-release-readiness-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            log/release_readiness.json
+            log/release_readiness.md
