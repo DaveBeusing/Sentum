@@ -4,10 +4,8 @@
 #include <cctype>
 #include <cmath>
 #include <ctime>
-#include <filesystem>
 #include <iomanip>
 #include <iostream>
-#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -46,6 +44,7 @@ constexpr const char* reset = "\x1b[0m";
 #if !defined(_WIN32)
 termios saved_termios{};
 bool raw_enabled = false;
+
 void enable_raw_input() {
     if (!::isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &saved_termios) != 0) return;
     termios raw = saved_termios;
@@ -54,11 +53,11 @@ void enable_raw_input() {
     raw.c_cc[VTIME] = 0;
     if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) raw_enabled = true;
 }
+
 void restore_input() {
-    if (raw_enabled) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &saved_termios);
-        raw_enabled = false;
-    }
+    if (!raw_enabled) return;
+    tcsetattr(STDIN_FILENO, TCSANOW, &saved_termios);
+    raw_enabled = false;
 }
 #endif
 
@@ -67,7 +66,9 @@ int terminal_width() {
     return 120;
 #else
     winsize size{};
-    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) return std::max(80, static_cast<int>(size.ws_col));
+    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
+        return std::max(80, static_cast<int>(size.ws_col));
+    }
     return 120;
 #endif
 }
@@ -96,8 +97,11 @@ std::string text(const nlohmann::json& j, const char* key, const std::string& fa
 
 template <typename T>
 T number(const nlohmann::json& j, const char* key, T fallback = T{}) {
-    try { return j.is_object() && j.contains(key) ? j[key].get<T>() : fallback; }
-    catch (...) { return fallback; }
+    try {
+        return j.is_object() && j.contains(key) ? j[key].get<T>() : fallback;
+    } catch (...) {
+        return fallback;
+    }
 }
 
 std::string clip(std::string value, std::size_t width) {
@@ -134,6 +138,12 @@ std::string on_off(bool active) {
     return active ? std::string(green) + "ON" + reset : std::string(red) + "OFF" + reset;
 }
 
+std::string pressure_badge(const std::string& pressure) {
+    if (pressure == "critical" || pressure == "saturated") return std::string(red) + pressure + reset;
+    if (pressure == "elevated") return std::string(yellow) + pressure + reset;
+    return std::string(green) + pressure + reset;
+}
+
 std::string timestamp_text(std::int64_t epoch_ms) {
     if (epoch_ms <= 0) return "-";
     const std::time_t seconds = static_cast<std::time_t>(epoch_ms / 1000);
@@ -153,7 +163,8 @@ std::string sparkline(const std::deque<double>& values, std::size_t width = 40) 
     const std::size_t count = std::min(width, values.size());
     auto begin = values.end() - static_cast<std::ptrdiff_t>(count);
     const auto [min_it, max_it] = std::minmax_element(begin, values.end());
-    const double lo = *min_it, hi = *max_it;
+    const double lo = *min_it;
+    const double hi = *max_it;
     static constexpr char levels[] = ".:-=+*#@";
     std::string out;
     out.reserve(count);
@@ -219,10 +230,13 @@ void TerminalUi::start() {
     enable_raw_input();
 #endif
     previous_lines_.clear();
+    cached_snapshot_ = nlohmann::json::object();
     force_full_redraw_ = true;
     ui_dirty_ = true;
     last_terminal_width_ = terminal_width();
     last_dashboard_generation_ = 0;
+    last_repository_refresh_ = {};
+    last_equity_sample_ = {};
     std::cout << enter_alt_screen << clear_screen << hide_cursor << std::flush;
     thread_ = std::thread(&TerminalUi::loop, this);
 }
@@ -236,24 +250,52 @@ void TerminalUi::stop() {
     std::cout << show_cursor << reset << leave_alt_screen << std::flush;
 }
 
+bool TerminalUi::active_tab_uses_repository() const noexcept {
+    return tab_ == Tab::Orders || tab_ == Tab::Trades || tab_ == Tab::Models;
+}
+
+bool TerminalUi::repository_refresh_due(std::chrono::steady_clock::time_point now) const noexcept {
+    if (!active_tab_uses_repository()) return false;
+    return last_repository_refresh_ == std::chrono::steady_clock::time_point{} ||
+           now - last_repository_refresh_ >= std::chrono::seconds(2);
+}
+
+bool TerminalUi::equity_sample_due(std::chrono::steady_clock::time_point now) const noexcept {
+    if (tab_ != Tab::Market) return false;
+    return last_equity_sample_ == std::chrono::steady_clock::time_point{} ||
+           now - last_equity_sample_ >= std::chrono::seconds(2);
+}
+
 void TerminalUi::loop() {
+    auto& dashboard = sentum::dashboard::DashboardState::global();
+
     while (running_.load(std::memory_order_relaxed)) {
         poll_input();
 
-        auto& dashboard = sentum::dashboard::DashboardState::global();
-        const auto generation = dashboard.generation();
+        sentum::dashboard::DashboardSnapshot updated;
+        const bool state_changed = dashboard.snapshot_if_changed(last_dashboard_generation_, updated);
+        if (state_changed) {
+            cached_snapshot_ = std::move(updated.state);
+            last_dashboard_generation_ = updated.generation;
+        }
+
+        if (cached_snapshot_.empty()) {
+            auto initial = dashboard.snapshot_versioned();
+            cached_snapshot_ = std::move(initial.state);
+            last_dashboard_generation_ = initial.generation;
+        }
+
         const int width = terminal_width();
         const bool resized = width != last_terminal_width_;
         const auto now = std::chrono::steady_clock::now();
-        const bool repository_due = last_repository_refresh_ == std::chrono::steady_clock::time_point{} ||
-                                    now - last_repository_refresh_ >= std::chrono::seconds(2);
-        const bool equity_due = last_equity_sample_ == std::chrono::steady_clock::time_point{} ||
-                                now - last_equity_sample_ >= std::chrono::seconds(2);
-        const bool state_changed = generation != last_dashboard_generation_;
+        const bool repository_due = repository_refresh_due(now);
+        const bool equity_due = equity_sample_due(now);
+
+        if (repository_due) refresh_repository_data(cached_snapshot_);
+        if (equity_due) sample_equity(cached_snapshot_);
 
         if (ui_dirty_ || resized || state_changed || repository_due || equity_due) {
-            draw(force_full_redraw_ || resized);
-            last_dashboard_generation_ = dashboard.generation();
+            draw(cached_snapshot_, force_full_redraw_ || resized);
             last_terminal_width_ = width;
             ui_dirty_ = false;
             force_full_redraw_ = false;
@@ -270,7 +312,9 @@ void TerminalUi::poll_input() {
         if (!_kbhit()) break;
         key = static_cast<char>(_getch());
 #else
-        fd_set set; FD_ZERO(&set); FD_SET(STDIN_FILENO, &set);
+        fd_set set;
+        FD_ZERO(&set);
+        FD_SET(STDIN_FILENO, &set);
         timeval timeout{0, 0};
         const int ready = select(STDIN_FILENO + 1, &set, nullptr, nullptr, &timeout);
         if (ready <= 0) break;
@@ -286,38 +330,79 @@ void TerminalUi::handle_key(char key) {
     if (editing_symbol_) {
         if (key == '\r' || key == '\n') {
             if (!symbol_buffer_.empty()) {
-                std::transform(symbol_buffer_.begin(), symbol_buffer_.end(), symbol_buffer_.begin(), [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+                std::transform(symbol_buffer_.begin(), symbol_buffer_.end(), symbol_buffer_.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::toupper(c));
+                });
                 control.set_manual_symbol(symbol_buffer_);
                 notice_ = "Manual symbol requested: " + symbol_buffer_ + " (applies between positions)";
             }
-            symbol_buffer_.clear(); editing_symbol_ = false; ui_dirty_ = true; return;
+            symbol_buffer_.clear();
+            editing_symbol_ = false;
+            ui_dirty_ = true;
+            return;
         }
-        if (key == 27) { symbol_buffer_.clear(); editing_symbol_ = false; notice_ = "Manual symbol edit cancelled"; ui_dirty_ = true; return; }
-        if (key == 8 || key == 127) { if (!symbol_buffer_.empty()) symbol_buffer_.pop_back(); ui_dirty_ = true; return; }
-        if (std::isalnum(static_cast<unsigned char>(key)) && symbol_buffer_.size() < 20) { symbol_buffer_.push_back(key); ui_dirty_ = true; }
+        if (key == 27) {
+            symbol_buffer_.clear();
+            editing_symbol_ = false;
+            notice_ = "Manual symbol edit cancelled";
+            ui_dirty_ = true;
+            return;
+        }
+        if (key == 8 || key == 127) {
+            if (!symbol_buffer_.empty()) symbol_buffer_.pop_back();
+            ui_dirty_ = true;
+            return;
+        }
+        if (std::isalnum(static_cast<unsigned char>(key)) && symbol_buffer_.size() < 20) {
+            symbol_buffer_.push_back(key);
+            ui_dirty_ = true;
+        }
         return;
     }
 
     if (key >= '1' && key <= '7') {
         tab_ = static_cast<Tab>(key - '1');
         notice_.clear();
+        last_repository_refresh_ = {};
+        if (tab_ == Tab::Market) last_equity_sample_ = {};
         ui_dirty_ = true;
         force_full_redraw_ = true;
         return;
     }
 
     switch (static_cast<char>(std::tolower(static_cast<unsigned char>(key)))) {
-        case 'p': control.pause_entries(!control.entries_paused()); notice_ = control.entries_paused() ? "New entries PAUSED; open position remains managed" : "New entries RESUMED"; ui_dirty_ = true; break;
-        case 'c': control.request_manual_close(); notice_ = "Manual close requested through simulated execution"; ui_dirty_ = true; break;
-        case 'a': control.set_auto_symbol(true); notice_ = "Scanner auto-selection requested"; ui_dirty_ = true; break;
-        case 'm': editing_symbol_ = true; symbol_buffer_.clear(); notice_ = "Enter symbol and press Enter; Esc cancels"; ui_dirty_ = true; break;
-        case 's': cycle_strategy(); ui_dirty_ = true; break;
-        default: break;
+        case 'p':
+            control.pause_entries(!control.entries_paused());
+            notice_ = control.entries_paused() ? "New entries PAUSED; open position remains managed" : "New entries RESUMED";
+            ui_dirty_ = true;
+            break;
+        case 'c':
+            control.request_manual_close();
+            notice_ = "Manual close requested through simulated execution";
+            ui_dirty_ = true;
+            break;
+        case 'a':
+            control.set_auto_symbol(true);
+            notice_ = "Scanner auto-selection requested";
+            ui_dirty_ = true;
+            break;
+        case 'm':
+            editing_symbol_ = true;
+            symbol_buffer_.clear();
+            notice_ = "Enter symbol and press Enter; Esc cancels";
+            ui_dirty_ = true;
+            break;
+        case 's':
+            cycle_strategy();
+            ui_dirty_ = true;
+            break;
+        default:
+            break;
     }
 }
 
 void TerminalUi::cycle_strategy() {
-    static const std::vector<std::string> types{"momentum","trend","mean_reversion","breakout","multi_timeframe_trend","ensemble"};
+    static const std::vector<std::string> types{"momentum", "trend", "mean_reversion", "breakout", "multi_timeframe_trend", "ensemble"};
     const auto current = sentum::runtime::RuntimeControl::global().strategy().value("type", std::string("momentum"));
     auto it = std::find(types.begin(), types.end(), current);
     const auto index = it == types.end() ? 0u : (static_cast<std::size_t>(std::distance(types.begin(), it)) + 1u) % types.size();
@@ -326,22 +411,21 @@ void TerminalUi::cycle_strategy() {
 }
 
 void TerminalUi::refresh_repository_data(const nlohmann::json& snapshot) {
-    const auto now = std::chrono::steady_clock::now();
-    if (last_repository_refresh_ != std::chrono::steady_clock::time_point{} && now - last_repository_refresh_ < std::chrono::seconds(2)) return;
+    if (!active_tab_uses_repository()) return;
+
     repository_db_path_ = text(snapshot, "db_path", "log/klines.sqlite3");
     sentum::dashboard::DashboardRepository repository(repository_db_path_);
-    recent_trades_ = repository.recent_trades(12);
-    recent_orders_ = repository.recent_orders(12);
-    models_ = repository.models(12);
-    last_repository_refresh_ = now;
+    if (tab_ == Tab::Orders) recent_orders_ = repository.recent_orders(12);
+    if (tab_ == Tab::Trades) recent_trades_ = repository.recent_trades(12);
+    if (tab_ == Tab::Models) models_ = repository.models(12);
+    last_repository_refresh_ = std::chrono::steady_clock::now();
 }
 
 void TerminalUi::sample_equity(const nlohmann::json& snapshot) {
-    const auto now = std::chrono::steady_clock::now();
-    if (last_equity_sample_ != std::chrono::steady_clock::time_point{} && now - last_equity_sample_ < std::chrono::seconds(2)) return;
+    if (tab_ != Tab::Market) return;
     equity_history_.push_back(number<double>(snapshot, "balance"));
     while (equity_history_.size() > 120) equity_history_.pop_front();
-    last_equity_sample_ = now;
+    last_equity_sample_ = std::chrono::steady_clock::now();
 }
 
 void TerminalUi::render_frame(const std::string& frame, bool force_full) {
@@ -368,11 +452,7 @@ void TerminalUi::render_frame(const std::string& frame, bool force_full) {
     previous_lines_ = std::move(current_lines);
 }
 
-void TerminalUi::draw(bool force_full) {
-    const auto snapshot = sentum::dashboard::DashboardState::global().snapshot();
-    refresh_repository_data(snapshot);
-    sample_equity(snapshot);
-
+void TerminalUi::draw(const nlohmann::json& snapshot, bool force_full) {
     const int width = terminal_width();
     const auto mode = text(snapshot, "mode", "idle");
     const auto status = text(snapshot, "health", "starting");
@@ -382,8 +462,11 @@ void TerminalUi::draw(bool force_full) {
     const double equity = number<double>(snapshot, "balance");
     const double realized = number<double>(snapshot.value("paper_account", nlohmann::json::object()), "realized_profit");
     const double total_profit = number<double>(snapshot, "total_profit");
+    const auto perf = snapshot.value("performance", nlohmann::json::object());
+    const auto pressure = text(perf, "queue_pressure", "normal");
 
-    double last_price = 0.0, unrealized = 0.0;
+    double last_price = 0.0;
+    double unrealized = 0.0;
     const bool has_position = snapshot.contains("active_position") && snapshot["active_position"].is_object();
     if (has_position) {
         last_price = number<double>(snapshot["active_position"], "current_price");
@@ -395,7 +478,8 @@ void TerminalUi::draw(bool force_full) {
         << "  " << health(status) << "  " << bold << symbol << reset;
     if (last_price > 0.0) out << "  " << format_number(last_price, last_price < 10.0 ? 5 : 2);
     out << "  Strategy " << bold << strategy << reset
-        << "  Entries " << (paused ? std::string(yellow)+"PAUSED"+reset : std::string(green)+"RUNNING"+reset) << '\n';
+        << "  Entries " << (paused ? std::string(yellow) + "PAUSED" + reset : std::string(green) + "RUNNING" + reset)
+        << "  Persist " << pressure_badge(pressure) << '\n';
 
     out << "Equity " << format_number(equity) << ' ' << text(snapshot, "quote_asset", "USDC")
         << "  Realized " << colored_value(realized, format_number(realized))
@@ -404,10 +488,10 @@ void TerminalUi::draw(bool force_full) {
     out << "  Market " << on_off(number<bool>(snapshot, "market_data_connected")) << '\n';
     separator(out, width);
 
-    static const char* tab_names[] = {"MARKET","SCANNER","ORDERS","TRADES","STRATEGY","MODELS","SYSTEM"};
+    static const char* tab_names[] = {"MARKET", "SCANNER", "ORDERS", "TRADES", "STRATEGY", "MODELS", "SYSTEM"};
     for (int i = 0; i < 7; ++i) {
         const bool selected = static_cast<int>(tab_) == i;
-        out << (selected ? std::string(bold)+cyan : std::string(dim)) << '[' << (i + 1) << "] " << tab_names[i] << reset;
+        out << (selected ? std::string(bold) + cyan : std::string(dim)) << '[' << (i + 1) << "] " << tab_names[i] << reset;
         if (i != 6) out << "   ";
     }
     out << '\n';
@@ -427,66 +511,51 @@ void TerminalUi::draw(bool force_full) {
             << "   Fill-model Bid/Ask " << (indicative_bid > 0.0 ? format_number(indicative_bid, 2) + " / " + format_number(indicative_ask, 2) : "-") << '\n';
 
         if (has_position) {
-            const auto& p = snapshot["active_position"];
+            const auto& position = snapshot["active_position"];
             out << "  " << green << bold << "LONG" << reset
-                << "   Entry " << format_number(number<double>(p,"entry_price"),2)
-                << "   Qty " << format_number(number<double>(p,"quantity"),6)
+                << "   Entry " << format_number(number<double>(position, "entry_price"), 2)
+                << "   Qty " << format_number(number<double>(position, "quantity"), 6)
                 << "   U-P/L " << colored_value(unrealized, format_number(unrealized))
-                << "   SL " << format_number(number<double>(p,"stop_loss"),2)
-                << "   TP " << format_number(number<double>(p,"take_profit"),2) << '\n';
+                << "   SL " << format_number(number<double>(position, "stop_loss"), 2)
+                << "   TP " << format_number(number<double>(position, "take_profit"), 2) << '\n';
         } else {
             out << "  " << dim << "FLAT - no open paper position" << reset << '\n';
         }
 
-        out << "  Risk/trade " << format_pct(number<double>(risk,"risk_per_trade") * 100.0)
-            << "   Stop " << format_pct(number<double>(risk,"stop_loss_percent") * 100.0)
-            << "   Target " << format_pct(number<double>(risk,"take_profit_percent") * 100.0)
-            << "   Max hold " << number<long long>(risk,"max_holding_seconds") << "s"
-            << "   Kill switch " << (number<bool>(snapshot,"kill_switch_active") ? std::string(red)+"ON"+reset : std::string(green)+"OFF"+reset) << '\n';
+        out << "  Risk/trade " << format_pct(number<double>(risk, "risk_per_trade") * 100.0)
+            << "   Stop " << format_pct(number<double>(risk, "stop_loss_percent") * 100.0)
+            << "   Target " << format_pct(number<double>(risk, "take_profit_percent") * 100.0)
+            << "   Max hold " << number<long long>(risk, "max_holding_seconds") << "s"
+            << "   Kill switch " << (number<bool>(snapshot, "kill_switch_active") ? std::string(red) + "ON" + reset : std::string(green) + "OFF" + reset) << '\n';
 
-        out << "  Equity curve  " << cyan << sparkline(equity_history_, static_cast<std::size_t>(std::min(60, width - 18))) << reset << '\n';
+        const auto spark_width = static_cast<std::size_t>(std::max(10, std::min(60, width - 18)));
+        out << "  Equity curve  " << cyan << sparkline(equity_history_, spark_width) << reset << '\n';
         separator(out, width);
         title(out, "MARKET WATCH");
         out << "  " << std::left << std::setw(14) << "Symbol" << std::right << std::setw(12) << "1m Return" << std::setw(12) << "Rank" << std::setw(16) << "State" << '\n';
         std::size_t rank = 1;
         for (const auto& row : scanner) {
-            const double r = number<double>(row,"return") * 100.0;
-            const std::string row_symbol = text(row,"symbol");
-            out << "  " << std::left << std::setw(14) << row_symbol << std::right << std::setw(12) << format_pct(r)
+            const double value = number<double>(row, "return") * 100.0;
+            const std::string row_symbol = text(row, "symbol");
+            out << "  " << std::left << std::setw(14) << row_symbol << std::right << std::setw(12) << format_pct(value)
                 << std::setw(12) << rank++ << std::setw(16) << (row_symbol == symbol ? "TRADING" : "WATCH") << '\n';
         }
         if (scanner.empty()) out << "  " << dim << "Waiting for scanner data..." << reset << '\n';
-
-        separator(out, width);
-        title(out, "RECENT TRADES");
-        out << "  " << std::left << std::setw(10) << "Time" << std::setw(12) << "Symbol" << std::setw(16) << "Strategy"
-            << std::right << std::setw(12) << "Entry" << std::setw(12) << "Exit" << std::setw(12) << "P/L" << "  Exit reason\n";
-        int shown = 0;
-        for (const auto& row : recent_trades_) {
-            if (shown++ >= 5) break;
-            const double pnl = number<double>(row,"net_profit");
-            out << "  " << std::left << std::setw(10) << timestamp_text(number<std::int64_t>(row,"exit_ts"))
-                << std::setw(12) << text(row,"symbol") << std::setw(16) << clip(text(row,"strategy"),15)
-                << std::right << std::setw(12) << format_number(number<double>(row,"entry_price"),2)
-                << std::setw(12) << format_number(number<double>(row,"exit_price"),2)
-                << std::setw(12) << format_number(pnl,2) << "  " << clip(text(row,"exit_reason"),22) << '\n';
-        }
-        if (recent_trades_.empty()) out << "  " << dim << "No completed trades yet." << reset << '\n';
     }
 
     if (tab_ == Tab::Scanner) {
         title(out, "SCANNER / WATCHLIST");
-        out << "  Markets " << number<std::size_t>(snapshot,"markets")
-            << "   Events/s " << format_number(number<double>(snapshot,"events_per_second"),1)
-            << "   Leader " << text(snapshot,"top_asset")
-            << "   Leader return " << format_pct(number<double>(snapshot,"top_return_percent")) << "\n\n";
+        out << "  Markets " << number<std::size_t>(snapshot, "markets")
+            << "   Events/s " << format_number(number<double>(snapshot, "events_per_second"), 1)
+            << "   Leader " << text(snapshot, "top_asset")
+            << "   Leader return " << format_pct(number<double>(snapshot, "top_return_percent")) << "\n\n";
         out << "  " << std::left << std::setw(6) << "Rank" << std::setw(16) << "Symbol" << std::right << std::setw(14) << "1m Return" << std::setw(16) << "Role" << '\n';
         std::size_t rank = 1;
         for (const auto& row : scanner) {
-            const auto s = text(row,"symbol");
-            const double r = number<double>(row,"return") * 100.0;
-            out << "  " << std::left << std::setw(6) << rank++ << std::setw(16) << s
-                << std::right << std::setw(14) << format_pct(r) << std::setw(16) << (s == symbol ? "ACTIVE" : "CANDIDATE") << '\n';
+            const auto candidate = text(row, "symbol");
+            const double value = number<double>(row, "return") * 100.0;
+            out << "  " << std::left << std::setw(6) << rank++ << std::setw(16) << candidate
+                << std::right << std::setw(14) << format_pct(value) << std::setw(16) << (candidate == symbol ? "ACTIVE" : "CANDIDATE") << '\n';
         }
         if (scanner.empty()) out << "  Waiting for closed candles and ranking data.\n";
         out << "\n  " << dim << "Scanner ranking is market-performance based; strategy approval happens only inside TradeEngine." << reset << '\n';
@@ -497,54 +566,52 @@ void TerminalUi::draw(bool force_full) {
         out << "  " << std::left << std::setw(10) << "Time" << std::setw(13) << "Symbol" << std::setw(8) << "Side"
             << std::setw(18) << "State" << std::right << std::setw(14) << "Requested" << std::setw(14) << "Executed" << std::setw(14) << "Fill" << "  Source\n";
         for (const auto& row : recent_orders_) {
-            out << "  " << std::left << std::setw(10) << timestamp_text(number<std::int64_t>(row,"local_ts"))
-                << std::setw(13) << text(row,"symbol") << std::setw(8) << text(row,"side") << std::setw(18) << clip(text(row,"state"),17)
-                << std::right << std::setw(14) << format_number(number<double>(row,"requested_quantity"),6)
-                << std::setw(14) << format_number(number<double>(row,"executed_quantity"),6)
-                << std::setw(14) << format_number(number<double>(row,"average_fill_price"),2) << "  " << clip(text(row,"source"),18) << '\n';
+            out << "  " << std::left << std::setw(10) << timestamp_text(number<std::int64_t>(row, "local_ts"))
+                << std::setw(13) << text(row, "symbol") << std::setw(8) << text(row, "side") << std::setw(18) << clip(text(row, "state"), 17)
+                << std::right << std::setw(14) << format_number(number<double>(row, "requested_quantity"), 6)
+                << std::setw(14) << format_number(number<double>(row, "executed_quantity"), 6)
+                << std::setw(14) << format_number(number<double>(row, "average_fill_price"), 2) << "  " << clip(text(row, "source"), 18) << '\n';
         }
         if (recent_orders_.empty()) out << "  " << dim << "No persisted order events." << reset << '\n';
     }
 
     if (tab_ == Tab::Trades) {
         title(out, "TRADE HISTORY / P&L");
-        out << "  Total " << number<int>(snapshot,"total_trades") << "   Wins " << number<int>(snapshot,"wins")
-            << "   Losses " << number<int>(snapshot,"losses") << "   Win rate " << format_pct(number<double>(snapshot,"win_rate"))
-            << "   Avg P/L " << format_number(number<double>(snapshot,"average_profit")) << "\n\n";
+        out << "  Total " << number<int>(snapshot, "total_trades") << "   Wins " << number<int>(snapshot, "wins")
+            << "   Losses " << number<int>(snapshot, "losses") << "   Win rate " << format_pct(number<double>(snapshot, "win_rate"))
+            << "   Avg P/L " << format_number(number<double>(snapshot, "average_profit")) << "\n\n";
         out << "  " << std::left << std::setw(10) << "Time" << std::setw(13) << "Symbol" << std::setw(18) << "Strategy"
             << std::right << std::setw(13) << "Entry" << std::setw(13) << "Exit" << std::setw(13) << "Fees" << std::setw(13) << "Net P/L" << "  Reason\n";
         for (const auto& row : recent_trades_) {
-            out << "  " << std::left << std::setw(10) << timestamp_text(number<std::int64_t>(row,"exit_ts"))
-                << std::setw(13) << text(row,"symbol") << std::setw(18) << clip(text(row,"strategy"),17)
-                << std::right << std::setw(13) << format_number(number<double>(row,"entry_price"),2)
-                << std::setw(13) << format_number(number<double>(row,"exit_price"),2)
-                << std::setw(13) << format_number(number<double>(row,"fees"),2)
-                << std::setw(13) << format_number(number<double>(row,"net_profit"),2) << "  " << clip(text(row,"exit_reason"),20) << '\n';
+            out << "  " << std::left << std::setw(10) << timestamp_text(number<std::int64_t>(row, "exit_ts"))
+                << std::setw(13) << text(row, "symbol") << std::setw(18) << clip(text(row, "strategy"), 17)
+                << std::right << std::setw(13) << format_number(number<double>(row, "entry_price"), 2)
+                << std::setw(13) << format_number(number<double>(row, "exit_price"), 2)
+                << std::setw(13) << format_number(number<double>(row, "fees"), 2)
+                << std::setw(13) << format_number(number<double>(row, "net_profit"), 2) << "  " << clip(text(row, "exit_reason"), 20) << '\n';
         }
         if (recent_trades_.empty()) out << "  " << dim << "No completed trades yet." << reset << '\n';
-        out << "\n  Equity  " << cyan << sparkline(equity_history_, static_cast<std::size_t>(std::min(70, width - 12))) << reset << '\n';
     }
 
     if (tab_ == Tab::Strategy) {
         title(out, "STRATEGY DECISION MATRIX");
-        const double confidence = number<double>(snapshot,"signal_confidence");
-        const auto signal_reason = text(snapshot,"signal_reason");
+        const double confidence = number<double>(snapshot, "signal_confidence");
+        const auto signal_reason = text(snapshot, "signal_reason");
         out << "  Active strategy  " << bold << strategy << reset << '\n'
-            << "  Last signal      " << text(snapshot,"last_signal") << '\n'
-            << "  Aggregate score  " << format_number(confidence,3) << "  [" << bar(confidence) << "]\n"
-            << "  Risk decision    " << text(snapshot,"last_risk_decision") << '\n'
+            << "  Last signal      " << text(snapshot, "last_signal") << '\n'
+            << "  Aggregate score  " << format_number(confidence, 3) << "  [" << bar(confidence) << "]\n"
+            << "  Risk decision    " << text(snapshot, "last_risk_decision") << '\n'
             << "  Signal reason    " << signal_reason << '\n'
-            << "  Risk reason      " << text(snapshot,"risk_reason") << "\n\n";
+            << "  Risk reason      " << text(snapshot, "risk_reason") << "\n\n";
 
         if (strategy_config.value("type", std::string{}) == "ensemble" && strategy_config.contains("members")) {
             out << "  " << std::left << std::setw(24) << "Member" << std::setw(12) << "Weight" << std::setw(16) << "Last confirm" << '\n';
             for (const auto& member : strategy_config["members"]) {
                 const auto member_name = member.value("type", std::string("unknown"));
                 const bool confirmed = signal_reason.find(member_name) != std::string::npos;
-                out << "  " << std::left << std::setw(24) << member_name << std::setw(12) << format_number(member.value("weight",1.0),2)
+                out << "  " << std::left << std::setw(24) << member_name << std::setw(12) << format_number(member.value("weight", 1.0), 2)
                     << std::setw(16) << (confirmed ? "YES" : "-") << '\n';
             }
-            out << "\n  " << dim << "Member confirmation is derived from the actual ensemble signal reason; aggregate confidence is the engine score." << reset << '\n';
         } else {
             out << "  Configuration: " << strategy_config.dump() << '\n';
         }
@@ -555,32 +622,34 @@ void TerminalUi::draw(bool force_full) {
         title(out, "MODEL LIFECYCLE");
         out << "  " << std::left << std::setw(24) << "Model" << std::setw(13) << "Symbol" << std::setw(13) << "Stage" << "Promotion path\n";
         for (const auto& row : models_) {
-            const auto stage = text(row,"stage");
-            std::string path = "research -> shadow -> paper -> testnet";
-            out << "  " << std::left << std::setw(24) << clip(text(row,"name",text(row,"model_id")),23)
-                << std::setw(13) << text(row,"symbol") << std::setw(13) << stage << path << '\n';
+            out << "  " << std::left << std::setw(24) << clip(text(row, "name", text(row, "model_id")), 23)
+                << std::setw(13) << text(row, "symbol") << std::setw(13) << text(row, "stage") << "research -> shadow -> paper -> testnet" << '\n';
         }
         if (models_.empty()) out << "  " << dim << "No registered models in log/models.sqlite3." << reset << '\n';
-        out << "\n  Active paper model: " << text(snapshot,"paper_model_id","-") << '\n';
+        out << "\n  Active paper model: " << text(snapshot, "paper_model_id", "-") << '\n';
         out << "  " << dim << "Promotion remains CLI-controlled and is intentionally not writable from the TUI." << reset << '\n';
     }
 
     if (tab_ == Tab::System) {
         title(out, "SYSTEM / LATENCY / DATA PATH");
-        out << "  Collector " << on_off(number<bool>(snapshot,"collector_active"))
-            << "   Scanner " << on_off(number<bool>(snapshot,"scanner_active"))
-            << "   Trader " << on_off(number<bool>(snapshot,"trader_active"))
-            << "   Queue " << number<std::size_t>(snapshot,"queue_depth")
-            << "   Drop " << format_pct(number<double>(snapshot,"drop_rate") * 100.0,4)
-            << "   Events/s " << format_number(number<double>(snapshot,"events_per_second"),1) << '\n';
-        out << "  DB " << text(snapshot,"db_path") << "   Size " << format_number(number<double>(snapshot,"db_size_bytes") / 1024.0 / 1024.0,2) << " MiB\n\n";
+        out << "  Collector " << on_off(number<bool>(snapshot, "collector_active"))
+            << "   Scanner " << on_off(number<bool>(snapshot, "scanner_active"))
+            << "   Trader " << on_off(number<bool>(snapshot, "trader_active"))
+            << "   Queue " << number<std::size_t>(snapshot, "queue_depth")
+            << "   Pressure " << pressure_badge(pressure)
+            << "   Drop " << format_pct(number<double>(snapshot, "drop_rate") * 100.0, 4)
+            << "   Events/s " << format_number(number<double>(snapshot, "events_per_second"), 1) << '\n';
+        out << "  DB " << text(snapshot, "db_path") << "   Size " << format_number(number<double>(snapshot, "db_size_bytes") / 1024.0 / 1024.0, 2) << " MiB"
+            << "   High water " << number<std::uint64_t>(perf, "queue_high_water") << '\n';
+        out << "  Wakeups " << number<std::uint64_t>(perf, "queue_wakeups")
+            << "   Pressure transitions " << number<std::uint64_t>(perf, "queue_pressure_transitions")
+            << "   Saturation events " << number<std::uint64_t>(perf, "queue_saturation_events") << "\n\n";
         out << "  " << std::left << std::setw(18) << "Pipeline" << std::right << std::setw(10) << "p50 us" << std::setw(10) << "p95 us" << std::setw(10) << "p99 us" << std::setw(10) << "max us" << '\n';
-        const auto perf = snapshot.value("performance", nlohmann::json::object());
         latency_row(out, perf, "parse_latency", "Parser");
         latency_row(out, perf, "event_dispatch_latency", "Event dispatch");
         latency_row(out, perf, "strategy_decision_latency", "Decision");
         latency_row(out, perf, "sqlite_batch_latency", "SQLite batch");
-        out << "\n  Dashboard bind: " << text(snapshot,"dashboard_host","-") << ':' << number<int>(snapshot,"dashboard_port") << '\n';
+        out << "\n  Dashboard bind: " << text(snapshot, "dashboard_host", "-") << ':' << number<int>(snapshot, "dashboard_port") << '\n';
     }
 
     separator(out, width);
@@ -588,7 +657,9 @@ void TerminalUi::draw(bool force_full) {
         << "  [S] Strategy  [A] Auto  [M] Manual symbol  [P] Pause/Resume  [C] Close paper position  [Ctrl+C] Quit\n";
     if (editing_symbol_) out << yellow << "Manual symbol> " << symbol_buffer_ << "_" << reset << '\n';
     if (!notice_.empty()) out << dim << notice_ << reset << '\n';
-    if (snapshot.contains("control_pending") && !snapshot["control_pending"].is_null()) out << yellow << "Pending: " << snapshot["control_pending"].dump() << reset << '\n';
+    if (snapshot.contains("control_pending") && !snapshot["control_pending"].is_null()) {
+        out << yellow << "Pending: " << snapshot["control_pending"].dump() << reset << '\n';
+    }
 
     render_frame(out.str(), force_full);
 }
