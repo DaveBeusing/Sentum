@@ -30,6 +30,29 @@ struct WorkspaceDescriptor {
 	std::string_view purpose;
 };
 
+struct OperatorActionPresentation {
+	std::string classification = "FORBIDDEN";
+	std::string label = "BLOCKED";
+	std::string guidance = "Action classification unavailable; fail closed";
+	bool confirmation_required = true;
+	bool blocked = true;
+};
+
+struct OperatorControlSurface {
+	OperatorStatus status;
+	std::string active_workspace;
+	std::string banner;
+	std::string navigation;
+	std::string workspace_help;
+	std::string governance_state = "UNAVAILABLE";
+	std::string maintenance_state = "NORMAL";
+	std::string incident_state = "NONE";
+	std::string recovery_state = "IDLE";
+	std::size_t pending_approvals = 0;
+	std::string approval_summary;
+	std::string audit_summary;
+};
+
 inline constexpr std::array<WorkspaceDescriptor, 7> terminal_workspaces{{
 	{'1', "MARKET", "position, price, risk and market watch"},
 	{'2', "SCANNER", "candidate ranking and watchlist"},
@@ -49,6 +72,11 @@ inline std::string json_text(const nlohmann::json& value, const char* key, const
 inline bool json_bool(const nlohmann::json& value, const char* key, bool fallback = false) {
 	if (!value.is_object() || !value.contains(key)) return fallback;
 	try { return value[key].get<bool>(); } catch (...) { return fallback; }
+}
+
+inline std::size_t json_size(const nlohmann::json& value, const char* key, std::size_t fallback = 0) {
+	if (!value.is_object() || !value.contains(key)) return fallback;
+	try { return value[key].get<std::size_t>(); } catch (...) { return fallback; }
 }
 
 inline OperatorStatus derive_operator_status(const nlohmann::json& snapshot) {
@@ -122,6 +150,55 @@ inline std::string workspace_help_text(std::string_view active_workspace) {
 	const auto* workspace = workspace_by_name(active_workspace);
 	if (workspace == nullptr) return {};
 	return std::string(workspace->name) + " | " + std::string(workspace->purpose);
+}
+
+inline OperatorActionPresentation operator_action_presentation(std::string_view classification) {
+	if (classification == "AUTOMATED") {
+		return {"AUTOMATED", "AVAILABLE", "Operational automation may execute within existing guardrails", false, false};
+	}
+	if (classification == "APPROVAL_REQUIRED") {
+		return {"APPROVAL_REQUIRED", "APPROVAL REQUIRED", "Explicit operator approval is required before execution", true, false};
+	}
+	if (classification == "FORBIDDEN") {
+		return {"FORBIDDEN", "BLOCKED", "Action is prohibited by operational governance", true, true};
+	}
+	return {};
+}
+
+inline OperatorControlSurface derive_operator_control_surface(
+	const nlohmann::json& snapshot,
+	std::string_view active_workspace) {
+	OperatorControlSurface surface;
+	surface.status = derive_operator_status(snapshot);
+	surface.active_workspace = std::string(active_workspace);
+	surface.banner = operator_banner_text(surface.status);
+	surface.navigation = workspace_navigation_text(active_workspace);
+	surface.workspace_help = workspace_help_text(active_workspace);
+
+	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
+	surface.governance_state = json_text(control_plane, "governance_state", "UNAVAILABLE");
+	surface.maintenance_state = json_text(control_plane, "maintenance_state", "NORMAL");
+	surface.incident_state = json_text(control_plane, "incident_state", "NONE");
+	surface.recovery_state = json_text(control_plane, "recovery_state", "IDLE");
+	surface.pending_approvals = json_size(control_plane, "pending_approvals");
+
+	if (surface.pending_approvals > 0) {
+		surface.approval_summary = std::to_string(surface.pending_approvals) + " approval(s) pending";
+	} else if (surface.governance_state == "UNAVAILABLE") {
+		surface.approval_summary = "Governance evidence unavailable";
+	} else {
+		surface.approval_summary = "No approvals pending";
+	}
+
+	const auto last_action = json_text(control_plane, "last_audit_action");
+	const auto last_actor = json_text(control_plane, "last_audit_actor");
+	if (!last_action.empty()) {
+		surface.audit_summary = "Last action: " + last_action;
+		if (!last_actor.empty()) surface.audit_summary += " by " + last_actor;
+	} else {
+		surface.audit_summary = "No governed action recorded";
+	}
+	return surface;
 }
 
 } // namespace sentum::ui
