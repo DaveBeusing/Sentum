@@ -128,6 +128,22 @@ A second `Enter` while confirmation is already open does not execute or authoriz
 
 The terminal surface displays this keyboard contract explicitly so an operator can distinguish navigation keys from existing runtime-control hotkeys. The navigation policy itself is side-effect free and does not call RuntimeControl, Risk, Execution or persistence APIs.
 
+## Production input hook and modal priority
+
+`TerminalUi` exposes the operator navigation model through an explicit modal input boundary:
+
+- `O` enters operator-navigation mode;
+- while the mode is active, input is routed to `OperatorNavigationPolicy` before workspace or runtime-control hotkeys;
+- number keys and `S`, `A`, `M`, `P`, `C` therefore cannot trigger their normal terminal behavior while operator navigation is active;
+- `Enter` can open confirmation UX but cannot execute or authorize an action;
+- a repeated `Enter` remains non-authoritative;
+- `Esc` closes operator navigation and returns input ownership to the normal terminal controls;
+- entering or leaving the mode does not mutate Risk, Execution, approvals or audit evidence.
+
+The active navigation state is rendered through the same operator-surface frame, including current focus and selected approval/audit row. This keeps input state and visible focus consistent without a second snapshot read or a second output path.
+
+The terminal UI regression suite exercises the real `TerminalUi::handle_key()` boundary to verify that normal workspace hotkeys are suppressed while the mode is active and resume only after `Esc` exits the mode.
+
 ## Missing governance evidence
 
 Missing operations-control-plane evidence remains visible as `UNAVAILABLE`.
@@ -154,11 +170,11 @@ The generated surface contains:
 6. optional governed action state from `operations_control_plane.operator_action`;
 7. structured maintenance, incident and recovery workflow summaries;
 8. bounded approval queue and audit timeline rows;
-9. keyboard/focus safety guidance.
+9. live keyboard/focus state.
 
-The production `TerminalUi` hook combines these lines with the existing terminal frame before the AP-06 diff is calculated. It reuses the cached dashboard snapshot and active tab and introduces no second snapshot read, polling path or output stream.
+The production `TerminalUi` hook combines these lines with the existing terminal frame before the AP-06 diff is calculated. It reuses the cached dashboard snapshot, active tab and current operator-navigation state and introduces no second snapshot read, polling path or output stream.
 
-The terminal-render regression suite requires an identical second operator frame, including workflow, approval and audit rows, to produce zero payload bytes and zero changed rows.
+The terminal-render regression suite requires an identical second operator frame, including workflow, approval, audit and navigation rows, to produce zero payload bytes and zero changed rows.
 
 ## Sanitizer regression integration
 
