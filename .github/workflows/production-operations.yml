@@ -1,0 +1,52 @@
+name: Sentum Production Operations Gate
+
+on:
+  workflow_run:
+    workflows:
+      - Sentum Core CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  production_operations:
+    name: Production operations baseline
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout evaluated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Download RC handoff artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sentum-rc-${{ github.event.workflow_run.head_sha }}
+          path: evidence/rc
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Enforce production operations baseline
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          python3 tools/ci/production_operations_gate.py \
+            --rc-report evidence/rc/rc_package.json \
+            --expected-sha "${GITHUB_SHA}" \
+            --report log/production_operations_gate.json \
+            --summary log/production_operations_gate.md
+          cat log/production_operations_gate.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload production operations evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentum-production-operations-${{ github.event.workflow_run.head_sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            log/production_operations_gate.json
+            log/production_operations_gate.md
