@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <sentum/ui/OperatorActionFlow.hpp>
 #include <sentum/ui/OperatorAuditQueueView.hpp>
+#include <sentum/ui/OperatorNavigationPolicy.hpp>
 #include <sentum/ui/OperatorWorkflowView.hpp>
 #include <sentum/ui/TerminalWorkspacePolicy.hpp>
 
@@ -20,7 +21,7 @@ inline std::string operator_surface_frame_lines(
 		surface.banner.size() + surface.navigation.size() + surface.workspace_help.size() +
 		surface.governance_state.size() + surface.maintenance_state.size() +
 		surface.incident_state.size() + surface.recovery_state.size() +
-		surface.approval_summary.size() + surface.audit_summary.size() + 1024);
+		surface.approval_summary.size() + surface.audit_summary.size() + 1280);
 
 	frame += "OPERATOR ";
 	frame += surface.banner;
@@ -57,6 +58,9 @@ inline std::string operator_surface_frame_lines(
 	frame += operator_workflows_text(control_plane);
 
 	const auto audit_queue = derive_operator_audit_queue_view(snapshot, 4, 5);
+	frame += "NAVIGATION ";
+	frame += operator_navigation_text(OperatorNavigationState{});
+	frame += '\n';
 	if (!audit_queue.approvals.empty()) {
 		frame += "APPROVAL QUEUE ";
 		frame += std::to_string(audit_queue.approval_total);
