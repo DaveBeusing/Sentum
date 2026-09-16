@@ -61,8 +61,8 @@ void test_frame_pacer_prevents_drift_and_catchup_bursts() {
 	require(recovered == start + 550ms, "late frame did not rebase without catch-up burst");
 }
 
-void test_operator_surface_preserves_zero_write_contract() {
-	const nlohmann::json snapshot = {
+nlohmann::json operator_snapshot() {
+	return {
 		{"health", "healthy"},
 		{"kill_switch_active", false},
 		{"market_data_connected", true},
@@ -108,7 +108,10 @@ void test_operator_surface_preserves_zero_write_contract() {
 			})}
 		}}
 	};
+}
 
+void test_operator_surface_preserves_zero_write_contract() {
+	const auto snapshot = operator_snapshot();
 	const auto frame = sentum::ui::operator_surface_frame_lines(snapshot, "SYSTEM");
 	require(frame.find("OPERATOR NORMAL") != std::string::npos, "operator banner missing from surface frame");
 	require(frame.find("[7] SYSTEM*") != std::string::npos, "active workspace missing from surface frame");
@@ -119,6 +122,7 @@ void test_operator_surface_preserves_zero_write_contract() {
 	require(frame.find("MAINTENANCE | REQUESTED | enter_maintenance | APPROVAL_REQUIRED | request maint-17") != std::string::npos, "maintenance workflow missing from surface frame");
 	require(frame.find("INCIDENT | OPEN | acknowledge_incident | APPROVAL_REQUIRED | request inc-9") != std::string::npos, "incident workflow missing from surface frame");
 	require(frame.find("RECOVERY | CANDIDATE | promote_recovery_candidate | APPROVAL_REQUIRED | request rec-4") != std::string::npos, "recovery workflow missing from surface frame");
+	require(frame.find("EVIDENCE AVAILABLE") != std::string::npos, "available evidence state missing from surface frame");
 	require(frame.find("APPROVAL QUEUE 1") != std::string::npos, "approval queue heading missing from surface frame");
 	require(frame.find("Approval req-1 | enter_maintenance | APPROVAL_REQUIRED | APPROVAL REQUIRED") != std::string::npos, "approval queue row missing from surface frame");
 	require(frame.find("AUDIT TIMELINE 1") != std::string::npos, "audit timeline heading missing from surface frame");
@@ -128,6 +132,37 @@ void test_operator_surface_preserves_zero_write_contract() {
 	const auto diff = sentum::ui::build_terminal_frame_diff(previous, frame, false);
 	require(diff.payload.empty(), "unchanged operator surface emitted terminal payload");
 	require(diff.changed_rows == 0, "unchanged operator surface reported dirty rows");
+}
+
+void test_operator_failure_states_are_visible_and_zero_write() {
+	auto stale = operator_snapshot();
+	stale["operations_control_plane"]["evidence_status"] = "STALE";
+	sentum::ui::OperatorNavigationState navigation;
+	navigation.confirmation_open = true;
+	navigation.selected_request_id = "req-1";
+	navigation.selected_action = "enter_maintenance";
+	const auto stale_frame = sentum::ui::operator_surface_frame_lines(stale, "SYSTEM", navigation);
+	require(stale_frame.find("EVIDENCE STALE - operator approvals are fail-closed") != std::string::npos, "stale evidence warning missing");
+	require(stale_frame.find("FORBIDDEN | BLOCKED - STALE EVIDENCE") != std::string::npos, "stale approval row not visibly blocked");
+	require(stale_frame.find("CONFIRMATION OPEN") == std::string::npos, "stale evidence left confirmation visible");
+
+	const auto previous = sentum::ui::split_terminal_lines(stale_frame);
+	const auto diff = sentum::ui::build_terminal_frame_diff(previous, stale_frame, false);
+	require(diff.payload.empty(), "unchanged stale operator frame emitted terminal payload");
+	require(diff.changed_rows == 0, "unchanged stale operator frame reported dirty rows");
+
+	const nlohmann::json missing = {
+		{"health", "healthy"},
+		{"kill_switch_active", false},
+		{"market_data_connected", true},
+		{"entries_paused", false},
+		{"performance", {{"queue_pressure", "normal"}}}
+	};
+	const auto missing_frame = sentum::ui::operator_surface_frame_lines(missing, "SYSTEM");
+	require(missing_frame.find("EVIDENCE MISSING - operator evidence unavailable") != std::string::npos, "missing evidence warning missing");
+	require(missing_frame.find("APPROVAL QUEUE 0") != std::string::npos, "empty approval queue heading missing");
+	require(missing_frame.find("No approval evidence available") != std::string::npos, "empty approval state missing");
+	require(missing_frame.find("AUDIT TIMELINE 0") != std::string::npos, "empty audit heading missing");
 }
 
 } // namespace
@@ -140,6 +175,7 @@ int main() {
 		test_full_redraw_is_explicit();
 		test_frame_pacer_prevents_drift_and_catchup_bursts();
 		test_operator_surface_preserves_zero_write_contract();
+		test_operator_failure_states_are_visible_and_zero_write();
 		std::cout << "terminal render pipeline tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {
