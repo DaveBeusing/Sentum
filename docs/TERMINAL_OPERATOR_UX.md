@@ -49,9 +49,17 @@ Each non-normal operator state may point to the workspace that contains the rele
 
 The recommendation is navigational guidance only and must never auto-change trading state.
 
-## Next integration slice
+## Presentation contract
 
-The next AP-07 slice should integrate the policy into the always-visible terminal header and warning area, replacing ad-hoc status composition with one consistent severity banner. It should also normalize workspace labels/help text and keep the existing zero-write renderer contract from AP-06.
+AP-07 exposes presentation-ready text from the same policy that determines severity and workspace guidance:
+
+- `operator_banner_text()` renders one deterministic operator banner;
+- `workspace_navigation_text()` renders the stable numeric workspace map and marks the active workspace;
+- `workspace_help_text()` supplies the active workspace purpose from the canonical descriptor table.
+
+This avoids duplicating severity wording and workspace labels in multiple terminal rendering paths. Regression tests verify normal/warning banner text, active-workspace marking, shortcut presence and workspace help text.
+
+The production `TerminalUi` should consume these presentation helpers in its always-visible header/navigation area. Doing so must preserve AP-06's unchanged-frame -> zero terminal output bytes contract.
 
 ## Non-goals
 
