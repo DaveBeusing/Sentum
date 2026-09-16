@@ -23,7 +23,7 @@ inline std::string operator_surface_frame_lines(
 		surface.banner.size() + surface.navigation.size() + surface.workspace_help.size() +
 		surface.governance_state.size() + surface.maintenance_state.size() +
 		surface.incident_state.size() + surface.recovery_state.size() +
-		surface.approval_summary.size() + surface.audit_summary.size() + 2800);
+		surface.approval_summary.size() + surface.audit_summary.size() + 3000);
 
 	frame += "OPERATOR ";
 	frame += surface.banner;
@@ -61,9 +61,14 @@ inline std::string operator_surface_frame_lines(
 	frame += std::to_string(alert_center.warning);
 	frame += " attention=";
 	frame += std::to_string(alert_center.attention);
+	frame += " suppressed=";
+	frame += std::to_string(alert_center.suppressed);
+	frame += " flapping=";
+	frame += std::to_string(alert_center.flapping);
+	if (alert_center.storm_limited) frame += " storm-limited";
 	frame += '\n';
 	if (alert_center.items.empty()) {
-		frame += "   No operator alerts\n";
+		frame += "   No visible operator alerts\n";
 	} else {
 		for (const auto& item : alert_center.items) {
 			frame += "   Alert ";
@@ -71,7 +76,11 @@ inline std::string operator_surface_frame_lines(
 			frame += '\n';
 		}
 	}
-	if (alert_center.truncated) frame += "   Additional alerts omitted from terminal view\n";
+	if (alert_center.suppressed > 0) {
+		frame += "   ";
+		frame += std::to_string(alert_center.suppressed);
+		frame += " low-severity alert(s) suppressed by attention policy\n";
+	}
 
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
 	const auto action_state = control_plane.value("operator_action", nlohmann::json::object());
