@@ -64,9 +64,34 @@ double Collector::drop_rate() const {
     return total == 0 ? 0.0 : static_cast<double>(rejected) / static_cast<double>(total);
 }
 
+void Collector::update_queue_pressure(std::size_t depth, bool saturated) noexcept {
+    auto& perf = sentum::market::RuntimePerformanceMetrics::global();
+    perf.observe_queue_depth(depth);
+    if (saturated) perf.observe_queue_saturation();
+
+    const auto level = saturated
+        ? sentum::market::QueuePressureLevel::Saturated
+        : depth >= critical_pressure_depth
+            ? sentum::market::QueuePressureLevel::Critical
+            : depth >= elevated_pressure_depth
+                ? sentum::market::QueuePressureLevel::Elevated
+                : sentum::market::QueuePressureLevel::Normal;
+
+    const auto raw = static_cast<std::uint8_t>(level);
+    auto previous = queue_pressure_level_.load(std::memory_order_relaxed);
+    if (previous != raw && queue_pressure_level_.compare_exchange_strong(
+            previous, raw, std::memory_order_relaxed, std::memory_order_relaxed)) {
+        perf.set_queue_pressure(level);
+    }
+}
+
 void Collector::start() {
     if (running.exchange(true, std::memory_order_acq_rel)) return;
     producer_stopped.store(false, std::memory_order_release);
+    queue_pressure_level_.store(static_cast<std::uint8_t>(sentum::market::QueuePressureLevel::Normal), std::memory_order_relaxed);
+    auto& perf = sentum::market::RuntimePerformanceMetrics::global();
+    perf.observe_queue_depth(queue.size_approx());
+    perf.set_queue_pressure(sentum::market::QueuePressureLevel::Normal);
     logger.start();
 
     try {
@@ -108,6 +133,7 @@ void Collector::stop() {
     queue_cv.notify_all();
     if (writer_thread.joinable() && writer_thread.get_id() != std::this_thread::get_id()) writer_thread.join();
 
+    update_queue_pressure(queue.size_approx(), false);
     logger.log("Collector stopped: enqueued=" + std::to_string(enqueued.load()) +
                " dropped=" + std::to_string(dropped.load()) +
                " drop_rate=" + std::to_string(drop_rate()));
@@ -115,14 +141,19 @@ void Collector::stop() {
 }
 
 bool Collector::try_enqueue(const std::string* symbol, Kline kline) {
-    if (!queue.try_push(KlineBatchItem{symbol, std::move(kline)})) {
+    const auto result = queue.try_push_observed(KlineBatchItem{symbol, std::move(kline)});
+    if (!result.accepted) {
         dropped.fetch_add(1, std::memory_order_relaxed);
+        update_queue_pressure(queue_capacity, true);
         return false;
     }
+
     enqueued.fetch_add(1, std::memory_order_relaxed);
-    const auto depth = queue.size_approx();
-    sentum::market::RuntimePerformanceMetrics::global().observe_queue_depth(depth);
-    queue_cv.notify_one();
+    update_queue_pressure(result.depth, false);
+    if (result.was_empty) {
+        sentum::market::RuntimePerformanceMetrics::global().observe_queue_wakeup();
+        queue_cv.notify_one();
+    }
     return true;
 }
 
@@ -145,6 +176,8 @@ void Collector::writer_loop() {
             });
             continue;
         }
+
+        update_queue_pressure(queue.size_approx(), false);
         {
             sentum::market::ScopedLatency latency(sentum::market::RuntimePerformanceMetrics::global().sqlite_batch_latency);
             if (!db_ref.save_kline_batch(batch)) logger.log("SQLite batch UPSERT failed, size=" + std::to_string(batch.size()));
@@ -152,8 +185,11 @@ void Collector::writer_loop() {
         batch.clear();
         if (std::chrono::steady_clock::now() - last_metrics >= 10s) {
             const double rate = drop_rate();
+            const auto perf_snapshot = sentum::market::RuntimePerformanceMetrics::global().snapshot();
             logger.log("Queue metrics: depth=" + std::to_string(queue.size_approx()) +
-                       " high_water=" + std::to_string(sentum::market::RuntimePerformanceMetrics::global().queue_high_water.load()) +
+                       " high_water=" + std::to_string(perf_snapshot.value("queue_high_water", 0ULL)) +
+                       " pressure=" + perf_snapshot.value("queue_pressure", std::string("unknown")) +
+                       " wakeups=" + std::to_string(perf_snapshot.value("queue_wakeups", 0ULL)) +
                        " enqueued=" + std::to_string(enqueued.load()) +
                        " dropped=" + std::to_string(dropped.load()) +
                        " drop_rate=" + std::to_string(rate) +
@@ -191,7 +227,9 @@ void Collector::run() {
                 if (!running.load(std::memory_order_acquire)) return;
                 sentum::collector::ParsedKline parsed;
                 {
-                    sentum::market::ScopedLatency latency(sentum::market::RuntimePerformanceMetrics::global().parse_latency);
+                    sentum::market::SampledScopedLatency latency(
+                        sentum::market::RuntimePerformanceMetrics::global().parse_latency,
+                        parse_latency_sampler);
                     if (!sentum::collector::FastBinanceKlineParser::parse(msg->get_payload(), parsed)) return;
                 }
                 const auto symbol = resolve_symbol(parsed.symbol);
@@ -212,7 +250,7 @@ void Collector::run() {
                     event.price = entry.close;
                     event.open = entry.open; event.high = entry.high; event.low = entry.low; event.close = entry.close; event.volume = entry.volume; event.closed = true;
                     {
-                        sentum::market::ScopedLatency latency(perf.event_dispatch_latency);
+                        sentum::market::SampledScopedLatency latency(perf.event_dispatch_latency, dispatch_latency_sampler);
                         sentum::market::MarketEventBus::global().publish(event);
                     }
                     try_enqueue(symbol.canonical, std::move(entry));
