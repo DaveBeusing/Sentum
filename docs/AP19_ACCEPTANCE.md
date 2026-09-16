@@ -129,6 +129,8 @@ Final-head Core CI must execute and pass the AP-19 regressions, including at lea
 - UBSan;
 - TSan.
 
+The final head must also remain mergeable and the pull request must stay Draft until the required Core CI evidence succeeds for that same head.
+
 ## Acceptance state
 
 AP-19 status is one of:
