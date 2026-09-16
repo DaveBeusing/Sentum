@@ -63,6 +63,10 @@ find_package(Threads REQUIRED)
 file(GLOB_RECURSE SENTUM_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 set(SENTUM_CORE_SOURCES ${SENTUM_SOURCES})
 list(FILTER SENTUM_CORE_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
+set_source_files_properties(
+	src/sentum/ui/TerminalUi.cpp
+	PROPERTIES COMPILE_DEFINITIONS SENTUM_TERMINAL_UI_OPERATOR_SURFACE_HOOK=1
+)
 
 add_library(sentum_core STATIC ${SENTUM_CORE_SOURCES})
 target_include_directories(
