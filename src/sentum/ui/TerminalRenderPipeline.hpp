@@ -8,6 +8,11 @@
 #include <utility>
 #include <vector>
 
+#if defined(SENTUM_TERMINAL_UI_OPERATOR_SURFACE_HOOK)
+#include <nlohmann/json.hpp>
+#include <sentum/ui/TerminalOperatorSurfaceRenderer.hpp>
+#endif
+
 namespace sentum::ui {
 
 struct TerminalFrameDiff {
@@ -60,6 +65,35 @@ inline TerminalFrameDiff build_terminal_frame_diff(
 	result.payload = terminal.str();
 	return result;
 }
+
+#if defined(SENTUM_TERMINAL_UI_OPERATOR_SURFACE_HOOK)
+inline std::string_view terminal_workspace_name_from_index(int index) noexcept {
+	static constexpr std::string_view names[]{
+		"MARKET", "SCANNER", "ORDERS", "TRADES", "STRATEGY", "MODELS", "SYSTEM"};
+	if (index < 0 || index >= static_cast<int>(sizeof(names) / sizeof(names[0]))) return "SYSTEM";
+	return names[index];
+}
+
+inline TerminalFrameDiff build_terminal_ui_frame_diff(
+	const std::vector<std::string>& previous_lines,
+	const std::string& frame,
+	bool force_full,
+	const nlohmann::json& snapshot,
+	int workspace_index) {
+	std::string combined;
+	const auto operator_surface = operator_surface_frame_lines(
+		snapshot,
+		terminal_workspace_name_from_index(workspace_index));
+	combined.reserve(operator_surface.size() + frame.size());
+	combined += operator_surface;
+	combined += frame;
+	return build_terminal_frame_diff(previous_lines, combined, force_full);
+}
+
+#define build_terminal_frame_diff(previous_lines, frame, force_full) \
+	build_terminal_ui_frame_diff( \
+		previous_lines, frame, force_full, cached_snapshot_, static_cast<int>(tab_))
+#endif
 
 class TerminalFramePacer {
 public:
