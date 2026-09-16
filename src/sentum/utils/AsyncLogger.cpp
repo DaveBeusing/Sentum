@@ -25,8 +25,21 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 
 #include <sentum/utils/AsyncLogger.hpp>
+
+namespace {
+std::tm local_time(std::time_t value) {
+    std::tm result{};
+#if defined(_WIN32)
+    localtime_s(&result, &value);
+#else
+    localtime_r(&value, &result);
+#endif
+    return result;
+}
+} // namespace
 
 AsyncLogger::AsyncLogger(const std::string& path) : file_path(path), running(false) {}
 
@@ -35,34 +48,46 @@ AsyncLogger::~AsyncLogger() {
 }
 
 void AsyncLogger::start() {
-	running = true;
+	bool expected = false;
+	if (!running.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
+	if (worker.joinable()) worker.join();
 	worker = std::thread(&AsyncLogger::run, this);
 }
 
 void AsyncLogger::stop() {
-	running = false;
+	running.store(false, std::memory_order_release);
 	cv.notify_all();
-	if (worker.joinable()) worker.join();
+	if (worker.joinable() && worker.get_id() != std::this_thread::get_id()) worker.join();
 }
 
 void AsyncLogger::log(const std::string& message) {
-	std::lock_guard<std::mutex> lock(mtx);
 	auto t = std::time(nullptr);
-	auto tm = *std::localtime(&t);
+	const auto tm = local_time(t);
 	std::ostringstream timestamped;
 	timestamped << "[" << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << "] " << message;
-	messages.push(timestamped.str());
+	{
+		std::lock_guard<std::mutex> lock(mtx);
+		messages.push(timestamped.str());
+	}
 	cv.notify_one();
 }
 
 void AsyncLogger::run() {
 	std::ofstream file(file_path, std::ios::app);
-	while (running || !messages.empty()) {
-		std::unique_lock<std::mutex> lock(mtx);
-		cv.wait(lock, [this] { return !messages.empty() || !running; });
-		while (!messages.empty()) {
-			file << messages.front() << std::endl;
-			messages.pop();
+	for (;;) {
+		std::queue<std::string> pending;
+		{
+			std::unique_lock<std::mutex> lock(mtx);
+			cv.wait(lock, [this] {
+				return !messages.empty() || !running.load(std::memory_order_acquire);
+			});
+			if (messages.empty() && !running.load(std::memory_order_acquire)) break;
+			pending.swap(messages);
+		}
+
+		while (!pending.empty()) {
+			file << pending.front() << std::endl;
+			pending.pop();
 		}
 		file.flush();
 	}
