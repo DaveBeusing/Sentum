@@ -6,7 +6,9 @@
 
 namespace {
 using sentum::ui::OperatorSeverity;
+using sentum::ui::derive_operator_control_surface;
 using sentum::ui::derive_operator_status;
+using sentum::ui::operator_action_presentation;
 using sentum::ui::operator_banner_text;
 using sentum::ui::workspace_for_key;
 using sentum::ui::workspace_help_text;
@@ -77,6 +79,50 @@ void test_operator_presentation_contract() {
 	require(workspace_help_text("UNKNOWN").empty(), "unknown workspace must not produce help text");
 }
 
+void test_control_surface_contract() {
+	auto snapshot = healthy_snapshot();
+	snapshot["operations_control_plane"] = {
+		{"governance_state", "CONTROLLED"},
+		{"maintenance_state", "NORMAL"},
+		{"incident_state", "NONE"},
+		{"recovery_state", "IDLE"},
+		{"pending_approvals", 2},
+		{"last_audit_action", "enter_maintenance"},
+		{"last_audit_actor", "operator-a"}
+	};
+
+	const auto surface = derive_operator_control_surface(snapshot, "SYSTEM");
+	require(surface.status.severity == OperatorSeverity::Normal, "healthy control surface must preserve normal runtime status");
+	require(surface.active_workspace == "SYSTEM", "control surface active workspace mismatch");
+	require(surface.navigation.find("[7] SYSTEM*") != std::string::npos, "control surface active workspace marker missing");
+	require(surface.governance_state == "CONTROLLED", "governance state mismatch");
+	require(surface.pending_approvals == 2, "pending approval count mismatch");
+	require(surface.approval_summary == "2 approval(s) pending", "approval summary mismatch");
+	require(surface.audit_summary == "Last action: enter_maintenance by operator-a", "audit summary mismatch");
+}
+
+void test_control_surface_missing_governance_fails_visible() {
+	const auto surface = derive_operator_control_surface(healthy_snapshot(), "MARKET");
+	require(surface.governance_state == "UNAVAILABLE", "missing governance evidence must remain visible");
+	require(surface.approval_summary == "Governance evidence unavailable", "missing governance evidence summary mismatch");
+}
+
+void test_action_presentation_uses_upstream_classification() {
+	const auto automated = operator_action_presentation("AUTOMATED");
+	require(!automated.blocked && !automated.confirmation_required, "automated action presentation mismatch");
+
+	const auto approval = operator_action_presentation("APPROVAL_REQUIRED");
+	require(!approval.blocked && approval.confirmation_required, "approval-required presentation mismatch");
+	require(approval.label == "APPROVAL REQUIRED", "approval-required label mismatch");
+
+	const auto forbidden = operator_action_presentation("FORBIDDEN");
+	require(forbidden.blocked, "forbidden action must render blocked");
+
+	const auto unknown = operator_action_presentation("UNKNOWN");
+	require(unknown.blocked, "unknown action class must fail closed");
+	require(unknown.classification == "FORBIDDEN", "unknown action class must present forbidden default");
+}
+
 } // namespace
 
 int main() {
@@ -84,6 +130,9 @@ int main() {
 		test_operator_priority_order();
 		test_workspace_contract();
 		test_operator_presentation_contract();
+		test_control_surface_contract();
+		test_control_surface_missing_governance_fails_visible();
+		test_action_presentation_uses_upstream_classification();
 		std::cout << "terminal workspace policy tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {

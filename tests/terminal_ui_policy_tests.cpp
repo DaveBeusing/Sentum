@@ -17,6 +17,13 @@ struct TerminalUiTestAccess {
     static void select_models(TerminalUi& ui) { ui.tab_ = TerminalUi::Tab::Models; }
     static void select_system(TerminalUi& ui) { ui.tab_ = TerminalUi::Tab::System; }
 
+    static bool is_market(const TerminalUi& ui) { return ui.tab_ == TerminalUi::Tab::Market; }
+    static bool is_scanner(const TerminalUi& ui) { return ui.tab_ == TerminalUi::Tab::Scanner; }
+    static bool operator_navigation_active(const TerminalUi& ui) { return ui.operator_navigation_active_; }
+    static const OperatorNavigationState& operator_navigation(const TerminalUi& ui) { return ui.operator_navigation_; }
+    static void set_snapshot(TerminalUi& ui, nlohmann::json snapshot) { ui.cached_snapshot_ = std::move(snapshot); }
+    static void key(TerminalUi& ui, char key) { ui.handle_key(key); }
+
     static bool uses_repository(const TerminalUi& ui) { return ui.active_tab_uses_repository(); }
     static bool repository_due(const TerminalUi& ui, std::chrono::steady_clock::time_point now) {
         return ui.repository_refresh_due(now);
@@ -83,6 +90,46 @@ void test_workspace_refresh_policy() {
     require(!TerminalUiTestAccess::uses_repository(ui), "system workspace must not poll repository history");
 }
 
+void test_modal_operator_input_suppresses_normal_hotkeys() {
+    TerminalUi ui;
+    TerminalUiTestAccess::select_market(ui);
+    TerminalUiTestAccess::set_snapshot(ui, {
+        {"operations_control_plane", {
+            {"approval_queue", nlohmann::json::array({
+                {
+                    {"request_id", "req-1"},
+                    {"action", "resume_entries"},
+                    {"classification", "APPROVAL_REQUIRED"},
+                    {"actor", "operator-a"},
+                    {"reason", "recovery validated"}
+                }
+            })},
+            {"audit_timeline", nlohmann::json::array()}
+        }}
+    });
+
+    TerminalUiTestAccess::key(ui, 'o');
+    require(TerminalUiTestAccess::operator_navigation_active(ui), "operator navigation did not activate");
+
+    TerminalUiTestAccess::key(ui, '2');
+    require(TerminalUiTestAccess::is_market(ui), "workspace hotkey escaped operator navigation mode");
+
+    TerminalUiTestAccess::key(ui, '\n');
+    const auto& confirmation = TerminalUiTestAccess::operator_navigation(ui);
+    require(confirmation.confirmation_open, "approval confirmation did not open");
+    require(!confirmation.execution_authorized, "approval confirmation authorized execution");
+
+    TerminalUiTestAccess::key(ui, '\n');
+    require(!TerminalUiTestAccess::operator_navigation(ui).execution_authorized, "second Enter authorized execution");
+
+    TerminalUiTestAccess::key(ui, 27);
+    require(!TerminalUiTestAccess::operator_navigation_active(ui), "Esc did not leave operator navigation mode");
+    require(!TerminalUiTestAccess::operator_navigation(ui).execution_authorized, "leaving operator navigation authorized execution");
+
+    TerminalUiTestAccess::key(ui, '2');
+    require(TerminalUiTestAccess::is_scanner(ui), "workspace hotkey did not resume after operator navigation closed");
+}
+
 void test_renderer_uses_zero_write_diff_contract() {
     TerminalUi ui;
     std::ostringstream captured;
@@ -108,6 +155,7 @@ void test_renderer_uses_zero_write_diff_contract() {
 int main() {
     try {
         test_workspace_refresh_policy();
+        test_modal_operator_input_suppresses_normal_hotkeys();
         test_renderer_uses_zero_write_diff_contract();
         std::cout << "terminal UI policy tests passed\n";
         return 0;

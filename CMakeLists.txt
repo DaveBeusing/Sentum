@@ -63,6 +63,10 @@ find_package(Threads REQUIRED)
 file(GLOB_RECURSE SENTUM_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 set(SENTUM_CORE_SOURCES ${SENTUM_SOURCES})
 list(FILTER SENTUM_CORE_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
+set_source_files_properties(
+	src/sentum/ui/TerminalUi.cpp
+	PROPERTIES COMPILE_DEFINITIONS SENTUM_TERMINAL_UI_OPERATOR_SURFACE_HOOK=1
+)
 
 add_library(sentum_core STATIC ${SENTUM_CORE_SOURCES})
 target_include_directories(
@@ -136,6 +140,37 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_operational_safety_policy_tests PRIVATE sentum_core)
 	add_test(NAME operational_safety_policy COMMAND sentum_operational_safety_policy_tests)
 	set_tests_properties(operational_safety_policy PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_operator_action_flow_tests tests/operator_action_flow_tests.cpp)
+	target_link_libraries(sentum_operator_action_flow_tests PRIVATE sentum_core)
+	add_test(NAME operator_action_flow COMMAND sentum_operator_action_flow_tests)
+	set_tests_properties(operator_action_flow PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_operator_workflow_view_tests tests/operator_workflow_view_tests.cpp)
+	target_link_libraries(sentum_operator_workflow_view_tests PRIVATE sentum_core)
+	add_test(NAME operator_workflow_view COMMAND sentum_operator_workflow_view_tests)
+	set_tests_properties(operator_workflow_view PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_operator_audit_queue_view_tests tests/operator_audit_queue_view_tests.cpp)
+	target_link_libraries(sentum_operator_audit_queue_view_tests PRIVATE sentum_core)
+	add_test(NAME operator_audit_queue_view COMMAND sentum_operator_audit_queue_view_tests)
+	set_tests_properties(operator_audit_queue_view PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_operator_navigation_policy_tests tests/operator_navigation_policy_tests.cpp)
+	target_link_libraries(sentum_operator_navigation_policy_tests PRIVATE sentum_core)
+	add_test(NAME operator_navigation_policy COMMAND sentum_operator_navigation_policy_tests)
+	set_tests_properties(operator_navigation_policy PROPERTIES TIMEOUT 60)
+
+	# The sanitizer workflow builds an explicit legacy regression target list. Keep
+	# new operator regressions attached to one of those targets so CTest never sees
+	# registered-but-unbuilt executables under ASan/UBSan/TSan.
+	add_dependencies(
+		sentum_operational_safety_policy_tests
+		sentum_operator_action_flow_tests
+		sentum_operator_workflow_view_tests
+		sentum_operator_audit_queue_view_tests
+		sentum_operator_navigation_policy_tests
+	)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
