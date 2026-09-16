@@ -134,7 +134,11 @@ void ExecutionEngine::apply_runtime_control() {
     const auto generation = control.generation();
     if (generation == applied_control_generation_) return;
 
-    bool position_open = trader && trader->get_current_position().open;
+    bool position_open = false;
+    {
+        std::lock_guard<std::mutex> lock(trader_mutex);
+        position_open = trader && trader->get_current_position().open;
+    }
     if (position_open) {
         sentum::dashboard::DashboardState::global().set("control_pending", "waiting_for_position_exit");
         return;
@@ -151,7 +155,7 @@ void ExecutionEngine::apply_runtime_control() {
     std::string restart_symbol;
     { std::lock_guard<std::mutex> lock(symbol_mutex); restart_symbol = current_symbol; }
     if (!auto_symbol && !manual_symbol.empty()) restart_symbol = manual_symbol;
-    if (trader) stop_trader();
+    if (trader_active.load(std::memory_order_acquire)) stop_trader();
     if (!restart_symbol.empty()) start_trader_for(restart_symbol);
     applied_control_generation_ = generation;
 }
@@ -198,33 +202,36 @@ void ExecutionEngine::run_main_loop() {
                 {"entries_paused", sentum::runtime::RuntimeControl::global().entries_paused()}, {"performance", perf.snapshot()}
             };
 
-            if (trader) {
-                const auto position = trader->get_current_position();
-                const double total_profit = trader->get_total_profit();
-                const double delta = total_profit - accounted_profit_;
-                if (delta != 0.0 && paper_account) { paper_account->apply_realized_profit(delta); accounted_profit_ = total_profit; }
-                quote_balance = paper_account ? paper_account->equity() : config.paperInitialBalance + total_profit;
-                runtime["balance"] = quote_balance;
-                runtime["paper_account"] = paper_account ? paper_account->snapshot() : nlohmann::json::object();
-                runtime["total_profit"] = total_profit;
-                runtime["total_trades"] = trader->get_total_trades();
-                runtime["win_rate"] = trader->get_winrate_percent();
-                runtime["wins"] = trader->get_win_count();
-                runtime["losses"] = trader->get_lose_count();
-                runtime["average_profit"] = trader->get_average_profit();
-                runtime["strategy_name"] = trader->strategy_name();
-                if (position.open) {
-                    const double price = trader->get_latest_price();
-                    const double profit = (price - position.entry_price) * position.quantity;
-                    runtime["active_position"] = {{"symbol", position.symbol},{"entry_price",position.entry_price},{"quantity",position.quantity},
-                        {"current_price",price},{"unrealized_profit",profit},{"stop_loss",position.stop_loss_price},{"take_profit",position.take_profit_price},
-                        {"strategy",position.strategy},{"signal_reason",position.signal_reason},{"risk_reason",position.risk_reason}};
-                } else runtime["active_position"] = nullptr;
-            } else {
-                runtime["balance"] = paper_account ? paper_account->equity() : config.paperInitialBalance;
-                runtime["paper_account"] = paper_account ? paper_account->snapshot() : nlohmann::json::object();
-                runtime["total_profit"] = 0.0; runtime["total_trades"] = 0; runtime["win_rate"] = 0.0;
-                runtime["wins"] = 0; runtime["losses"] = 0; runtime["average_profit"] = 0.0; runtime["active_position"] = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(trader_mutex);
+                if (trader) {
+                    const auto position = trader->get_current_position();
+                    const double total_profit = trader->get_total_profit();
+                    const double delta = total_profit - accounted_profit_;
+                    if (delta != 0.0 && paper_account) { paper_account->apply_realized_profit(delta); accounted_profit_ = total_profit; }
+                    quote_balance = paper_account ? paper_account->equity() : config.paperInitialBalance + total_profit;
+                    runtime["balance"] = quote_balance;
+                    runtime["paper_account"] = paper_account ? paper_account->snapshot() : nlohmann::json::object();
+                    runtime["total_profit"] = total_profit;
+                    runtime["total_trades"] = trader->get_total_trades();
+                    runtime["win_rate"] = trader->get_winrate_percent();
+                    runtime["wins"] = trader->get_win_count();
+                    runtime["losses"] = trader->get_lose_count();
+                    runtime["average_profit"] = trader->get_average_profit();
+                    runtime["strategy_name"] = trader->strategy_name();
+                    if (position.open) {
+                        const double price = trader->get_latest_price();
+                        const double profit = (price - position.entry_price) * position.quantity;
+                        runtime["active_position"] = {{"symbol", position.symbol},{"entry_price",position.entry_price},{"quantity",position.quantity},
+                            {"current_price",price},{"unrealized_profit",profit},{"stop_loss",position.stop_loss_price},{"take_profit",position.take_profit_price},
+                            {"strategy",position.strategy},{"signal_reason",position.signal_reason},{"risk_reason",position.risk_reason}};
+                    } else runtime["active_position"] = nullptr;
+                } else {
+                    runtime["balance"] = paper_account ? paper_account->equity() : config.paperInitialBalance;
+                    runtime["paper_account"] = paper_account ? paper_account->snapshot() : nlohmann::json::object();
+                    runtime["total_profit"] = 0.0; runtime["total_trades"] = 0; runtime["win_rate"] = 0.0;
+                    runtime["wins"] = 0; runtime["losses"] = 0; runtime["average_profit"] = 0.0; runtime["active_position"] = nullptr;
+                }
             }
             sentum::dashboard::DashboardState::global().merge(runtime);
             std::unique_lock<std::mutex> wait_lock(shutdown_wait_mutex);
@@ -260,13 +267,16 @@ void ExecutionEngine::monitor_scanner() {
 }
 
 void ExecutionEngine::start_trader_for(const std::string& symbol) {
+    std::lock_guard<std::mutex> lock(trader_mutex);
+    if (!running.load(std::memory_order_acquire)) return;
     if (trader_thread.joinable()) trader_thread.join();
     auto risk = load_risk_config(config.paperRiskConfigPath);
     if (paper_account) risk.max_total_capital = paper_account->equity();
     auto strategy = sentum::strategy::StrategyFactory::create(sentum::runtime::RuntimeControl::global().strategy());
     trader = std::make_unique<TradeEngine>(symbol, *binance, risk, std::move(strategy), db_path);
+    auto* const trader_instance = trader.get();
     accounted_profit_ = 0.0;
-    trader_active.store(true);
+    trader_active.store(true, std::memory_order_release);
     sentum::dashboard::DashboardState::global().merge({
         {"current_symbol", symbol}, {"trader_active", true},
         {"risk_config", {
@@ -279,14 +289,15 @@ void ExecutionEngine::start_trader_for(const std::string& symbol) {
             {"max_data_age_ms", risk.max_data_age_ms}
         }}
     });
-    trader_thread = std::thread([this] {
-        try { trader->run(); }
+    trader_thread = std::thread([this, trader_instance] {
+        try { trader_instance->run(); }
         catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::start_trader_for: " + std::string(e.what())); }
-        trader_active.store(false);
+        trader_active.store(false, std::memory_order_release);
     });
 }
 
 void ExecutionEngine::stop_trader() {
+    std::lock_guard<std::mutex> lock(trader_mutex);
     if (trader) {
         const double final_profit = trader->get_total_profit();
         const double delta = final_profit - accounted_profit_;
@@ -295,5 +306,6 @@ void ExecutionEngine::stop_trader() {
         trader->stop();
     }
     if (trader_thread.joinable() && trader_thread.get_id() != std::this_thread::get_id()) trader_thread.join();
-    trader.reset(); trader_active.store(false);
+    trader.reset();
+    trader_active.store(false, std::memory_order_release);
 }
