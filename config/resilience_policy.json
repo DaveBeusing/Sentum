@@ -1,0 +1,31 @@
+{
+	"schema_version": 1,
+	"environment_class": "ci_rehearsal",
+	"required_reliability_status": "PASS",
+	"circuit_breaker": {
+		"trip_on_states": ["BLOCKED"],
+		"degrade_on_states": ["ATTENTION"],
+		"reset_requires_ready_samples": 3
+	},
+	"autonomous_actions": [
+		"restart_non_authoritative_worker",
+		"reopen_read_only_monitoring_channel",
+		"rebuild_ephemeral_cache",
+		"rotate_local_log_sink",
+		"revalidate_recovery_artifact"
+	],
+	"operator_approval_actions": [
+		"resume_entries",
+		"clear_kill_switch",
+		"promote_recovery_candidate",
+		"accept_reconciliation_result"
+	],
+	"forbidden_autonomous_actions": [
+		"clear_kill_switch",
+		"enable_entries",
+		"synthesize_fill",
+		"mutate_risk_state",
+		"mutate_execution_state",
+		"override_exchange_confirmed_truth"
+	]
+}
