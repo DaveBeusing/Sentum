@@ -72,7 +72,7 @@ private:
     sentum::market::SpscRingQueue<KlineBatchItem, queue_capacity + 1> queue;
     sentum::market::LatencySampler parse_latency_sampler{hot_path_latency_sample_every};
     sentum::market::LatencySampler dispatch_latency_sampler{hot_path_latency_sample_every};
-    sentum::market::QueuePressureLevel queue_pressure_level_ = sentum::market::QueuePressureLevel::Normal;
+    std::atomic<std::uint8_t> queue_pressure_level_{static_cast<std::uint8_t>(sentum::market::QueuePressureLevel::Normal)};
     std::mutex wait_mutex;
     std::condition_variable queue_cv;
     AsyncLogger logger;
