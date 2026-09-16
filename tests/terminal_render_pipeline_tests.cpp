@@ -79,6 +79,26 @@ void test_operator_surface_preserves_zero_write_contract() {
 			{"operator_action", {
 				{"action", "resume_entries"},
 				{"classification", "APPROVAL_REQUIRED"}
+			}},
+			{"maintenance_workflow", {
+				{"state", "REQUESTED"},
+				{"action", "enter_maintenance"},
+				{"classification", "APPROVAL_REQUIRED"},
+				{"request_id", "maint-17"},
+				{"reason", "planned database maintenance"},
+				{"actor", "operator-a"}
+			}},
+			{"incident_workflow", {
+				{"state", "OPEN"},
+				{"action", "acknowledge_incident"},
+				{"classification", "APPROVAL_REQUIRED"},
+				{"request_id", "inc-9"}
+			}},
+			{"recovery_workflow", {
+				{"state", "CANDIDATE"},
+				{"action", "promote_recovery_candidate"},
+				{"classification", "APPROVAL_REQUIRED"},
+				{"request_id", "rec-4"}
 			}}
 		}}
 	};
@@ -90,6 +110,9 @@ void test_operator_surface_preserves_zero_write_contract() {
 	require(frame.find("1 approval(s) pending") != std::string::npos, "approval summary missing from surface frame");
 	require(frame.find("Last action: enter_maintenance by operator-a") != std::string::npos, "audit summary missing from surface frame");
 	require(frame.find("Action CONFIRM APPROVAL REQUEST | resume_entries") != std::string::npos, "approval-required action UX missing from surface frame");
+	require(frame.find("MAINTENANCE | REQUESTED | enter_maintenance | APPROVAL_REQUIRED | request maint-17") != std::string::npos, "maintenance workflow missing from surface frame");
+	require(frame.find("INCIDENT | OPEN | acknowledge_incident | APPROVAL_REQUIRED | request inc-9") != std::string::npos, "incident workflow missing from surface frame");
+	require(frame.find("RECOVERY | CANDIDATE | promote_recovery_candidate | APPROVAL_REQUIRED | request rec-4") != std::string::npos, "recovery workflow missing from surface frame");
 
 	const auto previous = sentum::ui::split_terminal_lines(frame);
 	const auto diff = sentum::ui::build_terminal_frame_diff(previous, frame, false);
