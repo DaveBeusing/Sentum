@@ -27,13 +27,16 @@ private:
     enum class Tab { Market = 0, Scanner, Orders, Trades, Strategy, Models, System };
 
     void loop();
-    void draw(bool force_full = false);
+    void draw(const nlohmann::json& snapshot, bool force_full = false);
     void render_frame(const std::string& frame, bool force_full);
     void poll_input();
     void handle_key(char key);
     void cycle_strategy();
     void refresh_repository_data(const nlohmann::json& snapshot);
     void sample_equity(const nlohmann::json& snapshot);
+    bool repository_refresh_due(std::chrono::steady_clock::time_point now) const noexcept;
+    bool equity_sample_due(std::chrono::steady_clock::time_point now) const noexcept;
+    bool active_tab_uses_repository() const noexcept;
 
     std::chrono::milliseconds refresh_;
     std::atomic<bool> running_{false};
@@ -50,6 +53,7 @@ private:
     nlohmann::json recent_trades_ = nlohmann::json::array();
     nlohmann::json recent_orders_ = nlohmann::json::array();
     nlohmann::json models_ = nlohmann::json::array();
+    nlohmann::json cached_snapshot_ = nlohmann::json::object();
     std::deque<double> equity_history_;
     std::vector<std::string> previous_lines_;
     std::uint64_t last_dashboard_generation_ = 0;
