@@ -4,20 +4,20 @@ Sentum's terminal UI is an operator surface. It must remain responsive without t
 
 ## Goals
 
-The terminal architecture must provide:
+The terminal architecture provides:
 
 - coherent dashboard snapshots rather than independently sampled fields;
 - no full dashboard JSON copy when state generation has not changed;
 - bounded refresh work when the runtime is idle;
 - repository reads only for views that actually need persisted history;
-- equity sampling only for views that display the equity curve;
+- equity sampling only for the Market workspace;
 - unchanged rendered lines producing no terminal writes where practical;
 - resize and operator input forcing deterministic redraws;
 - runtime pressure, connectivity, position and entry-state information visible without opening multiple views.
 
 ## Versioned snapshot boundary
 
-`DashboardState` now exposes a versioned snapshot contract:
+`DashboardState` exposes a versioned snapshot contract:
 
 ```text
 producer update
@@ -33,41 +33,45 @@ terminal poll
 
 `DashboardSnapshot` contains the generation associated with the copied state. `snapshot_if_changed()` performs a lock-free generation check first and only acquires the state mutex when the caller is behind.
 
-This preserves the existing `snapshot()` compatibility API for the web dashboard and other callers while giving the terminal renderer a cheaper polling contract.
+The existing `snapshot()` compatibility API remains available for the web dashboard and other callers.
+
+## Terminal integration
+
+`TerminalUi` keeps one cached dashboard JSON snapshot and one associated generation. The loop polls `snapshot_if_changed()` and replaces the cache only when the runtime generation advances. It does not perform a second generation read after rendering.
+
+A render pass is scheduled only for one of these causes:
+
+- dashboard state changed;
+- operator input marked the UI dirty;
+- terminal width changed;
+- the active workspace reached a view-specific refresh deadline.
+
+An unchanged generation with no operator input, resize or active-workspace deadline therefore produces no render work.
 
 ## Consistency
 
-A multi-field `merge()` remains atomic from the snapshot reader's point of view. The snapshot generation is captured under the same state mutex as the JSON copy, so the renderer never needs a separate generation read after copying the state.
+A multi-field `merge()` remains atomic from the snapshot reader's point of view. The snapshot generation is captured under the same state mutex as the JSON copy, so the renderer never consumes a generation that does not describe the copied state.
 
-The regression test repeatedly writes paired fields from one thread while another thread requests only changed snapshots. Torn pairs are a test failure.
+The dashboard snapshot regression test repeatedly writes paired fields from one thread while another thread requests only changed snapshots. Torn pairs are a test failure.
 
-## Evidence
+## View-specific refresh policy
 
-`sentum_dashboard_snapshot_benchmark` compares two idle-poll patterns against a representative dashboard payload:
-
-1. unconditional `snapshot()` copying;
-2. `snapshot_if_changed()` while the generation is unchanged.
-
-CI records this benchmark as **OBSERVED** evidence. AP-05 does not invent a production SLA from hosted-runner timing.
-
-The correctness requirement is stronger than the timing observation: unchanged conditional polling must report zero snapshot copies.
-
-## Renderer integration contract
-
-The terminal loop should migrate to a cached `DashboardSnapshot` and use the versioned API as its sole runtime-state refresh boundary.
-
-Repository refresh work is view-specific:
+Repository refresh work is restricted to the workspaces that render persisted records:
 
 - `Orders`: recent orders;
 - `Trades`: recent trades;
 - `Models`: model records;
-- other tabs: no periodic repository query solely because the global two-second interval elapsed.
+- `Market`, `Scanner`, `Strategy`, `System`: no periodic repository history query.
 
-Equity-curve sampling belongs to the `Market` workspace and should not force repository work or a full redraw of unrelated views.
+Changing workspace invalidates the shared repository refresh deadline so the newly selected repository-backed view gets fresh data immediately.
 
-## Frame pacing
+Equity-curve sampling belongs only to the `Market` workspace. Leaving Market stops the periodic equity deadline from forcing redraws in unrelated workspaces.
 
-The existing line-diff renderer remains the preferred output model:
+`terminal_ui_policy_tests` verifies these rules independently of terminal I/O.
+
+## Frame pacing and terminal writes
+
+The line-diff renderer remains the output model:
 
 ```text
 cached dashboard snapshot
@@ -77,22 +81,38 @@ cached dashboard snapshot
     -> emit changed rows only
 ```
 
-An unchanged dashboard generation with no operator input, terminal resize or view-specific refresh deadline should result in no render work and no terminal writes.
+Full-screen redraws occur for startup, explicit workspace changes and terminal resize. Normal runtime updates preserve line-diff output. If the generated frame is identical to the previous frame, the renderer emits no terminal payload.
 
-## Professional terminal priorities
+## Operator header
 
-The always-visible header should prioritize operational truth:
+The always-visible header prioritizes operational truth:
 
 - mode and health;
 - current symbol and last price;
-- strategy;
-- entry state (running/paused);
-- position state and unrealized P/L when open;
-- market-data connectivity;
-- persistence pressure when elevated or worse.
+- active strategy;
+- entry state (`RUNNING` / `PAUSED`);
+- persistence pressure;
+- equity and realized/runtime P/L;
+- unrealized P/L when a position is open;
+- market-data connectivity.
 
-Detailed latency, queue and persistence diagnostics remain in the System workspace. Warning states should be visible in the header before the operator navigates there.
+Persistence pressure uses the runtime `normal`, `elevated`, `critical` and `saturated` states introduced by the backpressure package. Elevated pressure is yellow; critical or saturated pressure is red. The System workspace also exposes queue high-water, wakeups, pressure transitions and saturation events alongside latency distributions.
+
+The header reports runtime truth only; it does not infer exchange state or invent market data.
+
+## Evidence
+
+`sentum_dashboard_snapshot_benchmark` compares two idle-poll patterns against a representative dashboard payload:
+
+1. unconditional `snapshot()` copying;
+2. `snapshot_if_changed()` while the generation is unchanged.
+
+CI records this benchmark as **OBSERVED** evidence. AP-05 does not derive a production SLA from hosted-runner timing.
+
+The correctness requirement is stronger than the timing observation: unchanged conditional polling must report zero snapshot copies.
+
+CI also runs dashboard snapshot consistency and terminal refresh-policy tests in Release, ASan, UBSan and TSan configurations.
 
 ## Non-goals
 
-This package does not move trading authority into the UI, change execution semantics, or create new persistence reads on the market producer path. The terminal remains a consumer of runtime truth and operator-control commands.
+This package does not move trading authority into the UI, change execution semantics, or create persistence reads on the market producer path. The terminal remains a consumer of runtime truth and operator-control commands.
