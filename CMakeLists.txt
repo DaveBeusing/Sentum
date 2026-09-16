@@ -131,6 +131,11 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_terminal_workspace_policy_tests PRIVATE sentum_core)
 	add_test(NAME terminal_workspace_policy COMMAND sentum_terminal_workspace_policy_tests)
 	set_tests_properties(terminal_workspace_policy PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_operational_safety_policy_tests tests/operational_safety_policy_tests.cpp)
+	target_link_libraries(sentum_operational_safety_policy_tests PRIVATE sentum_core)
+	add_test(NAME operational_safety_policy COMMAND sentum_operational_safety_policy_tests)
+	set_tests_properties(operational_safety_policy PROPERTIES TIMEOUT 60)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
