@@ -49,6 +49,15 @@ jobs:
             --report log/operational_validation_rehearsal.json \
             --summary log/operational_validation_rehearsal.md
           cat log/operational_validation_rehearsal.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Run continuous readiness rehearsal
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          python3 tools/ci/continuous_readiness_rehearsal.py \
+            --report log/continuous_readiness_rehearsal.json \
+            --summary log/continuous_readiness_rehearsal.md
+          cat log/continuous_readiness_rehearsal.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload production operations evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -61,3 +70,5 @@ jobs:
             log/production_operations_gate.md
             log/operational_validation_rehearsal.json
             log/operational_validation_rehearsal.md
+            log/continuous_readiness_rehearsal.json
+            log/continuous_readiness_rehearsal.md
