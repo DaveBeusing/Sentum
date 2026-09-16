@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include <sentum/dashboard/DashboardAssets.hpp>
+#include <sentum/dashboard/DashboardOperationsOverlay.hpp>
 #include <sentum/dashboard/DashboardRepository.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
 #include <sentum/ui/CrossSurfaceOperationsView.hpp>
@@ -112,7 +113,7 @@ http::response<http::string_body> build_response(const http::request<http::strin
         if (request.method() != http::verb::get)
             return text_response(http::status::method_not_allowed, "read-only dashboard", "text/plain", request.version());
         if (target == "/" || target == "/index.html")
-            return text_response(http::status::ok, kDashboardHtml, "text/html; charset=utf-8", request.version());
+            return text_response(http::status::ok, dashboard_html_with_operations(kDashboardHtml), "text/html; charset=utf-8", request.version());
         if (starts_with(target, "/api/status"))
             return json_response(merged_runtime_state(host, port), request.version());
         if (starts_with(target, "/api/operations")) {
