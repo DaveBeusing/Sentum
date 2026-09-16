@@ -116,6 +116,11 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_dashboard_snapshot_tests PRIVATE sentum_core)
 	add_test(NAME dashboard_snapshot COMMAND sentum_dashboard_snapshot_tests)
 	set_tests_properties(dashboard_snapshot PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_terminal_ui_policy_tests tests/terminal_ui_policy_tests.cpp)
+	target_link_libraries(sentum_terminal_ui_policy_tests PRIVATE sentum_core)
+	add_test(NAME terminal_ui_policy COMMAND sentum_terminal_ui_policy_tests)
+	set_tests_properties(terminal_ui_policy PROPERTIES TIMEOUT 60)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
