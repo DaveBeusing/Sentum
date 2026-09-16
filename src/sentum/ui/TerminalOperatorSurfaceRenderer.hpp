@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 #include <sentum/ui/OperatorActionFlow.hpp>
+#include <sentum/ui/OperatorWorkflowView.hpp>
 #include <sentum/ui/TerminalWorkspacePolicy.hpp>
 
 namespace sentum::ui {
@@ -18,7 +19,7 @@ inline std::string operator_surface_frame_lines(
 		surface.banner.size() + surface.navigation.size() + surface.workspace_help.size() +
 		surface.governance_state.size() + surface.maintenance_state.size() +
 		surface.incident_state.size() + surface.recovery_state.size() +
-		surface.approval_summary.size() + surface.audit_summary.size() + 256);
+		surface.approval_summary.size() + surface.audit_summary.size() + 512);
 
 	frame += "OPERATOR ";
 	frame += surface.banner;
@@ -51,6 +52,8 @@ inline std::string operator_surface_frame_lines(
 		frame += operator_action_flow_text(flow);
 		frame += '\n';
 	}
+
+	frame += operator_workflows_text(control_plane);
 	return frame;
 }
 
