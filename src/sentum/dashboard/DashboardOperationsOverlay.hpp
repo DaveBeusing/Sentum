@@ -12,7 +12,9 @@ inline constexpr std::string_view kOperationsDashboardOverlay = R"HTML(
 <script id="sentum-operations-overlay-script">
 (()=>{
 const q=id=>document.getElementById(id),safe=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const OPERATIONS_SCHEMA_VERSION=1,OPERATIONS_CONTRACT='sentum.operations.v1',OPERATIONS_AUTHORITY='READ_ONLY_PRESENTATION';
 function badgeClass(v){const s=String(v||'').toUpperCase();return s.includes('CRITICAL')||s.includes('BLOCKED')||s.includes('FORBIDDEN')?'negative':s.includes('WARNING')||s.includes('ATTENTION')||s.includes('STALE')||s.includes('APPROVAL')?'warn':'positive'}
+function validContract(d){return d&&d.schema_version===OPERATIONS_SCHEMA_VERSION&&d.contract===OPERATIONS_CONTRACT&&d.authority===OPERATIONS_AUTHORITY}
 function install(){
  if(q('operationsView')) return;
  const tabs=document.querySelector('.tabs');
@@ -26,13 +28,14 @@ function install(){
 function workflowRow(w){if(!w)return '<div class="ops-row ops-muted">Unavailable</div>';const cls=w.blocked?' blocked':w.approval_required?' warn':'';return `<div class="ops-row${cls}"><b>${safe(w.title)}</b> · ${safe(w.state)} · ${safe(w.action||'no action')} · ${safe(w.classification)}${w.request_id?` · request ${safe(w.request_id)}`:''}${w.actor?` · actor ${safe(w.actor)}`:''}</div>`}
 function approvalRow(a){const cls=String(a.status||'').includes('BLOCKED')?' blocked':' warn';return `<div class="ops-row${cls}"><b>${safe(a.request_id)}</b> · ${safe(a.action)} · ${safe(a.classification)} · ${safe(a.status)} · actor ${safe(a.actor)} · ${safe(a.reason)}</div>`}
 function auditRow(a){return `<div class="ops-row"><b>${safe(a.timestamp_utc)}</b> · ${safe(a.request_id)} · ${safe(a.action)} · actor ${safe(a.actor)} · ${safe(a.outcome)} · ${safe(a.reason)}</div>`}
+function renderUnavailable(message){['opsRuntime','opsGovernance','opsEvidence','opsAuthority'].forEach(id=>{const el=q(id);if(el){el.textContent='UNAVAILABLE';el.className='value negative'}});const el=q('opsWorkflows');if(el)el.innerHTML=`<div class="ops-row blocked">${safe(message)}</div>`}
 async function refreshOperations(){
- try{const r=await fetch('/api/operations',{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json(),g=d.governance||{},rt=d.runtime||{};
+ try{const r=await fetch('/api/operations',{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();if(!validContract(d)){renderUnavailable('Operations contract mismatch - fail closed');return}const g=d.governance||{},rt=d.runtime||{};
  [['opsRuntime',rt.label],['opsGovernance',g.state],['opsEvidence',g.evidence_state],['opsApprovals',g.pending_approvals],['opsMaintenance',g.maintenance_state],['opsIncident',g.incident_state],['opsRecovery',g.recovery_state],['opsAuthority',d.authority]].forEach(([id,v])=>{const el=q(id);if(el){el.textContent=v??'—';el.className='value '+badgeClass(v)}});
  const w=d.workflows||{};q('opsWorkflows').innerHTML=[w.maintenance,w.incident,w.recovery].map(workflowRow).join('');
  const approvals=d.approval_queue?.items||[];q('opsApprovalList').innerHTML=approvals.length?approvals.map(approvalRow).join(''):'<div class="ops-row ops-muted">No approval evidence available</div>';
  const audit=d.audit_timeline?.items||[];q('opsAuditList').innerHTML=audit.length?audit.map(auditRow).join(''):'<div class="ops-row ops-muted">No audit evidence available</div>';
- }catch(e){['opsRuntime','opsGovernance','opsEvidence'].forEach(id=>{const el=q(id);if(el){el.textContent='UNAVAILABLE';el.className='value negative'}});const el=q('opsWorkflows');if(el)el.innerHTML='<div class="ops-row blocked">Operations evidence unavailable</div>'}
+ }catch(e){renderUnavailable('Operations evidence unavailable')}
 }
 window.sentumRefreshOperations=refreshOperations;install();setInterval(()=>{if(q('operationsView')?.classList.contains('active'))refreshOperations()},2000);
 })();
