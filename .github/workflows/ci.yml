@@ -68,6 +68,20 @@ jobs:
             cat log/scanner_hot_path_2000.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Observe dashboard snapshot polling
+        shell: bash
+        run: |
+          mkdir -p log
+          ./build/sentum_dashboard_snapshot_benchmark 250000 | tee log/dashboard_snapshot.txt
+          {
+            echo '## Dashboard snapshot observation'
+            echo ''
+            echo 'This is OBSERVED evidence for the AP-05 snapshot architecture; it is not a production SLA.'
+            echo ''
+            echo '```text'
+            cat log/dashboard_snapshot.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload performance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -81,6 +95,7 @@ jobs:
             log/scanner_hot_path_500.txt
             log/scanner_hot_path_1000.txt
             log/scanner_hot_path_2000.txt
+            log/dashboard_snapshot.txt
       - name: Smoke test quant research
         shell: bash
         run: |
@@ -150,7 +165,7 @@ jobs:
       - name: Configure ${{ matrix.name }}
         run: cmake -S . -B build-sanitizer -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -D${{ matrix.option }}=ON
       - name: Build ${{ matrix.name }}
-        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests sentum_market_hot_path_tests sentum_runtime_observability_tests
+        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests sentum_market_hot_path_tests sentum_runtime_observability_tests sentum_dashboard_snapshot_tests sentum_terminal_ui_policy_tests
       - name: Run regression tests under ${{ matrix.name }}
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
