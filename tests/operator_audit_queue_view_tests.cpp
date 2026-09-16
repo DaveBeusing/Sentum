@@ -26,6 +26,7 @@ nlohmann::json base_snapshot() {
 
 void test_approval_queue_projection() {
 	const auto view = sentum::ui::derive_operator_audit_queue_view(base_snapshot());
+	require(view.evidence_state == sentum::ui::OperatorEvidenceState::Available, "available evidence not detected");
 	require(view.approval_total == 2, "approval total mismatch");
 	require(view.approvals.size() == 2, "approval projection size mismatch");
 	require(view.approvals[0].classification == "APPROVAL_REQUIRED", "approval class lost");
@@ -41,6 +42,19 @@ void test_missing_classification_fails_closed() {
 	const auto view = sentum::ui::derive_operator_audit_queue_view(snapshot);
 	require(view.approvals[0].classification == "FORBIDDEN", "missing classification did not fail closed");
 	require(view.approvals[0].status == "BLOCKED", "missing classification was not blocked");
+}
+
+void test_stale_evidence_blocks_all_approvals() {
+	auto snapshot = base_snapshot();
+	snapshot["operations_control_plane"]["evidence_status"] = "STALE";
+	const auto view = sentum::ui::derive_operator_audit_queue_view(snapshot);
+	require(view.evidence_state == sentum::ui::OperatorEvidenceState::Stale, "stale evidence not detected");
+	require(view.evidence_status == "STALE", "stale evidence label mismatch");
+	for (const auto& row : view.approvals) {
+		require(row.classification == "FORBIDDEN", "stale approval classification was not fail-closed");
+		require(row.status == "BLOCKED - STALE EVIDENCE", "stale approval row was not blocked");
+		require(!row.execution_authorized, "stale evidence authorized execution");
+	}
 }
 
 void test_audit_projection_is_read_only_context() {
@@ -66,10 +80,12 @@ void test_projection_is_bounded() {
 	require(view.truncated, "bounded projection did not report truncation");
 }
 
-void test_empty_evidence_stays_empty() {
+void test_missing_evidence_stays_empty_and_explicit() {
 	const auto view = sentum::ui::derive_operator_audit_queue_view(nlohmann::json::object());
-	require(view.approval_total == 0 && view.audit_total == 0, "empty evidence invented rows");
-	require(view.approvals.empty() && view.audit.empty(), "empty evidence projected rows");
+	require(view.evidence_state == sentum::ui::OperatorEvidenceState::Missing, "missing evidence not detected");
+	require(view.evidence_status == "MISSING", "missing evidence label mismatch");
+	require(view.approval_total == 0 && view.audit_total == 0, "missing evidence invented rows");
+	require(view.approvals.empty() && view.audit.empty(), "missing evidence projected rows");
 }
 
 } // namespace
@@ -78,9 +94,10 @@ int main() {
 	try {
 		test_approval_queue_projection();
 		test_missing_classification_fails_closed();
+		test_stale_evidence_blocks_all_approvals();
 		test_audit_projection_is_read_only_context();
 		test_projection_is_bounded();
-		test_empty_evidence_stays_empty();
+		test_missing_evidence_stays_empty_and_explicit();
 		std::cout << "operator audit queue view tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {
