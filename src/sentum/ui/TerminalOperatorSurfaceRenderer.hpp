@@ -14,7 +14,8 @@ namespace sentum::ui {
 
 inline std::string operator_surface_frame_lines(
 	const nlohmann::json& snapshot,
-	std::string_view active_workspace) {
+	std::string_view active_workspace,
+	const OperatorNavigationState& navigation = OperatorNavigationState{}) {
 	const auto surface = derive_operator_control_surface(snapshot, active_workspace);
 	std::string frame;
 	frame.reserve(
@@ -59,15 +60,15 @@ inline std::string operator_surface_frame_lines(
 
 	const auto audit_queue = derive_operator_audit_queue_view(snapshot, 4, 5);
 	frame += "NAVIGATION ";
-	frame += operator_navigation_text(OperatorNavigationState{});
+	frame += operator_navigation_text(navigation);
 	frame += '\n';
 	if (!audit_queue.approvals.empty()) {
 		frame += "APPROVAL QUEUE ";
 		frame += std::to_string(audit_queue.approval_total);
 		frame += '\n';
-		for (const auto& item : audit_queue.approvals) {
-			frame += "  Approval ";
-			frame += operator_approval_item_text(item);
+		for (std::size_t index = 0; index < audit_queue.approvals.size(); ++index) {
+			frame += navigation.focus == OperatorFocusRegion::ApprovalQueue && navigation.approval_index == index ? " > Approval " : "   Approval ";
+			frame += operator_approval_item_text(audit_queue.approvals[index]);
 			frame += '\n';
 		}
 	}
@@ -75,9 +76,9 @@ inline std::string operator_surface_frame_lines(
 		frame += "AUDIT TIMELINE ";
 		frame += std::to_string(audit_queue.audit_total);
 		frame += '\n';
-		for (const auto& item : audit_queue.audit) {
-			frame += "  Audit ";
-			frame += operator_audit_item_text(item);
+		for (std::size_t index = 0; index < audit_queue.audit.size(); ++index) {
+			frame += navigation.focus == OperatorFocusRegion::AuditTimeline && navigation.audit_index == index ? " > Audit " : "   Audit ";
+			frame += operator_audit_item_text(audit_queue.audit[index]);
 			frame += '\n';
 		}
 	}
