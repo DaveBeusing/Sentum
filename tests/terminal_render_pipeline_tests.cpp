@@ -75,7 +75,11 @@ void test_operator_surface_preserves_zero_write_contract() {
 			{"recovery_state", "IDLE"},
 			{"pending_approvals", 1},
 			{"last_audit_action", "enter_maintenance"},
-			{"last_audit_actor", "operator-a"}
+			{"last_audit_actor", "operator-a"},
+			{"operator_action", {
+				{"action", "resume_entries"},
+				{"classification", "APPROVAL_REQUIRED"}
+			}}
 		}}
 	};
 
@@ -85,6 +89,7 @@ void test_operator_surface_preserves_zero_write_contract() {
 	require(frame.find("Governance CONTROLLED") != std::string::npos, "governance state missing from surface frame");
 	require(frame.find("1 approval(s) pending") != std::string::npos, "approval summary missing from surface frame");
 	require(frame.find("Last action: enter_maintenance by operator-a") != std::string::npos, "audit summary missing from surface frame");
+	require(frame.find("Action CONFIRM APPROVAL REQUEST | resume_entries") != std::string::npos, "approval-required action UX missing from surface frame");
 
 	const auto previous = sentum::ui::split_terminal_lines(frame);
 	const auto diff = sentum::ui::build_terminal_frame_diff(previous, frame, false);
