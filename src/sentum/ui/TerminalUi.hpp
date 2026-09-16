@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <sentum/ui/OperatorNavigationPolicy.hpp>
 
 namespace sentum::ui {
 
@@ -47,10 +48,12 @@ private:
     std::thread thread_;
     Tab tab_ = Tab::Market;
     bool editing_symbol_ = false;
+    bool operator_navigation_active_ = false;
     bool ui_dirty_ = true;
     bool force_full_redraw_ = true;
     std::string symbol_buffer_;
     std::string notice_;
+    OperatorNavigationState operator_navigation_{};
     std::chrono::steady_clock::time_point last_repository_refresh_{};
     std::chrono::steady_clock::time_point last_equity_sample_{};
     std::string repository_db_path_;
