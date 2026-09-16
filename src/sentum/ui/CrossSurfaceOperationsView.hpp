@@ -101,6 +101,10 @@ inline nlohmann::json derive_cross_surface_operations_view(
 			{"acknowledgement_required", item.acknowledgement_required},
 			{"notification_candidate", item.notification_candidate},
 			{"active", item.active},
+			{"attention", item.attention},
+			{"suppressed", item.suppressed},
+			{"flapping", item.flapping},
+			{"attention_reason", item.attention_reason},
 			{"execution_authorized", false}
 		});
 	}
@@ -128,6 +132,9 @@ inline nlohmann::json derive_cross_surface_operations_view(
 			{"critical", alerts.critical},
 			{"warning", alerts.warning},
 			{"attention", alerts.attention},
+			{"suppressed", alerts.suppressed},
+			{"flapping", alerts.flapping},
+			{"storm_limited", alerts.storm_limited},
 			{"truncated", alerts.truncated},
 			{"execution_authorized", false},
 			{"items", std::move(alert_items)}
