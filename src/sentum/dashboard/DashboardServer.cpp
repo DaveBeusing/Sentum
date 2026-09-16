@@ -17,6 +17,7 @@
 #include <sentum/dashboard/DashboardAssets.hpp>
 #include <sentum/dashboard/DashboardRepository.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
+#include <sentum/ui/CrossSurfaceOperationsView.hpp>
 
 namespace sentum::dashboard {
 namespace asio = boost::asio;
@@ -72,6 +73,17 @@ nlohmann::json runtime_status_file() {
     }
 }
 
+nlohmann::json merged_runtime_state(const std::string& host, std::uint16_t port) {
+    auto state = runtime_status_file();
+    const auto live = DashboardState::global().snapshot();
+    for (auto it = live.begin(); it != live.end(); ++it) {
+        if (!it.value().is_null() && !(it.key() == "mode" && it.value() == "idle")) state[it.key()] = it.value();
+    }
+    state["dashboard_host"] = host;
+    state["dashboard_port"] = port;
+    return state;
+}
+
 http::response<http::string_body> json_response(const nlohmann::json& value, unsigned version) {
     http::response<http::string_body> response{http::status::ok, version};
     response.set(http::field::content_type, "application/json; charset=utf-8");
@@ -101,15 +113,11 @@ http::response<http::string_body> build_response(const http::request<http::strin
             return text_response(http::status::method_not_allowed, "read-only dashboard", "text/plain", request.version());
         if (target == "/" || target == "/index.html")
             return text_response(http::status::ok, kDashboardHtml, "text/html; charset=utf-8", request.version());
-        if (starts_with(target, "/api/status")) {
-            auto state = runtime_status_file();
-            const auto live = DashboardState::global().snapshot();
-            for (auto it = live.begin(); it != live.end(); ++it) {
-                if (!it.value().is_null() && !(it.key() == "mode" && it.value() == "idle")) state[it.key()] = it.value();
-            }
-            state["dashboard_host"] = host;
-            state["dashboard_port"] = port;
-            return json_response(state, request.version());
+        if (starts_with(target, "/api/status"))
+            return json_response(merged_runtime_state(host, port), request.version());
+        if (starts_with(target, "/api/operations")) {
+            const auto state = merged_runtime_state(host, port);
+            return json_response(sentum::ui::derive_cross_surface_operations_view(state), request.version());
         }
         if (starts_with(target, "/api/trades"))
             return json_response(repository.recent_trades(query_limit(target, 100, 1000)), request.version());
@@ -140,7 +148,8 @@ http::response<http::string_body> build_response(const http::request<http::strin
         }
         if (target == "/api/health") {
             return json_response({{"status", "ok"}, {"read_only", true}, {"bind", host},
-                                  {"research_dashboard", true}, {"model_promotion_dashboard", true}},
+                                  {"research_dashboard", true}, {"model_promotion_dashboard", true},
+                                  {"operations_dashboard", true}},
                                  request.version());
         }
         return text_response(http::status::not_found, "not found", "text/plain", request.version());
