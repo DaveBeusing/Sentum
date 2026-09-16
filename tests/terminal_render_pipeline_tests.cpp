@@ -99,7 +99,13 @@ void test_operator_surface_preserves_zero_write_contract() {
 				{"action", "promote_recovery_candidate"},
 				{"classification", "APPROVAL_REQUIRED"},
 				{"request_id", "rec-4"}
-			}}
+			}},
+			{"approval_queue", nlohmann::json::array({
+				{{"request_id", "req-1"}, {"action", "enter_maintenance"}, {"classification", "APPROVAL_REQUIRED"}, {"actor", "operator-a"}, {"reason", "planned maintenance"}}
+			})},
+			{"audit_timeline", nlohmann::json::array({
+				{{"timestamp_utc", "2026-09-16T16:00:00Z"}, {"request_id", "req-0"}, {"action", "ack_incident"}, {"actor", "operator-c"}, {"reason", "investigating"}, {"outcome", "RECORDED"}}
+			})}
 		}}
 	};
 
@@ -113,6 +119,10 @@ void test_operator_surface_preserves_zero_write_contract() {
 	require(frame.find("MAINTENANCE | REQUESTED | enter_maintenance | APPROVAL_REQUIRED | request maint-17") != std::string::npos, "maintenance workflow missing from surface frame");
 	require(frame.find("INCIDENT | OPEN | acknowledge_incident | APPROVAL_REQUIRED | request inc-9") != std::string::npos, "incident workflow missing from surface frame");
 	require(frame.find("RECOVERY | CANDIDATE | promote_recovery_candidate | APPROVAL_REQUIRED | request rec-4") != std::string::npos, "recovery workflow missing from surface frame");
+	require(frame.find("APPROVAL QUEUE 1") != std::string::npos, "approval queue heading missing from surface frame");
+	require(frame.find("Approval req-1 | enter_maintenance | APPROVAL_REQUIRED | APPROVAL REQUIRED") != std::string::npos, "approval queue row missing from surface frame");
+	require(frame.find("AUDIT TIMELINE 1") != std::string::npos, "audit timeline heading missing from surface frame");
+	require(frame.find("Audit 2026-09-16T16:00:00Z | req-0 | ack_incident | actor operator-c | outcome RECORDED") != std::string::npos, "audit timeline row missing from surface frame");
 
 	const auto previous = sentum::ui::split_terminal_lines(frame);
 	const auto diff = sentum::ui::build_terminal_frame_diff(previous, frame, false);
