@@ -66,12 +66,15 @@ curl --fail --silent --show-error --connect-timeout 1 --max-time 2 \
 kill -TERM "${pid}"
 for _ in {1..20}; do
     if ! kill -0 "${pid}" 2>/dev/null; then
-        if wait "${pid}"; then
+        set +e
+        wait "${pid}"
+        status=$?
+        set -e
+        if [[ "${status}" -eq 0 ]]; then
             pid=""
             trap - EXIT
             exit 0
         fi
-        status=$?
         echo "dashboard exited with status ${status}" >&2
         print_diagnostics
         exit "${status}"
