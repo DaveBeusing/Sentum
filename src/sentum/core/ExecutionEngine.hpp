@@ -39,6 +39,7 @@ private:
     std::thread main_thread, scanner_thread, trader_thread;
     std::atomic<bool> running, collector_active, scanner_active, trader_active;
     std::mutex symbol_mutex;
+    std::mutex trader_mutex;
     std::mutex scanner_signal_mutex;
     std::condition_variable scanner_signal_cv;
     std::mutex shutdown_wait_mutex;
