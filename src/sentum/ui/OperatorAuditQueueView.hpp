@@ -10,6 +10,12 @@
 
 namespace sentum::ui {
 
+enum class OperatorEvidenceState {
+	Available,
+	Missing,
+	Stale
+};
+
 struct OperatorApprovalItem {
 	std::string request_id;
 	std::string action;
@@ -35,13 +41,36 @@ struct OperatorAuditQueueView {
 	std::size_t approval_total = 0;
 	std::size_t audit_total = 0;
 	bool truncated = false;
+	OperatorEvidenceState evidence_state = OperatorEvidenceState::Missing;
+	std::string evidence_status = "MISSING";
 };
+
+inline OperatorEvidenceState operator_evidence_state(const nlohmann::json& snapshot) {
+	if (!snapshot.contains("operations_control_plane") || !snapshot["operations_control_plane"].is_object()) {
+		return OperatorEvidenceState::Missing;
+	}
+	const auto& control_plane = snapshot["operations_control_plane"];
+	const auto status = json_text(control_plane, "evidence_status", "AVAILABLE");
+	if (status == "STALE" || control_plane.value("evidence_stale", false)) return OperatorEvidenceState::Stale;
+	return OperatorEvidenceState::Available;
+}
+
+inline const char* operator_evidence_state_text(OperatorEvidenceState state) noexcept {
+	if (state == OperatorEvidenceState::Available) return "AVAILABLE";
+	if (state == OperatorEvidenceState::Stale) return "STALE";
+	return "MISSING";
+}
 
 inline OperatorAuditQueueView derive_operator_audit_queue_view(
 	const nlohmann::json& snapshot,
 	std::size_t approval_limit = 8,
 	std::size_t audit_limit = 12) {
 	OperatorAuditQueueView view;
+	view.evidence_state = operator_evidence_state(snapshot);
+	view.evidence_status = operator_evidence_state_text(view.evidence_state);
+
+	if (view.evidence_state == OperatorEvidenceState::Missing) return view;
+
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
 	const auto approvals = control_plane.value("approval_queue", nlohmann::json::array());
 	const auto audit = control_plane.value("audit_timeline", nlohmann::json::array());
@@ -61,6 +90,10 @@ inline OperatorAuditQueueView derive_operator_audit_queue_view(
 			const auto presentation = operator_action_presentation(row.classification);
 			row.classification = presentation.classification;
 			row.status = presentation.blocked ? "BLOCKED" : presentation.label;
+			if (view.evidence_state == OperatorEvidenceState::Stale) {
+				row.classification = "FORBIDDEN";
+				row.status = "BLOCKED - STALE EVIDENCE";
+			}
 			row.execution_authorized = false;
 			view.approvals.push_back(std::move(row));
 		}
