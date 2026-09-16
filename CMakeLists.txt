@@ -191,6 +191,11 @@ if(BUILD_TESTING)
 	add_test(NAME operator_alert_center_view COMMAND sentum_operator_alert_center_view_tests)
 	set_tests_properties(operator_alert_center_view PROPERTIES TIMEOUT 60)
 
+	add_executable(sentum_operator_alert_center_integration_tests tests/operator_alert_center_integration_tests.cpp)
+	target_link_libraries(sentum_operator_alert_center_integration_tests PRIVATE sentum_core)
+	add_test(NAME operator_alert_center_integration COMMAND sentum_operator_alert_center_integration_tests)
+	set_tests_properties(operator_alert_center_integration PROPERTIES TIMEOUT 60)
+
 	# The sanitizer workflow builds an explicit legacy regression target list. Keep
 	# new operator regressions attached to one of those targets so CTest never sees
 	# registered-but-unbuilt executables under ASan/UBSan/TSan.
@@ -206,6 +211,7 @@ if(BUILD_TESTING)
 		sentum_operator_alert_policy_tests
 		sentum_operator_alert_lifecycle_tests
 		sentum_operator_alert_center_view_tests
+		sentum_operator_alert_center_integration_tests
 	)
 endif()
 
