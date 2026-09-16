@@ -82,6 +82,20 @@ jobs:
             cat log/dashboard_snapshot.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Observe terminal render pipeline
+        shell: bash
+        run: |
+          mkdir -p log
+          ./build/sentum_terminal_render_pipeline_benchmark 250000 | tee log/terminal_render_pipeline.txt
+          {
+            echo '## Terminal render pipeline observation'
+            echo ''
+            echo 'This is OBSERVED evidence for AP-06; unchanged frames must emit zero terminal payload bytes.'
+            echo ''
+            echo '```text'
+            cat log/terminal_render_pipeline.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload performance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -96,6 +110,7 @@ jobs:
             log/scanner_hot_path_1000.txt
             log/scanner_hot_path_2000.txt
             log/dashboard_snapshot.txt
+            log/terminal_render_pipeline.txt
       - name: Smoke test quant research
         shell: bash
         run: |
@@ -165,7 +180,7 @@ jobs:
       - name: Configure ${{ matrix.name }}
         run: cmake -S . -B build-sanitizer -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -D${{ matrix.option }}=ON
       - name: Build ${{ matrix.name }}
-        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests sentum_market_hot_path_tests sentum_runtime_observability_tests sentum_dashboard_snapshot_tests sentum_terminal_ui_policy_tests
+        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests sentum_market_hot_path_tests sentum_runtime_observability_tests sentum_dashboard_snapshot_tests sentum_terminal_ui_policy_tests sentum_terminal_render_pipeline_tests
       - name: Run regression tests under ${{ matrix.name }}
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1

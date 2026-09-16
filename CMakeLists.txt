@@ -121,6 +121,11 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_terminal_ui_policy_tests PRIVATE sentum_core)
 	add_test(NAME terminal_ui_policy COMMAND sentum_terminal_ui_policy_tests)
 	set_tests_properties(terminal_ui_policy PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_terminal_render_pipeline_tests tests/terminal_render_pipeline_tests.cpp)
+	target_link_libraries(sentum_terminal_render_pipeline_tests PRIVATE sentum_core)
+	add_test(NAME terminal_render_pipeline COMMAND sentum_terminal_render_pipeline_tests)
+	set_tests_properties(terminal_render_pipeline PROPERTIES TIMEOUT 60)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
@@ -136,6 +141,9 @@ if(SENTUM_BUILD_BENCHMARKS)
 
 	add_executable(sentum_dashboard_snapshot_benchmark benchmarks/dashboard_snapshot_benchmark.cpp)
 	target_link_libraries(sentum_dashboard_snapshot_benchmark PRIVATE sentum_core)
+
+	add_executable(sentum_terminal_render_pipeline_benchmark benchmarks/terminal_render_pipeline_benchmark.cpp)
+	target_link_libraries(sentum_terminal_render_pipeline_benchmark PRIVATE sentum_core)
 endif()
 
 if(NOT SENTUM_ENABLE_ASAN AND NOT SENTUM_ENABLE_UBSAN AND NOT SENTUM_ENABLE_TSAN)
