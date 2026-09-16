@@ -82,6 +82,18 @@ jobs:
             --report log/resilience_guardrail_gate.json \
             --summary log/resilience_guardrail_gate.md
           cat log/resilience_guardrail_gate.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce operations control-plane governance
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          python3 tools/ci/operations_control_plane_gate.py \
+            --policy config/operations_governance_policy.json \
+            --resilience log/resilience_guardrail_gate.json \
+            --expected-sha "${GITHUB_SHA}" \
+            --report log/operations_control_plane_gate.json \
+            --summary log/operations_control_plane_gate.md
+          cat log/operations_control_plane_gate.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload production operations evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -100,3 +112,5 @@ jobs:
             log/reliability_gate.md
             log/resilience_guardrail_gate.json
             log/resilience_guardrail_gate.md
+            log/operations_control_plane_gate.json
+            log/operations_control_plane_gate.md
