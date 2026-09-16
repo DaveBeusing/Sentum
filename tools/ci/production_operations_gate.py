@@ -52,6 +52,8 @@ def main() -> int:
     parser.add_argument("--release-readiness", default="docs/RELEASE_READINESS.md")
     parser.add_argument("--live-safety", default="docs/LIVE_TRADING_SAFETY.md")
     parser.add_argument("--account-reconciliation", default="docs/ACCOUNT_RECONCILIATION.md")
+    parser.add_argument("--rc-report", required=True)
+    parser.add_argument("--expected-sha", default=os.environ.get("GITHUB_SHA", "unknown"))
     parser.add_argument("--report", default="log/production_operations_gate.json")
     parser.add_argument("--summary", default="log/production_operations_gate.md")
     args = parser.parse_args()
@@ -68,6 +70,21 @@ def main() -> int:
     for name, path in paths.items():
         if not path.is_file():
             violations.append(f"missing required operations document: {name} ({path})")
+
+    rc_report_path = Path(args.rc_report)
+    rc_report = None
+    if not rc_report_path.is_file():
+        violations.append(f"missing RC package report: {rc_report_path}")
+    else:
+        try:
+            rc_report = json.loads(rc_report_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            violations.append(f"invalid RC package report JSON: {error}")
+        if isinstance(rc_report, dict):
+            if rc_report.get("status") != "PASS":
+                violations.append("RC package report is not PASS")
+            if rc_report.get("git_sha") != args.expected_sha:
+                violations.append("RC package report Git SHA does not match the evaluated commit")
 
     runbook_text = paths["runbook"].read_text(encoding="utf-8") if paths["runbook"].is_file() else ""
     for section in REQUIRED_SECTIONS:
@@ -86,9 +103,15 @@ def main() -> int:
     report = {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "git_sha": os.environ.get("GITHUB_SHA", "unknown"),
+        "git_sha": args.expected_sha,
         "workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
         "status": "PASS" if not violations else "FAIL",
+        "rc_package": {
+            "path": str(rc_report_path),
+            "sha256": sha256(rc_report_path) if rc_report_path.is_file() else None,
+            "status": rc_report.get("status") if isinstance(rc_report, dict) else None,
+            "git_sha": rc_report.get("git_sha") if isinstance(rc_report, dict) else None,
+        },
         "documents": {
             name: {
                 "path": str(path),
@@ -112,6 +135,7 @@ def main() -> int:
         "",
         f"Status: **{report['status']}**",
         f"Git SHA: `{report['git_sha']}`",
+        f"RC package report: **{report['rc_package']['status'] or 'missing'}**",
         "",
         "| Document | SHA-256 |",
         "| --- | --- |",
