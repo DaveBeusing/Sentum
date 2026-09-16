@@ -41,7 +41,8 @@ The always-visible operator surface presents information in this order:
 7. governed operator-action state;
 8. structured maintenance, incident and recovery workflow detail;
 9. bounded approval queue and audit timeline evidence;
-10. workspace-specific operational detail.
+10. keyboard/focus safety guidance;
+11. workspace-specific operational detail.
 
 Critical runtime and safety status always outranks informational governance detail.
 
@@ -101,29 +102,31 @@ The regression suite verifies:
 
 `OperatorAuditQueueView.hpp` projects upstream governance evidence into a bounded, read-only operator view.
 
-Approval queue rows expose:
+Approval queue rows expose request ID, action, upstream governance classification, actor, reason and presentation status. Missing or unknown approval classifications fail closed as `FORBIDDEN / BLOCKED`. Approval rows never authorize execution locally.
 
-- request ID;
-- action;
-- upstream governance classification;
-- actor;
-- reason;
-- presentation status.
-
-Missing or unknown approval classifications fail closed as `FORBIDDEN / BLOCKED`. Approval rows never authorize execution locally.
-
-Audit timeline rows expose:
-
-- UTC timestamp;
-- request ID;
-- action;
-- actor;
-- reason;
-- recorded outcome.
-
-The terminal does not create, modify, reorder, approve or delete upstream audit evidence. It is a viewer only.
+Audit timeline rows expose UTC timestamp, request ID, action, actor, reason and recorded outcome. The terminal does not create, modify, reorder, approve or delete upstream audit evidence. It is a viewer only.
 
 The projection is deliberately bounded for terminal rendering: the production surface displays at most four approval rows and five audit rows per frame and visibly reports when additional evidence was omitted from the terminal view. Full immutable history remains an operations-control-plane responsibility.
+
+## Operator navigation, focus and keyboard safety
+
+`OperatorNavigationPolicy.hpp` defines a deterministic UI-only navigation state machine for three focus regions:
+
+- approval queue;
+- audit timeline;
+- workflow detail.
+
+Navigation bindings are deliberately separated from action authority:
+
+- `j` / `k` move selection only;
+- `Tab` or `]` moves focus forward;
+- `[` moves focus backward;
+- `Enter` opens the selected view or, for an `APPROVAL_REQUIRED` row, opens confirmation UX only;
+- `Esc` cancels the local interaction state.
+
+A second `Enter` while confirmation is already open does not execute or authorize anything. Forbidden approval rows never open confirmation. Audit and workflow detail remain read-only. Every navigation transition forces `execution_authorized = false`.
+
+The terminal surface displays this keyboard contract explicitly so an operator can distinguish navigation keys from existing runtime-control hotkeys. The navigation policy itself is side-effect free and does not call RuntimeControl, Risk, Execution or persistence APIs.
 
 ## Missing governance evidence
 
@@ -139,7 +142,7 @@ Workflow request IDs, reasons and actors are included as operator context when p
 
 ## Terminal integration
 
-`TerminalOperatorSurfaceRenderer.hpp` converts the tested `OperatorControlSurface` contract into deterministic terminal frame lines for the always-visible operator area. It contains no repository access, filesystem access, sleep, locking or control mutation.
+`TerminalOperatorSurfaceRenderer.hpp` converts the tested operator contracts into deterministic terminal frame lines for the always-visible operator area. It contains no repository access, filesystem access, sleep, locking or control mutation.
 
 The generated surface contains:
 
@@ -150,7 +153,8 @@ The generated surface contains:
 5. pending-approval summary and most recent governed audit action;
 6. optional governed action state from `operations_control_plane.operator_action`;
 7. structured maintenance, incident and recovery workflow summaries;
-8. bounded approval queue and audit timeline rows.
+8. bounded approval queue and audit timeline rows;
+9. keyboard/focus safety guidance.
 
 The production `TerminalUi` hook combines these lines with the existing terminal frame before the AP-06 diff is calculated. It reuses the cached dashboard snapshot and active tab and introduces no second snapshot read, polling path or output stream.
 
@@ -158,7 +162,7 @@ The terminal-render regression suite requires an identical second operator frame
 
 ## Sanitizer regression integration
 
-The Core CI sanitizer jobs build an explicit legacy regression-target list. New AP-17 regression executables are attached as CMake dependencies of the already-built `sentum_operational_safety_policy_tests` target. This guarantees that ASan, UBSan and TSan build the operator action, workflow and audit/approval regressions before CTest executes them, avoiding registered-but-unbuilt test executables.
+The Core CI sanitizer jobs build an explicit legacy regression-target list. New AP-17 regression executables are attached as CMake dependencies of the already-built `sentum_operational_safety_policy_tests` target. This guarantees that ASan, UBSan and TSan build the operator action, workflow, audit/approval and navigation regressions before CTest executes them, avoiding registered-but-unbuilt test executables.
 
 ## Performance and rendering invariant
 
@@ -168,6 +172,7 @@ AP-17 preserves AP-06 terminal rendering behavior:
 - unchanged source state produces unchanged frame content;
 - unchanged frame content results in zero terminal output bytes through the existing diff renderer;
 - approval/audit projections are bounded;
+- navigation state transitions are constant-time and allocate no external resources;
 - no new repository polling, filesystem polling or blocking I/O is introduced into the render hot path.
 
 ## Non-goals
