@@ -181,6 +181,13 @@ jobs:
       - name: Smoke test dashboard
         shell: bash
         run: timeout --signal=TERM --kill-after=5s 60s bash tools/ci/dashboard_smoke.sh
+      - name: Upload release candidate binary input
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentum-rc-binary-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: sentum
 
   sanitizers:
     name: ${{ matrix.name }}
@@ -251,3 +258,44 @@ jobs:
           path: |
             log/release_readiness.json
             log/release_readiness.md
+
+  rc_package:
+    name: Release candidate package
+    needs:
+      - release_readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified release binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sentum-rc-binary-${{ github.sha }}
+          path: evidence/binary
+      - name: Download release readiness evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: sentum-release-readiness-${{ github.sha }}
+          path: evidence/readiness
+      - name: Build deterministic RC bundle
+        run: |
+          chmod +x evidence/binary/sentum
+          python3 tools/ci/package_release_candidate.py \
+            --binary evidence/binary/sentum \
+            --readiness evidence/readiness/release_readiness.json \
+            --git-sha "${GITHUB_SHA}" \
+            --output-dir artifacts \
+            --report log/rc_package.json \
+            --summary log/rc_package.md
+          cat log/rc_package.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload release candidate handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentum-rc-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
+            log/rc_package.json
+            log/rc_package.md
