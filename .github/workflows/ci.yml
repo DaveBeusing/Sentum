@@ -24,7 +24,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DSENTUM_BUILD_BENCHMARKS=ON
       - name: Build release
         run: cmake --build build --parallel
-      - name: Run lifecycle regression tests
+      - name: Run regression tests
         run: ctest --test-dir build --output-on-failure --timeout 60
       - name: Smoke test unified CLI
         run: |
@@ -48,6 +48,26 @@ jobs:
             cat log/performance_gate.md >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$status"
+      - name: Observe scanner hot path
+        shell: bash
+        run: |
+          mkdir -p log
+          ./build/sentum_scanner_hot_path_benchmark 500 200 | tee log/scanner_hot_path_500.txt
+          ./build/sentum_scanner_hot_path_benchmark 1000 100 | tee log/scanner_hot_path_1000.txt
+          ./build/sentum_scanner_hot_path_benchmark 2000 50 | tee log/scanner_hot_path_2000.txt
+          {
+            echo '## Scanner hot path observation'
+            echo ''
+            echo 'These measurements are OBSERVED evidence only; AP-03 does not turn them into a production SLA.'
+            echo ''
+            echo '```text'
+            cat log/scanner_hot_path_500.txt
+            echo
+            cat log/scanner_hot_path_1000.txt
+            echo
+            cat log/scanner_hot_path_2000.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload performance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -58,6 +78,9 @@ jobs:
           path: |
             log/performance_gate.json
             log/performance_gate.md
+            log/scanner_hot_path_500.txt
+            log/scanner_hot_path_1000.txt
+            log/scanner_hot_path_2000.txt
       - name: Smoke test quant research
         shell: bash
         run: |
@@ -127,8 +150,8 @@ jobs:
       - name: Configure ${{ matrix.name }}
         run: cmake -S . -B build-sanitizer -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -D${{ matrix.option }}=ON
       - name: Build ${{ matrix.name }}
-        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests
-      - name: Run lifecycle tests under ${{ matrix.name }}
+        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests sentum_market_hot_path_tests
+      - name: Run regression tests under ${{ matrix.name }}
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
