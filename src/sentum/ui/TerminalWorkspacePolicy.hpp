@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -87,6 +88,40 @@ inline const WorkspaceDescriptor* workspace_for_key(char key) noexcept {
 		if (workspace.key == key) return &workspace;
 	}
 	return nullptr;
+}
+
+inline const WorkspaceDescriptor* workspace_by_name(std::string_view name) noexcept {
+	for (const auto& workspace : terminal_workspaces) {
+		if (workspace.name == name) return &workspace;
+	}
+	return nullptr;
+}
+
+inline std::string operator_banner_text(const OperatorStatus& status) {
+	std::ostringstream out;
+	out << status.label;
+	if (!status.message.empty()) out << " | " << status.message;
+	if (!status.recommended_workspace.empty() && status.severity != OperatorSeverity::Normal) {
+		out << " | Inspect " << status.recommended_workspace;
+	}
+	return out.str();
+}
+
+inline std::string workspace_navigation_text(std::string_view active_workspace) {
+	std::ostringstream out;
+	for (std::size_t index = 0; index < terminal_workspaces.size(); ++index) {
+		const auto& workspace = terminal_workspaces[index];
+		if (index != 0) out << "   ";
+		out << '[' << workspace.key << "] " << workspace.name;
+		if (workspace.name == active_workspace) out << '*';
+	}
+	return out.str();
+}
+
+inline std::string workspace_help_text(std::string_view active_workspace) {
+	const auto* workspace = workspace_by_name(active_workspace);
+	if (workspace == nullptr) return {};
+	return std::string(workspace->name) + " | " + std::string(workspace->purpose);
 }
 
 } // namespace sentum::ui
