@@ -13,13 +13,28 @@ template <typename T, std::size_t Capacity>
 class SpscRingQueue {
     static_assert(Capacity > 1, "SPSC queue capacity must exceed one");
 public:
-    bool try_push(T value) noexcept(std::is_nothrow_move_constructible_v<T>) {
+    struct PushResult {
+        bool accepted = false;
+        bool was_empty = false;
+        std::size_t depth = 0;
+    };
+
+    PushResult try_push_observed(T value) noexcept(std::is_nothrow_move_constructible_v<T>) {
         const auto head = head_.load(std::memory_order_relaxed);
+        const auto tail = tail_.load(std::memory_order_acquire);
         const auto next = increment(head);
-        if (next == tail_.load(std::memory_order_acquire)) return false;
+        if (next == tail) return {false, false, usable_capacity()};
+
+        const bool was_empty = head == tail;
         slots_[head].emplace(std::move(value));
         head_.store(next, std::memory_order_release);
-        return true;
+
+        const auto depth = next >= tail ? next - tail : Capacity - (tail - next);
+        return {true, was_empty, depth};
+    }
+
+    bool try_push(T value) noexcept(std::is_nothrow_move_constructible_v<T>) {
+        return try_push_observed(std::move(value)).accepted;
     }
 
     bool try_pop(T& out) noexcept(std::is_nothrow_move_assignable_v<T>) {
