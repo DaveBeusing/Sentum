@@ -9,6 +9,23 @@
 
 namespace sentum::market {
 
+enum class QueuePressureLevel : std::uint8_t {
+    Normal = 0,
+    Elevated = 1,
+    Critical = 2,
+    Saturated = 3
+};
+
+inline const char* queue_pressure_name(QueuePressureLevel level) noexcept {
+    switch (level) {
+    case QueuePressureLevel::Normal: return "normal";
+    case QueuePressureLevel::Elevated: return "elevated";
+    case QueuePressureLevel::Critical: return "critical";
+    case QueuePressureLevel::Saturated: return "saturated";
+    }
+    return "unknown";
+}
+
 class LatencyHistogram {
 public:
     void observe(std::uint64_t microseconds) noexcept {
@@ -76,6 +93,7 @@ public:
     std::atomic<std::uint64_t> queue_pressure_transitions{0};
     std::atomic<std::uint64_t> queue_saturation_events{0};
     std::atomic<std::uint64_t> queue_wakeups{0};
+    std::atomic<std::uint8_t> queue_pressure_level{static_cast<std::uint8_t>(QueuePressureLevel::Normal)};
 
     void observe_queue_depth(std::uint64_t depth) noexcept {
         queue_depth.store(depth, std::memory_order_relaxed);
@@ -83,12 +101,15 @@ public:
         while(depth>current && !queue_high_water.compare_exchange_weak(current,depth,std::memory_order_relaxed)){}
     }
 
-    void observe_queue_pressure_transition() noexcept {
-        queue_pressure_transitions.fetch_add(1, std::memory_order_relaxed);
+    void set_queue_pressure(QueuePressureLevel level) noexcept {
+        const auto raw = static_cast<std::uint8_t>(level);
+        const auto previous = queue_pressure_level.exchange(raw, std::memory_order_relaxed);
+        if (previous != raw) queue_pressure_transitions.fetch_add(1, std::memory_order_relaxed);
     }
 
     void observe_queue_saturation() noexcept {
         queue_saturation_events.fetch_add(1, std::memory_order_relaxed);
+        set_queue_pressure(QueuePressureLevel::Saturated);
     }
 
     void observe_queue_wakeup() noexcept {
@@ -96,9 +117,12 @@ public:
     }
 
     nlohmann::json snapshot() const {
+        const auto pressure = static_cast<QueuePressureLevel>(queue_pressure_level.load(std::memory_order_relaxed));
         return {{"market_events_total",market_events.load(std::memory_order_relaxed)},
                 {"queue_depth",queue_depth.load(std::memory_order_relaxed)},
                 {"queue_high_water",queue_high_water.load(std::memory_order_relaxed)},
+                {"queue_pressure",queue_pressure_name(pressure)},
+                {"queue_pressure_level",static_cast<std::uint8_t>(pressure)},
                 {"queue_pressure_transitions",queue_pressure_transitions.load(std::memory_order_relaxed)},
                 {"queue_saturation_events",queue_saturation_events.load(std::memory_order_relaxed)},
                 {"queue_wakeups",queue_wakeups.load(std::memory_order_relaxed)},
