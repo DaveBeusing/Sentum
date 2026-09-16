@@ -180,7 +180,7 @@ jobs:
       - name: Configure ${{ matrix.name }}
         run: cmake -S . -B build-sanitizer -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -D${{ matrix.option }}=ON
       - name: Build ${{ matrix.name }}
-        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests sentum_market_hot_path_tests sentum_runtime_observability_tests sentum_dashboard_snapshot_tests sentum_terminal_ui_policy_tests sentum_terminal_render_pipeline_tests
+        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests sentum_market_hot_path_tests sentum_runtime_observability_tests sentum_dashboard_snapshot_tests sentum_terminal_ui_policy_tests sentum_terminal_render_pipeline_tests sentum_terminal_workspace_policy_tests
       - name: Run regression tests under ${{ matrix.name }}
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
