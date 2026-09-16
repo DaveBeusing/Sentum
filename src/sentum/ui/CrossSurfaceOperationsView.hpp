@@ -82,6 +82,7 @@ inline nlohmann::json derive_cross_surface_operations_view(
 
 	return {
 		{"schema_version", 1},
+		{"contract", "sentum.operations.v1"},
 		{"authority", "READ_ONLY_PRESENTATION"},
 		{"runtime", operator_status_json(surface.status)},
 		{"governance", {
