@@ -14,6 +14,7 @@
 #include <sentum/core/RuntimeControl.hpp>
 #include <sentum/dashboard/DashboardRepository.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
+#include <sentum/ui/TerminalRenderPipeline.hpp>
 
 #if defined(_WIN32)
 #include <conio.h>
@@ -71,22 +72,6 @@ int terminal_width() {
     }
     return 120;
 #endif
-}
-
-std::vector<std::string> split_lines(const std::string& frame) {
-    std::vector<std::string> lines;
-    std::size_t start = 0;
-    while (start < frame.size()) {
-        const auto end = frame.find('\n', start);
-        if (end == std::string::npos) {
-            lines.emplace_back(frame.substr(start));
-            break;
-        }
-        lines.emplace_back(frame.substr(start, end - start));
-        start = end + 1;
-    }
-    if (!frame.empty() && frame.back() == '\n') lines.emplace_back();
-    return lines;
 }
 
 std::string text(const nlohmann::json& j, const char* key, const std::string& fallback = "-") {
@@ -268,6 +253,7 @@ bool TerminalUi::equity_sample_due(std::chrono::steady_clock::time_point now) co
 
 void TerminalUi::loop() {
     auto& dashboard = sentum::dashboard::DashboardState::global();
+    TerminalFramePacer pacer(refresh_);
 
     while (running_.load(std::memory_order_relaxed)) {
         poll_input();
@@ -301,7 +287,8 @@ void TerminalUi::loop() {
             force_full_redraw_ = false;
         }
 
-        std::this_thread::sleep_for(refresh_);
+        const auto deadline = pacer.next_deadline(std::chrono::steady_clock::now());
+        std::this_thread::sleep_until(deadline);
     }
 }
 
@@ -429,27 +416,12 @@ void TerminalUi::sample_equity(const nlohmann::json& snapshot) {
 }
 
 void TerminalUi::render_frame(const std::string& frame, bool force_full) {
-    auto current_lines = split_lines(frame);
-    std::ostringstream terminal;
-
-    if (force_full || previous_lines_.empty()) {
-        terminal << cursor_home << "\x1b[2J" << frame;
-    } else {
-        const std::size_t rows = std::max(previous_lines_.size(), current_lines.size());
-        for (std::size_t i = 0; i < rows; ++i) {
-            const std::string current = i < current_lines.size() ? current_lines[i] : std::string{};
-            const std::string previous = i < previous_lines_.size() ? previous_lines_[i] : std::string{};
-            if (current == previous) continue;
-            terminal << "\x1b[" << (i + 1) << ";1H\x1b[2K" << current << reset;
-        }
-    }
-
-    const auto payload = terminal.str();
-    if (!payload.empty()) {
-        std::cout.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+    auto diff = build_terminal_frame_diff(previous_lines_, frame, force_full);
+    if (!diff.payload.empty()) {
+        std::cout.write(diff.payload.data(), static_cast<std::streamsize>(diff.payload.size()));
         std::cout.flush();
     }
-    previous_lines_ = std::move(current_lines);
+    previous_lines_ = std::move(diff.lines);
 }
 
 void TerminalUi::draw(const nlohmann::json& snapshot, bool force_full) {
