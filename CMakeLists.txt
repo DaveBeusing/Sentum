@@ -150,6 +150,21 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_operator_workflow_view_tests PRIVATE sentum_core)
 	add_test(NAME operator_workflow_view COMMAND sentum_operator_workflow_view_tests)
 	set_tests_properties(operator_workflow_view PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_operator_audit_queue_view_tests tests/operator_audit_queue_view_tests.cpp)
+	target_link_libraries(sentum_operator_audit_queue_view_tests PRIVATE sentum_core)
+	add_test(NAME operator_audit_queue_view COMMAND sentum_operator_audit_queue_view_tests)
+	set_tests_properties(operator_audit_queue_view PROPERTIES TIMEOUT 60)
+
+	# The sanitizer workflow builds an explicit legacy regression target list. Keep
+	# new operator regressions attached to one of those targets so CTest never sees
+	# registered-but-unbuilt executables under ASan/UBSan/TSan.
+	add_dependencies(
+		sentum_operational_safety_policy_tests
+		sentum_operator_action_flow_tests
+		sentum_operator_workflow_view_tests
+		sentum_operator_audit_queue_view_tests
+	)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
