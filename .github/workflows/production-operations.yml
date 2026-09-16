@@ -58,6 +58,18 @@ jobs:
             --report log/continuous_readiness_rehearsal.json \
             --summary log/continuous_readiness_rehearsal.md
           cat log/continuous_readiness_rehearsal.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce reliability policy
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          python3 tools/ci/reliability_gate.py \
+            --policy config/reliability_policy.json \
+            --continuous-readiness log/continuous_readiness_rehearsal.json \
+            --expected-sha "${GITHUB_SHA}" \
+            --report log/reliability_gate.json \
+            --summary log/reliability_gate.md
+          cat log/reliability_gate.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload production operations evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -72,3 +84,5 @@ jobs:
             log/operational_validation_rehearsal.md
             log/continuous_readiness_rehearsal.json
             log/continuous_readiness_rehearsal.md
+            log/reliability_gate.json
+            log/reliability_gate.md
