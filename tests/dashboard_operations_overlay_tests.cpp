@@ -70,6 +70,14 @@ void test_overlay_exposes_transport_stale_and_recovery_state() {
 	require(overlay.find("operationsLastSuccess") != std::string::npos, "last successful transport timestamp is not tracked");
 }
 
+void test_overlay_renders_read_only_escalation_timeline() {
+	const std::string overlay(sentum::dashboard::kOperationsDashboardOverlay);
+	require(overlay.find("Escalation Timeline") != std::string::npos, "escalation timeline is not visible");
+	require(overlay.find("opsEscalationState") != std::string::npos, "due/overdue escalation summary missing");
+	require(overlay.find("alert_escalation") != std::string::npos, "web overlay does not consume escalation contract");
+	require(overlay.find("OVERDUE") != std::string::npos, "overdue escalation styling missing");
+}
+
 } // namespace
 
 int main() {
@@ -81,6 +89,7 @@ int main() {
 		test_overlay_validates_cross_surface_contract();
 		test_overlay_uses_bounded_resilient_refresh();
 		test_overlay_exposes_transport_stale_and_recovery_state();
+		test_overlay_renders_read_only_escalation_timeline();
 		std::cout << "dashboard operations overlay tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {

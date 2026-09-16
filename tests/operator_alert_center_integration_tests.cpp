@@ -1,0 +1,139 @@
+#include <sentum/ui/CrossSurfaceOperationsView.hpp>
+#include <sentum/ui/OperatorAlertCenterView.hpp>
+#include <sentum/ui/OperatorAlertEscalationTimeline.hpp>
+#include <sentum/ui/TerminalOperatorSurfaceRenderer.hpp>
+
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+void require(bool condition, const char* message) {
+	if (!condition) throw std::runtime_error(message);
+}
+
+nlohmann::json snapshot_with_alerts() {
+	return {
+		{"health", "healthy"}, {"market_data_connected", false}, {"entries_paused", true}, {"kill_switch_active", false},
+		{"performance", {{"queue_pressure", "normal"}}},
+		{"operations_control_plane", {{"governance_state", "CONTROLLED"}, {"evidence_status", "AVAILABLE"}, {"incident_state", "NONE"}, {"pending_approvals", 0}}}
+	};
+}
+
+void test_cross_surface_alert_contract_matches_shared_view() {
+	const auto snapshot = snapshot_with_alerts();
+	const auto center = sentum::ui::derive_operator_alert_center_view(snapshot, 12);
+	const auto operations = sentum::ui::derive_cross_surface_operations_view(snapshot, 8, 12, 12);
+	const auto alerts = operations.at("alerts");
+	require(alerts.at("total").get<std::size_t>() == center.total, "alert total drifted across surfaces");
+	require(alerts.at("active").get<std::size_t>() == center.active, "active count drifted across surfaces");
+	require(alerts.at("warning").get<std::size_t>() == center.warning, "warning count drifted across surfaces");
+	require(alerts.at("attention").get<std::size_t>() == center.attention, "attention count drifted across surfaces");
+	require(alerts.at("suppressed").get<std::size_t>() == center.suppressed, "suppression count drifted across surfaces");
+	require(alerts.at("flapping").get<std::size_t>() == center.flapping, "flapping count drifted across surfaces");
+	require(alerts.at("storm_limited").get<bool>() == center.storm_limited, "storm state drifted across surfaces");
+	require(alerts.at("items").size() == center.items.size(), "alert item count drifted across surfaces");
+	for (std::size_t index = 0; index < center.items.size(); ++index) {
+		const auto& expected = center.items[index];
+		const auto& actual = alerts.at("items").at(index);
+		require(actual.at("id") == expected.id, "alert id drifted across surfaces");
+		require(actual.at("severity") == expected.severity, "alert severity drifted across surfaces");
+		require(actual.at("state") == expected.state, "alert state drifted across surfaces");
+		require(actual.at("attention") == expected.attention, "alert attention class drifted across surfaces");
+		require(actual.at("flapping") == expected.flapping, "alert flapping state drifted across surfaces");
+		require(actual.at("execution_authorized") == false, "web alert contract granted execution authority");
+	}
+}
+
+void test_terminal_renders_same_alerts() {
+	const auto snapshot = snapshot_with_alerts();
+	const auto center = sentum::ui::derive_operator_alert_center_view(snapshot, 6);
+	const auto frame = sentum::ui::operator_surface_frame_lines(snapshot, "SYSTEM");
+	require(frame.find("ALERT CENTER total=" + std::to_string(center.total)) != std::string::npos, "terminal alert center count missing");
+	for (const auto& item : center.items) {
+		require(frame.find(item.id) != std::string::npos, "terminal omitted shared alert id");
+		require(frame.find(item.state) != std::string::npos, "terminal omitted shared alert lifecycle state");
+		require(frame.find(item.attention) != std::string::npos, "terminal omitted shared alert attention class");
+	}
+}
+
+void test_acknowledged_and_cleared_states_cross_surfaces() {
+	auto snapshot = snapshot_with_alerts();
+	snapshot["operations_control_plane"]["alert_lifecycle"] = nlohmann::json::array({
+		{{"id", "runtime.health"}, {"source", "RUNTIME"}, {"severity", "CRITICAL"}, {"state", "ACKNOWLEDGED"}, {"generation", 2}, {"title", "Runtime health degraded"}, {"acknowledged_by", "operator-c"}},
+		{{"id", "market.disconnected"}, {"source", "MARKET_DATA"}, {"severity", "WARNING"}, {"state", "CLEARED"}, {"generation", 1}, {"title", "Market data disconnected"}}
+	});
+	const auto operations = sentum::ui::derive_cross_surface_operations_view(snapshot);
+	const auto alerts = operations.at("alerts");
+	require(alerts.at("acknowledged") == 1, "acknowledged alert not exposed to web contract");
+	require(alerts.at("cleared") == 1, "cleared alert not exposed to web contract");
+	const auto frame = sentum::ui::operator_surface_frame_lines(snapshot, "SYSTEM");
+	require(frame.find("ACKNOWLEDGED") != std::string::npos, "terminal did not render acknowledged state");
+	require(frame.find("CLEARED") != std::string::npos, "terminal did not render cleared state");
+}
+
+void test_noise_control_is_cross_surface_and_high_severity_safe() {
+	auto snapshot = snapshot_with_alerts();
+	nlohmann::json lifecycle = nlohmann::json::array();
+	lifecycle.push_back({{"id", "critical"}, {"severity", "CRITICAL"}, {"state", "ACTIVE"}, {"title", "Critical"}});
+	lifecycle.push_back({{"id", "warning"}, {"severity", "WARNING"}, {"state", "ACKNOWLEDGED"}, {"title", "Warning"}});
+	lifecycle.push_back({{"id", "flapping"}, {"severity", "ATTENTION"}, {"state", "ACTIVE"}, {"generation", 3}, {"title", "Flapping"}});
+	for (int index = 0; index < 8; ++index) lifecycle.push_back({{"id", "attention-" + std::to_string(index)}, {"severity", "ATTENTION"}, {"state", "ACTIVE"}, {"title", "Attention"}});
+	snapshot["operations_control_plane"]["alert_lifecycle"] = std::move(lifecycle);
+	const auto center = sentum::ui::derive_operator_alert_center_view(snapshot, 2);
+	const auto operations = sentum::ui::derive_cross_surface_operations_view(snapshot, 8, 12, 2);
+	const auto alerts = operations.at("alerts");
+	require(center.suppressed > 0 && center.storm_limited, "attention storm was not limited");
+	require(center.flapping == 1, "flapping alert count mismatch");
+	require(alerts.at("suppressed") == center.suppressed, "web suppression count drifted");
+	require(alerts.at("flapping") == center.flapping, "web flapping count drifted");
+	bool critical_visible = false, warning_visible = false, flapping_visible = false;
+	for (const auto& item : center.items) {
+		critical_visible = critical_visible || item.id == "critical";
+		warning_visible = warning_visible || item.id == "warning";
+		flapping_visible = flapping_visible || item.id == "flapping";
+	}
+	require(critical_visible && warning_visible, "high-severity alert was hidden by noise control");
+	require(flapping_visible, "flapping alert was hidden by noise control");
+	const auto frame = sentum::ui::operator_surface_frame_lines(snapshot, "SYSTEM");
+	require(frame.find("suppressed=") != std::string::npos, "terminal suppression summary missing");
+	require(frame.find("FLAPPING") != std::string::npos, "terminal flapping marker missing");
+}
+
+void test_escalation_timeline_is_cross_surface_and_read_only() {
+	auto snapshot = snapshot_with_alerts();
+	snapshot["operations_control_plane"]["observed_at_utc"] = "2026-09-16T20:10:00Z";
+	snapshot["operations_control_plane"]["alert_escalation"] = nlohmann::json::array({{
+		{"alert_id", "market.disconnected"}, {"first_seen_utc", "2026-09-16T20:00:00Z"},
+		{"last_seen_utc", "2026-09-16T20:09:00Z"}, {"next_escalation_at_utc", "2026-09-16T20:05:00Z"},
+		{"timeline", nlohmann::json::array({{{"state", "LEVEL_2"}, {"actor", "policy"}, {"reason", "unacknowledged"}}})}
+	}});
+	const auto timeline = sentum::ui::derive_operator_alert_escalation_timeline(snapshot, 12);
+	const auto operations = sentum::ui::derive_cross_surface_operations_view(snapshot, 8, 12, 12);
+	const auto serialized = operations.at("alert_escalation");
+	require(serialized.at("total") == timeline.total, "escalation total drifted across surfaces");
+	require(serialized.at("overdue") == timeline.overdue, "overdue count drifted across surfaces");
+	require(serialized.at("execution_authorized") == false, "escalation contract granted execution authority");
+	require(serialized.at("items").front().at("aging_state") == "OVERDUE", "web escalation aging state missing");
+	const auto frame = sentum::ui::operator_surface_frame_lines(snapshot, "SYSTEM");
+	require(frame.find("ESCALATION TIMELINE") != std::string::npos, "terminal escalation timeline missing");
+	require(frame.find("OVERDUE") != std::string::npos, "terminal overdue state missing");
+}
+
+} // namespace
+
+int main() {
+	try {
+		test_cross_surface_alert_contract_matches_shared_view();
+		test_terminal_renders_same_alerts();
+		test_acknowledged_and_cleared_states_cross_surfaces();
+		test_noise_control_is_cross_surface_and_high_severity_safe();
+		test_escalation_timeline_is_cross_surface_and_read_only();
+		std::cout << "operator alert center integration tests passed\n";
+		return 0;
+	} catch (const std::exception& error) {
+		std::cerr << "operator alert center integration test failure: " << error.what() << '\n';
+		return 1;
+	}
+}
