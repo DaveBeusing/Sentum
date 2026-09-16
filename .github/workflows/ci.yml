@@ -6,19 +6,26 @@ on:
     branches:
       - master
 
+concurrency:
+  group: sentum-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake curl libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
-      - name: Configure release and benchmarks
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSENTUM_BUILD_BENCHMARKS=ON
+      - name: Configure release, tests and benchmarks
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DSENTUM_BUILD_BENCHMARKS=ON
       - name: Build release
         run: cmake --build build --parallel
+      - name: Run lifecycle regression tests
+        run: ctest --test-dir build --output-on-failure --timeout 60
       - name: Smoke test unified CLI
         run: |
           ./sentum help | grep 'Sentum unified CLI'
@@ -77,33 +84,35 @@ jobs:
           cmp /tmp/research_trials_first.csv log/research_trials.csv
       - name: Smoke test dashboard
         shell: bash
-        run: |
-          ./sentum dashboard --dashboard-port 18080 > /tmp/sentum-dashboard.log 2>&1 &
-          pid=$!
-          trap 'kill -TERM "$pid" 2>/dev/null || true' EXIT
-          for i in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:18080/api/health >/tmp/health.json; then
-              break
-            fi
-            sleep 0.2
-          done
-          curl --fail --silent http://127.0.0.1:18080/api/health | grep '"read_only":true'
-          curl --fail --silent http://127.0.0.1:18080/api/status | grep '"dashboard_port":18080'
-          curl --fail --silent http://127.0.0.1:18080/api/research | grep '"objective":"sharpe"'
-          curl --fail --silent http://127.0.0.1:18080/ | grep 'SENTUM'
-          kill -TERM "$pid"
-          wait "$pid"
-          trap - EXIT
+        run: timeout --signal=TERM --kill-after=5s 60s bash tools/ci/dashboard_smoke.sh
 
-  tsan-build:
+  sanitizers:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan
+            option: SENTUM_ENABLE_ASAN
+          - name: UBSan
+            option: SENTUM_ENABLE_UBSAN
+          - name: TSan
+            option: SENTUM_ENABLE_TSAN
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
-      - name: Configure ThreadSanitizer
-        run: cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DSENTUM_ENABLE_TSAN=ON
-      - name: Build ThreadSanitizer
-        run: cmake --build build-tsan --parallel 2
+      - name: Configure ${{ matrix.name }}
+        run: cmake -S . -B build-sanitizer -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -D${{ matrix.option }}=ON
+      - name: Build ${{ matrix.name }}
+        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests
+      - name: Run lifecycle tests under ${{ matrix.name }}
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build-sanitizer --output-on-failure --timeout 60

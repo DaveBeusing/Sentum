@@ -29,7 +29,8 @@ private:
     std::atomic<bool> running_{false};
     std::thread thread_;
 
-    void run();
+    void accept_next();
+    void run() noexcept;
 };
 
 } // namespace sentum::dashboard

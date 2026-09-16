@@ -18,6 +18,7 @@ struct Collector::Impl {
     client websocket;
     websocketpp::connection_hdl connection;
     std::mutex mutex;
+    std::atomic<bool> io_initialized{false};
     bool connection_valid = false;
 };
 
@@ -64,26 +65,49 @@ double Collector::drop_rate() const {
 }
 
 void Collector::start() {
-    if (running.exchange(true)) return;
+    if (running.exchange(true, std::memory_order_acq_rel)) return;
+    producer_stopped.store(false, std::memory_order_release);
     logger.start();
-    writer_thread = std::thread(&Collector::writer_loop, this);
-    ws_thread = std::thread(&Collector::run, this);
+
+    try {
+        writer_thread = std::thread(&Collector::writer_loop, this);
+        ws_thread = std::thread(&Collector::run, this);
+    } catch (...) {
+        running.store(false, std::memory_order_release);
+        producer_stopped.store(true, std::memory_order_release);
+        queue_cv.notify_all();
+        if (ws_thread.joinable() && ws_thread.get_id() != std::this_thread::get_id()) ws_thread.join();
+        if (writer_thread.joinable() && writer_thread.get_id() != std::this_thread::get_id()) writer_thread.join();
+        logger.stop();
+        throw;
+    }
 }
 
 void Collector::stop() {
-    running.store(false);
-    {
-        std::lock_guard<std::mutex> lock(impl->mutex);
-        if (impl->connection_valid) {
-            websocketpp::lib::error_code ec;
-            impl->websocket.close(impl->connection, websocketpp::close::status::going_away, "shutdown", ec);
+    const bool called_from_ws = ws_thread.joinable() && ws_thread.get_id() == std::this_thread::get_id();
+    running.store(false, std::memory_order_release);
+
+    if (impl->io_initialized.load(std::memory_order_acquire)) {
+        {
+            std::lock_guard<std::mutex> lock(impl->mutex);
+            if (impl->connection_valid) {
+                websocketpp::lib::error_code ec;
+                impl->websocket.close(impl->connection, websocketpp::close::status::going_away, "shutdown", ec);
+            }
         }
+        impl->websocket.stop_perpetual();
+        impl->websocket.stop();
     }
-    impl->websocket.stop_perpetual();
-    impl->websocket.stop();
+
     queue_cv.notify_all();
-    if (ws_thread.joinable() && ws_thread.get_id() != std::this_thread::get_id()) ws_thread.join();
+    if (ws_thread.joinable() && !called_from_ws) ws_thread.join();
+
+    if (called_from_ws) return;
+
+    producer_stopped.store(true, std::memory_order_release);
+    queue_cv.notify_all();
     if (writer_thread.joinable() && writer_thread.get_id() != std::this_thread::get_id()) writer_thread.join();
+
     logger.log("Collector stopped: enqueued=" + std::to_string(enqueued.load()) +
                " dropped=" + std::to_string(dropped.load()) +
                " drop_rate=" + std::to_string(drop_rate()));
@@ -108,12 +132,17 @@ void Collector::writer_loop() {
     batch.reserve(batch_size);
     auto last_metrics = std::chrono::steady_clock::now();
 
-    while (running.load(std::memory_order_acquire) || !queue.empty()) {
+    while (running.load(std::memory_order_acquire) ||
+           !producer_stopped.load(std::memory_order_acquire) ||
+           !queue.empty()) {
         KlineBatchItem item;
         while (batch.size() < batch_size && queue.try_pop(item)) batch.push_back(std::move(item));
         if (batch.empty()) {
             std::unique_lock<std::mutex> lock(wait_mutex);
-            queue_cv.wait_for(lock, 100ms, [this] { return !queue.empty() || !running.load(); });
+            queue_cv.wait_for(lock, 100ms, [this] {
+                return !queue.empty() ||
+                       (!running.load(std::memory_order_acquire) && producer_stopped.load(std::memory_order_acquire));
+            });
             continue;
         }
         {
@@ -139,67 +168,81 @@ void Collector::run() {
     try {
         impl->websocket.init_asio();
         impl->websocket.start_perpetual();
-        impl->websocket.clear_access_channels(websocketpp::log::alevel::all);
-        impl->websocket.clear_error_channels(websocketpp::log::elevel::all);
-        impl->websocket.set_tls_init_handler([](websocketpp::connection_hdl) {
-            auto ctx = websocketpp::lib::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::tls_client);
-            ctx->set_options(boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::no_sslv2 | boost::asio::ssl::context::no_sslv3);
-            return ctx;
-        });
-        impl->websocket.set_open_handler([this](websocketpp::connection_hdl hdl) {
-            std::lock_guard<std::mutex> lock(impl->mutex); impl->connection = hdl; impl->connection_valid = true;
-        });
-        impl->websocket.set_close_handler([this](websocketpp::connection_hdl) {
-            std::lock_guard<std::mutex> lock(impl->mutex); impl->connection_valid = false;
-        });
-        impl->websocket.set_fail_handler([this](websocketpp::connection_hdl) {
-            std::lock_guard<std::mutex> lock(impl->mutex); impl->connection_valid = false;
-        });
-        impl->websocket.set_message_handler([this](websocketpp::connection_hdl, client::message_ptr msg) {
-            if (!running.load(std::memory_order_relaxed)) return;
-            sentum::collector::ParsedKline parsed;
-            {
-                sentum::market::ScopedLatency latency(sentum::market::RuntimePerformanceMetrics::global().parse_latency);
-                if (!sentum::collector::FastBinanceKlineParser::parse(msg->get_payload(), parsed)) return;
-            }
-            const auto symbol = resolve_symbol(parsed.symbol);
-            if (!symbol.canonical) return;
-            Kline entry;
-            entry.timestamp = parsed.timestamp;
-            entry.open = parsed.open; entry.high = parsed.high; entry.low = parsed.low; entry.close = parsed.close; entry.volume = parsed.volume;
-            store_ref.upsert(symbol.id, entry);
-            auto& perf = sentum::market::RuntimePerformanceMetrics::global();
-            perf.market_events.fetch_add(1, std::memory_order_relaxed);
+        impl->io_initialized.store(true, std::memory_order_release);
 
-            if (parsed.closed) {
-                MarketEvent event;
-                event.type = MarketEvent::Type::Candle;
-                event.symbol_id = symbol.id;
-                event.symbol = *symbol.canonical;
-                event.timestamp = std::chrono::system_clock::time_point(std::chrono::milliseconds(entry.timestamp));
-                event.price = entry.close;
-                event.open = entry.open; event.high = entry.high; event.low = entry.low; event.close = entry.close; event.volume = entry.volume; event.closed = true;
+        if (running.load(std::memory_order_acquire)) {
+            impl->websocket.clear_access_channels(websocketpp::log::alevel::all);
+            impl->websocket.clear_error_channels(websocketpp::log::elevel::all);
+            impl->websocket.set_tls_init_handler([](websocketpp::connection_hdl) {
+                auto ctx = websocketpp::lib::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::tls_client);
+                ctx->set_options(boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::no_sslv2 | boost::asio::ssl::context::no_sslv3);
+                return ctx;
+            });
+            impl->websocket.set_open_handler([this](websocketpp::connection_hdl hdl) {
+                std::lock_guard<std::mutex> lock(impl->mutex); impl->connection = hdl; impl->connection_valid = true;
+            });
+            impl->websocket.set_close_handler([this](websocketpp::connection_hdl) {
+                std::lock_guard<std::mutex> lock(impl->mutex); impl->connection_valid = false;
+            });
+            impl->websocket.set_fail_handler([this](websocketpp::connection_hdl) {
+                std::lock_guard<std::mutex> lock(impl->mutex); impl->connection_valid = false;
+            });
+            impl->websocket.set_message_handler([this](websocketpp::connection_hdl, client::message_ptr msg) {
+                if (!running.load(std::memory_order_acquire)) return;
+                sentum::collector::ParsedKline parsed;
                 {
-                    sentum::market::ScopedLatency latency(perf.event_dispatch_latency);
-                    sentum::market::MarketEventBus::global().publish(event);
+                    sentum::market::ScopedLatency latency(sentum::market::RuntimePerformanceMetrics::global().parse_latency);
+                    if (!sentum::collector::FastBinanceKlineParser::parse(msg->get_payload(), parsed)) return;
                 }
-                try_enqueue(symbol.canonical, std::move(entry));
-            }
-        });
+                const auto symbol = resolve_symbol(parsed.symbol);
+                if (!symbol.canonical) return;
+                Kline entry;
+                entry.timestamp = parsed.timestamp;
+                entry.open = parsed.open; entry.high = parsed.high; entry.low = parsed.low; entry.close = parsed.close; entry.volume = parsed.volume;
+                store_ref.upsert(symbol.id, entry);
+                auto& perf = sentum::market::RuntimePerformanceMetrics::global();
+                perf.market_events.fetch_add(1, std::memory_order_relaxed);
 
-        std::string url = "wss://stream.binance.com:443/stream?streams=";
-        for (std::size_t i = 0; i < canonical_symbols.size(); ++i) {
-            url += canonical_symbols[i] + "@kline_1s";
-            if (i + 1 < canonical_symbols.size()) url += "/";
+                if (parsed.closed) {
+                    MarketEvent event;
+                    event.type = MarketEvent::Type::Candle;
+                    event.symbol_id = symbol.id;
+                    event.symbol = *symbol.canonical;
+                    event.timestamp = std::chrono::system_clock::time_point(std::chrono::milliseconds(entry.timestamp));
+                    event.price = entry.close;
+                    event.open = entry.open; event.high = entry.high; event.low = entry.low; event.close = entry.close; event.volume = entry.volume; event.closed = true;
+                    {
+                        sentum::market::ScopedLatency latency(perf.event_dispatch_latency);
+                        sentum::market::MarketEventBus::global().publish(event);
+                    }
+                    try_enqueue(symbol.canonical, std::move(entry));
+                }
+            });
+
+            std::string url = "wss://stream.binance.com:443/stream?streams=";
+            for (std::size_t i = 0; i < canonical_symbols.size(); ++i) {
+                url += canonical_symbols[i] + "@kline_1s";
+                if (i + 1 < canonical_symbols.size()) url += "/";
+            }
+            websocketpp::lib::error_code ec;
+            auto con = impl->websocket.get_connection(url, ec);
+            if (ec) throw std::runtime_error("Connection error: " + ec.message());
+            impl->websocket.connect(con);
+            impl->websocket.run();
+        } else {
+            impl->websocket.stop_perpetual();
+            impl->websocket.stop();
         }
-        websocketpp::lib::error_code ec;
-        auto con = impl->websocket.get_connection(url, ec);
-        if (ec) throw std::runtime_error("Connection error: " + ec.message());
-        impl->websocket.connect(con);
-        impl->websocket.run();
     } catch (const std::exception& e) {
-        if (running.load()) logger.log(std::string("Collector run() error: ") + e.what());
+        if (running.load(std::memory_order_acquire)) logger.log(std::string("Collector run() error: ") + e.what());
     }
-    running.store(false);
+
+    {
+        std::lock_guard<std::mutex> lock(impl->mutex);
+        impl->connection_valid = false;
+    }
+    impl->io_initialized.store(false, std::memory_order_release);
+    running.store(false, std::memory_order_release);
+    producer_stopped.store(true, std::memory_order_release);
     queue_cv.notify_all();
 }

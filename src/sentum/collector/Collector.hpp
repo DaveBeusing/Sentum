@@ -19,6 +19,8 @@
 #include <sentum/market/SpscRingQueue.hpp>
 #include <sentum/market/SymbolId.hpp>
 
+struct CollectorTestAccess;
+
 class Collector {
 public:
     Collector(Database& db, const std::vector<MarketInfo>& markets);
@@ -33,6 +35,8 @@ public:
     std::size_t queue_depth() const { return queue.size_approx(); }
 
 private:
+    friend struct CollectorTestAccess;
+
     struct Impl;
     struct SymbolRef {
         sentum::market::SymbolId id = sentum::market::kInvalidSymbolId;
@@ -57,6 +61,7 @@ private:
     std::thread ws_thread;
     std::thread writer_thread;
     std::atomic<bool> running{false};
+    std::atomic<bool> producer_stopped{true};
     std::atomic<std::uint64_t> enqueued{0};
     std::atomic<std::uint64_t> dropped{0};
     sentum::market::SpscRingQueue<KlineBatchItem, queue_capacity + 1> queue;
