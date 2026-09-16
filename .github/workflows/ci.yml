@@ -26,6 +26,31 @@ jobs:
         run: cmake --build build --parallel
       - name: Run regression tests
         run: ctest --test-dir build --output-on-failure --timeout 60
+      - name: Run operational acceptance cycles
+        shell: bash
+        run: |
+          set +e
+          python3 tools/ci/operational_acceptance.py \
+            --build-dir build \
+            --cycles 5 \
+            --timeout-seconds 90 \
+            --report log/operational_acceptance.json \
+            --summary log/operational_acceptance.md
+          status=$?
+          if [[ -f log/operational_acceptance.md ]]; then
+            cat log/operational_acceptance.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+      - name: Upload operational acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentum-operational-acceptance-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            log/operational_acceptance.json
+            log/operational_acceptance.md
       - name: Smoke test unified CLI
         run: |
           ./sentum help | grep 'Sentum unified CLI'
