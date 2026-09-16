@@ -133,6 +133,8 @@ The final head must also remain mergeable and the pull request must stay Draft u
 
 ## Acceptance state
 
+Current implementation state: `IMPLEMENTED / CI PENDING`.
+
 AP-19 status is one of:
 
 - `IMPLEMENTED / CI PENDING` — scope is complete but final-head CI has not succeeded;
