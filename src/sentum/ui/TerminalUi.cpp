@@ -216,6 +216,8 @@ void TerminalUi::start() {
 #endif
     previous_lines_.clear();
     cached_snapshot_ = nlohmann::json::object();
+    operator_navigation_active_ = false;
+    operator_navigation_ = OperatorNavigationState{};
     force_full_redraw_ = true;
     ui_dirty_ = true;
     last_terminal_width_ = terminal_width();
@@ -344,6 +346,33 @@ void TerminalUi::handle_key(char key) {
             symbol_buffer_.push_back(key);
             ui_dirty_ = true;
         }
+        return;
+    }
+
+    if (operator_navigation_active_) {
+        const auto command = operator_navigation_command(key);
+        if (command == OperatorNavigationCommand::Cancel) {
+            operator_navigation_ = apply_operator_navigation(
+                operator_navigation_, command, derive_operator_audit_queue_view(cached_snapshot_, 4, 5));
+            operator_navigation_active_ = false;
+            notice_ = "Operator navigation closed without execution";
+            ui_dirty_ = true;
+            return;
+        }
+        if (command != OperatorNavigationCommand::None) {
+            operator_navigation_ = apply_operator_navigation(
+                operator_navigation_, command, derive_operator_audit_queue_view(cached_snapshot_, 4, 5));
+            notice_ = operator_navigation_text(operator_navigation_);
+            ui_dirty_ = true;
+        }
+        return;
+    }
+
+    if (key == 'o' || key == 'O') {
+        operator_navigation_active_ = true;
+        operator_navigation_ = OperatorNavigationState{};
+        notice_ = "Operator navigation active; runtime hotkeys are suppressed until Esc";
+        ui_dirty_ = true;
         return;
     }
 
@@ -626,7 +655,8 @@ void TerminalUi::draw(const nlohmann::json& snapshot, bool force_full) {
 
     separator(out, width);
     out << bold << "TRADING CONTROLS" << reset
-        << "  [S] Strategy  [A] Auto  [M] Manual symbol  [P] Pause/Resume  [C] Close paper position  [Ctrl+C] Quit\n";
+        << "  [S] Strategy  [A] Auto  [M] Manual symbol  [P] Pause/Resume  [C] Close paper position  [O] Operator navigation  [Ctrl+C] Quit\n";
+    if (operator_navigation_active_) out << yellow << "Operator navigation ACTIVE - runtime hotkeys suppressed; Esc exits" << reset << '\n';
     if (editing_symbol_) out << yellow << "Manual symbol> " << symbol_buffer_ << "_" << reset << '\n';
     if (!notice_.empty()) out << dim << notice_ << reset << '\n';
     if (snapshot.contains("control_pending") && !snapshot["control_pending"].is_null()) {
