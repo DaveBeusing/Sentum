@@ -23,7 +23,8 @@ The presentation contract consumes existing authoritative or already-derived sta
 - pending approval count;
 - last governed audit action and actor;
 - optional governed operator action and upstream action classification;
-- optional structured maintenance, incident and recovery workflow records.
+- optional structured maintenance, incident and recovery workflow records;
+- optional structured approval queue and audit timeline evidence.
 
 The control surface does not recompute governance classes. Action classification must be supplied by the upstream control-plane contract.
 
@@ -39,7 +40,8 @@ The always-visible operator surface presents information in this order:
 6. last governed audit action;
 7. governed operator-action state;
 8. structured maintenance, incident and recovery workflow detail;
-9. workspace-specific operational detail.
+9. bounded approval queue and audit timeline evidence;
+10. workspace-specific operational detail.
 
 Critical runtime and safety status always outranks informational governance detail.
 
@@ -95,6 +97,34 @@ The regression suite verifies:
 - missing classifications fail closed;
 - absent workflows remain visible as `IDLE` rather than being inferred as approved.
 
+## Approval queue and audit timeline
+
+`OperatorAuditQueueView.hpp` projects upstream governance evidence into a bounded, read-only operator view.
+
+Approval queue rows expose:
+
+- request ID;
+- action;
+- upstream governance classification;
+- actor;
+- reason;
+- presentation status.
+
+Missing or unknown approval classifications fail closed as `FORBIDDEN / BLOCKED`. Approval rows never authorize execution locally.
+
+Audit timeline rows expose:
+
+- UTC timestamp;
+- request ID;
+- action;
+- actor;
+- reason;
+- recorded outcome.
+
+The terminal does not create, modify, reorder, approve or delete upstream audit evidence. It is a viewer only.
+
+The projection is deliberately bounded for terminal rendering: the production surface displays at most four approval rows and five audit rows per frame and visibly reports when additional evidence was omitted from the terminal view. Full immutable history remains an operations-control-plane responsibility.
+
 ## Missing governance evidence
 
 Missing operations-control-plane evidence remains visible as `UNAVAILABLE`.
@@ -103,7 +133,7 @@ The presentation must not silently substitute `CONTROLLED`, zero pending approva
 
 ## Audit presentation
 
-When audit evidence exists, the operator surface presents the most recent governed action and actor. A full immutable audit chain remains an operations-control-plane concern; the terminal is a viewer, not the audit authority.
+When audit evidence exists, the operator surface presents the most recent governed action and actor. Structured audit timeline rows add request ID, timestamp, outcome and reason where provided. A full immutable audit chain remains an operations-control-plane concern; the terminal is a viewer, not the audit authority.
 
 Workflow request IDs, reasons and actors are included as operator context when provided. They are presentation evidence only and do not replace the immutable upstream audit record.
 
@@ -119,11 +149,16 @@ The generated surface contains:
 4. governance, maintenance, incident and recovery state;
 5. pending-approval summary and most recent governed audit action;
 6. optional governed action state from `operations_control_plane.operator_action`;
-7. structured maintenance, incident and recovery workflow summaries.
+7. structured maintenance, incident and recovery workflow summaries;
+8. bounded approval queue and audit timeline rows.
 
 The production `TerminalUi` hook combines these lines with the existing terminal frame before the AP-06 diff is calculated. It reuses the cached dashboard snapshot and active tab and introduces no second snapshot read, polling path or output stream.
 
-The terminal-render regression suite requires an identical second operator frame, including workflow rows, to produce zero payload bytes and zero changed rows.
+The terminal-render regression suite requires an identical second operator frame, including workflow, approval and audit rows, to produce zero payload bytes and zero changed rows.
+
+## Sanitizer regression integration
+
+The Core CI sanitizer jobs build an explicit legacy regression-target list. New AP-17 regression executables are attached as CMake dependencies of the already-built `sentum_operational_safety_policy_tests` target. This guarantees that ASan, UBSan and TSan build the operator action, workflow and audit/approval regressions before CTest executes them, avoiding registered-but-unbuilt test executables.
 
 ## Performance and rendering invariant
 
@@ -132,6 +167,7 @@ AP-17 preserves AP-06 terminal rendering behavior:
 - presentation helpers remain deterministic and side-effect free;
 - unchanged source state produces unchanged frame content;
 - unchanged frame content results in zero terminal output bytes through the existing diff renderer;
+- approval/audit projections are bounded;
 - no new repository polling, filesystem polling or blocking I/O is introduced into the render hot path.
 
 ## Non-goals
@@ -144,6 +180,7 @@ This package does not:
 - approve maintenance or recovery transitions locally;
 - acknowledge or resolve incidents locally;
 - promote recovery candidates locally;
+- mutate approval or audit evidence;
 - create or accept reconciliation truth;
 - synthesize fills;
 - mutate Risk or Execution state;
