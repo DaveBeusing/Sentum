@@ -61,6 +61,22 @@ The presentation must not silently substitute `CONTROLLED`, zero pending approva
 
 When audit evidence exists, the operator surface presents the most recent governed action and actor. A full immutable audit chain remains an operations-control-plane concern; the terminal is a viewer, not the audit authority.
 
+## Terminal integration slice
+
+`TerminalOperatorSurfaceRenderer.hpp` converts the tested `OperatorControlSurface` contract into deterministic terminal frame lines for the always-visible operator area. It contains no repository access, filesystem access, sleep, locking or control mutation.
+
+The generated surface contains:
+
+1. the operator safety/runtime banner;
+2. canonical workspace navigation and active-workspace marker;
+3. workspace purpose/context;
+4. governance, maintenance, incident and recovery state;
+5. pending-approval summary and most recent governed audit action.
+
+The renderer is intentionally separate from the terminal output mechanism. `TerminalRenderPipeline` remains the only frame-diff policy, so the presentation layer cannot bypass AP-06 write suppression.
+
+The terminal-render regression suite feeds an operator surface frame through the existing diff pipeline and requires an identical second frame to produce zero payload bytes and zero changed rows.
+
 ## Performance and rendering invariant
 
 AP-17 must preserve AP-06 terminal rendering behavior:
@@ -70,11 +86,11 @@ AP-17 must preserve AP-06 terminal rendering behavior:
 - unchanged frame content must result in zero terminal output bytes through the existing diff renderer;
 - no new repository polling, filesystem polling or blocking I/O is introduced into the render hot path.
 
-## Current integration boundary
+## Production hook boundary
 
-This package establishes the tested presentation contract in `TerminalWorkspacePolicy.hpp` and extends the existing `terminal_workspace_policy` regression target.
+The presentation contract and terminal frame-line renderer are now implemented and covered by the existing workspace/render regression targets.
 
-The next AP-17 slice integrates the contract into the production `TerminalUi` always-visible header/navigation and adds explicit approval/maintenance/incident/recovery panels while preserving the zero-write invariant.
+The remaining production hook is deliberately narrow: `TerminalUi::draw()` must consume `operator_surface_frame_lines(snapshot, active_workspace)` inside its existing frame assembly before calling the unchanged `render_frame()` path. That hook must not add a second snapshot read, polling path, output stream or action authority.
 
 ## Non-goals
 
