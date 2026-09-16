@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 #include <sentum/ui/OperatorActionFlow.hpp>
+#include <sentum/ui/OperatorAuditQueueView.hpp>
 #include <sentum/ui/OperatorWorkflowView.hpp>
 #include <sentum/ui/TerminalWorkspacePolicy.hpp>
 
@@ -19,7 +20,7 @@ inline std::string operator_surface_frame_lines(
 		surface.banner.size() + surface.navigation.size() + surface.workspace_help.size() +
 		surface.governance_state.size() + surface.maintenance_state.size() +
 		surface.incident_state.size() + surface.recovery_state.size() +
-		surface.approval_summary.size() + surface.audit_summary.size() + 512);
+		surface.approval_summary.size() + surface.audit_summary.size() + 1024);
 
 	frame += "OPERATOR ";
 	frame += surface.banner;
@@ -54,6 +55,29 @@ inline std::string operator_surface_frame_lines(
 	}
 
 	frame += operator_workflows_text(control_plane);
+
+	const auto audit_queue = derive_operator_audit_queue_view(snapshot, 4, 5);
+	if (!audit_queue.approvals.empty()) {
+		frame += "APPROVAL QUEUE ";
+		frame += std::to_string(audit_queue.approval_total);
+		frame += '\n';
+		for (const auto& item : audit_queue.approvals) {
+			frame += "  Approval ";
+			frame += operator_approval_item_text(item);
+			frame += '\n';
+		}
+	}
+	if (!audit_queue.audit.empty()) {
+		frame += "AUDIT TIMELINE ";
+		frame += std::to_string(audit_queue.audit_total);
+		frame += '\n';
+		for (const auto& item : audit_queue.audit) {
+			frame += "  Audit ";
+			frame += operator_audit_item_text(item);
+			frame += '\n';
+		}
+	}
+	if (audit_queue.truncated) frame += "  Additional operator evidence omitted from terminal view\n";
 	return frame;
 }
 
