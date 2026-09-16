@@ -16,6 +16,7 @@
 #include <sentum/utils/AsyncLogger.hpp>
 #include <sentum/api/model/MarketInfo.hpp>
 #include <sentum/market/MarketDataStore.hpp>
+#include <sentum/market/RuntimePerformanceMetrics.hpp>
 #include <sentum/market/SpscRingQueue.hpp>
 #include <sentum/market/SymbolId.hpp>
 
@@ -48,10 +49,14 @@ private:
     bool try_enqueue(const std::string* symbol, Kline kline);
     SymbolRef resolve_symbol(std::string_view symbol) const noexcept;
     void initialize_symbols();
+    void update_queue_pressure(std::size_t depth, bool saturated) noexcept;
 
     static constexpr std::size_t queue_capacity = 8192;
     static constexpr std::size_t batch_size = 256;
     static constexpr double max_drop_rate = 0.001;
+    static constexpr std::size_t elevated_pressure_depth = queue_capacity / 2;
+    static constexpr std::size_t critical_pressure_depth = (queue_capacity * 4) / 5;
+    static constexpr std::uint32_t hot_path_latency_sample_every = 64;
 
     Database& db_ref;
     MarketDataStore& store_ref;
@@ -65,6 +70,9 @@ private:
     std::atomic<std::uint64_t> enqueued{0};
     std::atomic<std::uint64_t> dropped{0};
     sentum::market::SpscRingQueue<KlineBatchItem, queue_capacity + 1> queue;
+    sentum::market::LatencySampler parse_latency_sampler{hot_path_latency_sample_every};
+    sentum::market::LatencySampler dispatch_latency_sampler{hot_path_latency_sample_every};
+    std::atomic<std::uint8_t> queue_pressure_level_{static_cast<std::uint8_t>(sentum::market::QueuePressureLevel::Normal)};
     std::mutex wait_mutex;
     std::condition_variable queue_cv;
     AsyncLogger logger;

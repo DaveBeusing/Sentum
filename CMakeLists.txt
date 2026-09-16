@@ -106,6 +106,11 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_market_hot_path_tests PRIVATE sentum_core)
 	add_test(NAME market_hot_path COMMAND sentum_market_hot_path_tests)
 	set_tests_properties(market_hot_path PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_runtime_observability_tests tests/runtime_observability_tests.cpp)
+	target_link_libraries(sentum_runtime_observability_tests PRIVATE sentum_core)
+	add_test(NAME runtime_observability COMMAND sentum_runtime_observability_tests)
+	set_tests_properties(runtime_observability PROPERTIES TIMEOUT 60)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
