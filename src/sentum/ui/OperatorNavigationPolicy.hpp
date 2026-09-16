@@ -82,10 +82,68 @@ inline OperatorFocusRegion next_focus(OperatorFocusRegion focus) noexcept {
 	return OperatorFocusRegion::ApprovalQueue;
 }
 
+inline OperatorNavigationState reconcile_operator_navigation(
+	OperatorNavigationState state,
+	const OperatorAuditQueueView& evidence) {
+	state.execution_authorized = false;
+	state.approval_index = evidence.approvals.empty()
+		? 0
+		: std::min(state.approval_index, evidence.approvals.size() - 1);
+	state.audit_index = evidence.audit.empty()
+		? 0
+		: std::min(state.audit_index, evidence.audit.size() - 1);
+
+	if (evidence.evidence_state == OperatorEvidenceState::Missing) {
+		state.confirmation_open = false;
+		state.selected_request_id.clear();
+		state.selected_action.clear();
+		state.status = "EVIDENCE MISSING - READ ONLY";
+		return state;
+	}
+
+	if (evidence.evidence_state == OperatorEvidenceState::Stale) {
+		state.confirmation_open = false;
+		state.selected_request_id.clear();
+		state.selected_action.clear();
+		state.status = "EVIDENCE STALE - BLOCKED";
+		return state;
+	}
+
+	if (state.confirmation_open) {
+		const auto selected = std::find_if(
+			evidence.approvals.begin(),
+			evidence.approvals.end(),
+			[&state](const OperatorApprovalItem& item) {
+				return item.request_id == state.selected_request_id &&
+					item.action == state.selected_action &&
+					item.classification == "APPROVAL_REQUIRED";
+			});
+		if (selected == evidence.approvals.end()) {
+			state.confirmation_open = false;
+			state.selected_request_id.clear();
+			state.selected_action.clear();
+			state.status = "SELECTION CHANGED - CONFIRMATION CANCELLED";
+			return state;
+		}
+	}
+
+	if (state.focus == OperatorFocusRegion::ApprovalQueue && evidence.approvals.empty()) {
+		state.selected_request_id.clear();
+		state.selected_action.clear();
+		state.status = "APPROVAL QUEUE EMPTY";
+	} else if (state.focus == OperatorFocusRegion::AuditTimeline && evidence.audit.empty()) {
+		state.selected_request_id.clear();
+		state.selected_action.clear();
+		state.status = "AUDIT TIMELINE EMPTY";
+	}
+	return state;
+}
+
 inline OperatorNavigationState apply_operator_navigation(
 	OperatorNavigationState state,
 	OperatorNavigationCommand command,
 	const OperatorAuditQueueView& evidence) {
+	state = reconcile_operator_navigation(std::move(state), evidence);
 	state.execution_authorized = false;
 
 	if (command == OperatorNavigationCommand::Cancel) {
@@ -96,6 +154,8 @@ inline OperatorNavigationState apply_operator_navigation(
 		return state;
 	}
 
+	if (evidence.evidence_state != OperatorEvidenceState::Available) return state;
+
 	if (state.confirmation_open) {
 		state.status = "CONFIRMATION OPEN - ENTER CANNOT EXECUTE";
 		return state;
@@ -104,21 +164,22 @@ inline OperatorNavigationState apply_operator_navigation(
 	if (command == OperatorNavigationCommand::FocusPrevious) {
 		state.focus = previous_focus(state.focus);
 		state.status = "BROWSE";
-		return state;
+		return reconcile_operator_navigation(std::move(state), evidence);
 	}
 	if (command == OperatorNavigationCommand::FocusNext) {
 		state.focus = next_focus(state.focus);
 		state.status = "BROWSE";
-		return state;
+		return reconcile_operator_navigation(std::move(state), evidence);
 	}
 
 	if (state.focus == OperatorFocusRegion::ApprovalQueue) {
 		if (command == OperatorNavigationCommand::MovePrevious) {
 			state.approval_index = bounded_previous(state.approval_index, evidence.approvals.size());
+			state.status = evidence.approvals.empty() ? "APPROVAL QUEUE EMPTY" : "BROWSE";
 		} else if (command == OperatorNavigationCommand::MoveNext) {
 			state.approval_index = bounded_next(state.approval_index, evidence.approvals.size());
+			state.status = evidence.approvals.empty() ? "APPROVAL QUEUE EMPTY" : "BROWSE";
 		} else if (command == OperatorNavigationCommand::Open && !evidence.approvals.empty()) {
-			state.approval_index = std::min(state.approval_index, evidence.approvals.size() - 1);
 			const auto& item = evidence.approvals[state.approval_index];
 			state.selected_request_id = item.request_id;
 			state.selected_action = item.action;
@@ -138,10 +199,11 @@ inline OperatorNavigationState apply_operator_navigation(
 	if (state.focus == OperatorFocusRegion::AuditTimeline) {
 		if (command == OperatorNavigationCommand::MovePrevious) {
 			state.audit_index = bounded_previous(state.audit_index, evidence.audit.size());
+			state.status = evidence.audit.empty() ? "AUDIT TIMELINE EMPTY" : "BROWSE";
 		} else if (command == OperatorNavigationCommand::MoveNext) {
 			state.audit_index = bounded_next(state.audit_index, evidence.audit.size());
+			state.status = evidence.audit.empty() ? "AUDIT TIMELINE EMPTY" : "BROWSE";
 		} else if (command == OperatorNavigationCommand::Open && !evidence.audit.empty()) {
-			state.audit_index = std::min(state.audit_index, evidence.audit.size() - 1);
 			const auto& item = evidence.audit[state.audit_index];
 			state.selected_request_id = item.request_id;
 			state.selected_action = item.action;
