@@ -51,6 +51,25 @@ void test_overlay_validates_cross_surface_contract() {
 	require(overlay.find("Operations contract mismatch - fail closed") != std::string::npos, "contract mismatch does not fail closed visibly");
 }
 
+void test_overlay_uses_bounded_resilient_refresh() {
+	const std::string overlay(sentum::dashboard::kOperationsDashboardOverlay);
+	require(overlay.find("OPERATIONS_REFRESH_MS=2000") != std::string::npos, "operations base refresh interval missing");
+	require(overlay.find("OPERATIONS_MAX_BACKOFF_MS=30000") != std::string::npos, "operations backoff is not bounded");
+	require(overlay.find("Math.min(OPERATIONS_REFRESH_MS*Math.pow(2") != std::string::npos, "operations retry does not use bounded exponential backoff");
+	require(overlay.find("setInterval(") == std::string::npos, "operations overlay still uses unbounded interval polling");
+	require(overlay.find("setTimeout(") != std::string::npos, "operations overlay does not use single-shot scheduling");
+	require(overlay.find("operationsInFlight") != std::string::npos, "operations overlay does not suppress overlapping requests");
+}
+
+void test_overlay_exposes_transport_stale_and_recovery_state() {
+	const std::string overlay(sentum::dashboard::kOperationsDashboardOverlay);
+	require(overlay.find("opsTransport") != std::string::npos, "transport state is not visible");
+	require(overlay.find("renderTransport('STALE'") != std::string::npos, "transport failure does not mark cached evidence stale");
+	require(overlay.find("renderTransport('UNAVAILABLE'") != std::string::npos, "initial transport failure is not unavailable");
+	require(overlay.find("renderTransport('LIVE')") != std::string::npos, "successful recovery does not restore live state");
+	require(overlay.find("operationsLastSuccess") != std::string::npos, "last successful transport timestamp is not tracked");
+}
+
 } // namespace
 
 int main() {
@@ -60,6 +79,8 @@ int main() {
 		test_overlay_falls_back_without_body_tag();
 		test_overlay_exposes_no_write_routes();
 		test_overlay_validates_cross_surface_contract();
+		test_overlay_uses_bounded_resilient_refresh();
+		test_overlay_exposes_transport_stale_and_recovery_state();
 		std::cout << "dashboard operations overlay tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {
