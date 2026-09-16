@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <sentum/ui/OperatorAuditQueueView.hpp>
 #include <sentum/ui/OperatorActionFlow.hpp>
