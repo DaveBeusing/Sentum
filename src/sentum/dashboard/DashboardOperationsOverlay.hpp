@@ -11,7 +11,7 @@ inline constexpr std::string_view kOperationsDashboardOverlay = R"HTML(
 </style>
 <script id="sentum-operations-overlay-script">
 (()=>{
-const q=id=>document.getElementById(id),safe=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]));
+const q=id=>document.getElementById(id),safe=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const OPERATIONS_SCHEMA_VERSION=1,OPERATIONS_CONTRACT='sentum.operations.v1',OPERATIONS_AUTHORITY='READ_ONLY_PRESENTATION';
 const OPERATIONS_REFRESH_MS=2000,OPERATIONS_MAX_BACKOFF_MS=30000;
 let operationsFailures=0,operationsTimer=null,operationsInFlight=false,operationsLastSuccess=0;
