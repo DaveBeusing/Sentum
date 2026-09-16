@@ -101,6 +101,11 @@ if(BUILD_TESTING)
 	target_link_libraries(sentum_runtime_lifecycle_tests PRIVATE sentum_core)
 	add_test(NAME runtime_lifecycle COMMAND sentum_runtime_lifecycle_tests)
 	set_tests_properties(runtime_lifecycle PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_market_hot_path_tests tests/market_hot_path_tests.cpp)
+	target_link_libraries(sentum_market_hot_path_tests PRIVATE sentum_core)
+	add_test(NAME market_hot_path COMMAND sentum_market_hot_path_tests)
+	set_tests_properties(market_hot_path PROPERTIES TIMEOUT 60)
 endif()
 
 if(SENTUM_BUILD_BENCHMARKS)
@@ -110,6 +115,9 @@ if(SENTUM_BUILD_BENCHMARKS)
 
 	add_executable(sentum_parser_allocation_benchmark benchmarks/parser_allocation_benchmark.cpp)
 	target_include_directories(sentum_parser_allocation_benchmark PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+	add_executable(sentum_scanner_hot_path_benchmark benchmarks/scanner_hot_path_benchmark.cpp)
+	target_link_libraries(sentum_scanner_hot_path_benchmark PRIVATE sentum_core)
 endif()
 
 if(NOT SENTUM_ENABLE_ASAN AND NOT SENTUM_ENABLE_UBSAN AND NOT SENTUM_ENABLE_TSAN)
