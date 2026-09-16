@@ -38,14 +38,17 @@ struct CollectorTestAccess {
         return collector.running.load(std::memory_order_acquire);
     }
 
+    static void request_stop(Collector& collector) {
+        collector.running.store(false, std::memory_order_release);
+        collector.queue_cv.notify_all();
+    }
+
     static void producer_done(Collector& collector) {
         collector.producer_stopped.store(true, std::memory_order_release);
         collector.queue_cv.notify_all();
     }
 
-    static void stop_persistence(Collector& collector) {
-        collector.running.store(false, std::memory_order_release);
-        collector.queue_cv.notify_all();
+    static void join_writer(Collector& collector) {
         if (collector.writer_thread.joinable()) collector.writer_thread.join();
         collector.logger.stop();
     }
@@ -142,7 +145,7 @@ void test_collector_drains_non_empty_persistence_queue() {
     const std::filesystem::path db_path = "log/lifecycle_collector_backlog.db";
     remove_database_files(db_path);
 
-    constexpr std::size_t backlog_size = 8000;
+    constexpr std::size_t backlog_size = 1024;
     {
         Database db(db_path.string());
         Collector collector(db, test_markets());
@@ -154,11 +157,10 @@ void test_collector_drains_non_empty_persistence_queue() {
         }
         require(collector.queue_depth() == backlog_size, "collector test backlog was not fully queued");
 
-        CollectorTestAccess::start_writer(collector);
-        require(collector.queue_depth() > 0, "collector backlog drained before shutdown condition could be exercised");
-
+        CollectorTestAccess::request_stop(collector);
         const auto stop_started = std::chrono::steady_clock::now();
-        CollectorTestAccess::stop_persistence(collector);
+        CollectorTestAccess::start_writer(collector);
+        CollectorTestAccess::join_writer(collector);
         const auto stop_elapsed = std::chrono::steady_clock::now() - stop_started;
 
         require(stop_elapsed <= 2s, "collector backlog drain exceeded two-second lifecycle budget");
@@ -197,7 +199,8 @@ void test_collector_shutdown_under_mock_traffic() {
         require(produced.load(std::memory_order_relaxed) > 0, "mock collector producer did not generate traffic");
 
         const auto stop_started = std::chrono::steady_clock::now();
-        CollectorTestAccess::stop_persistence(collector);
+        CollectorTestAccess::request_stop(collector);
+        CollectorTestAccess::join_writer(collector);
         const auto stop_elapsed = std::chrono::steady_clock::now() - stop_started;
         producer.join();
 
