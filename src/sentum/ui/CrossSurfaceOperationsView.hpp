@@ -9,12 +9,22 @@
 
 namespace sentum::ui {
 
+inline const char* operator_severity_text(OperatorSeverity severity) noexcept {
+	switch (severity) {
+		case OperatorSeverity::Normal: return "NORMAL";
+		case OperatorSeverity::Attention: return "ATTENTION";
+		case OperatorSeverity::Warning: return "WARNING";
+		case OperatorSeverity::Critical: return "CRITICAL";
+	}
+	return "CRITICAL";
+}
+
 inline nlohmann::json operator_status_json(const OperatorStatus& status) {
 	return {
 		{"label", status.label},
 		{"message", status.message},
-		{"operator_action", status.operator_action},
-		{"severity", operator_severity_name(status.severity)}
+		{"recommended_workspace", status.recommended_workspace},
+		{"severity", operator_severity_text(status.severity)}
 	};
 }
 
