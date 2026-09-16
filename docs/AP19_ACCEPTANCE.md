@@ -21,101 +21,41 @@ Every alert remains presentation-only with `execution_authorized = false`.
 
 ## Lifecycle acceptance
 
-Alert lifecycle presentation must preserve:
-
-- stable alert identifiers;
-- `NEW`, `ACTIVE`, `ACKNOWLEDGED`, `CLEARED` states;
-- stable-id deduplication across observations;
-- generation increment on re-activation after clear;
-- acknowledgement evidence matched to exact `alert_id + generation`;
-- rejection of stale or malformed acknowledgement evidence;
-- no locally invented acknowledgement, clear or resolution authority.
+Alert lifecycle presentation must preserve stable alert identifiers, `NEW`, `ACTIVE`, `ACKNOWLEDGED`, `CLEARED` states, stable-id deduplication across observations, generation increment on re-activation after clear, acknowledgement evidence matched to exact `alert_id + generation`, rejection of stale or malformed acknowledgement evidence, and no locally invented acknowledgement, clear or resolution authority.
 
 ## Alert Center acceptance
 
-Terminal and `/api/operations` must consume the same shared Alert Center projection.
-
-Required shared presentation includes:
-
-- active, acknowledged and cleared counts;
-- severity counts;
-- bounded alert rows;
-- generation and lifecycle state;
-- acknowledgement evidence when present;
-- operator guidance and recommended workspace;
-- `execution_authorized = false` throughout.
+Terminal and `/api/operations` must consume the same shared Alert Center projection. Required shared presentation includes active, acknowledged and cleared counts, severity counts, bounded alert rows, generation and lifecycle state, acknowledgement evidence when present, operator guidance and recommended workspace, and `execution_authorized = false` throughout.
 
 When persisted lifecycle history is absent, presentation may show current active alerts but must not invent cleared history.
 
 ## Noise-control acceptance
 
-Operator noise control must remain presentation-only.
-
-Required behavior:
-
-- `CRITICAL` and `WARNING` are never suppressed;
-- low-severity `ATTENTION` and `INFO` may use a bounded presentation budget;
-- acknowledged or cleared low-severity evidence may be visually deprioritized while remaining counted as evidence;
-- active generation `>= 3` is visibly marked as flapping and is not hidden by the low-priority budget;
-- storm limiting exposes suppression counts instead of silently discarding evidence;
-- terminal and web use the same suppression/flapping decisions.
+`CRITICAL` and `WARNING` are never suppressed. Low-severity `ATTENTION` and `INFO` may use a bounded presentation budget. Acknowledged or cleared low-severity evidence may be visually deprioritized while remaining counted as evidence. Active generation `>= 3` is visibly marked as flapping and is not hidden by the low-priority budget. Storm limiting exposes suppression counts instead of silently discarding evidence. Terminal and web use the same suppression/flapping decisions.
 
 Noise control must never acknowledge, resolve, clear or execute anything.
 
 ## Escalation timeline and aging acceptance
 
-Aging and escalation presentation must consume only supplied control-plane evidence.
+Aging and escalation presentation must consume only supplied control-plane evidence. The presentation layer must not read the local wall clock and must not invent escalation deadlines.
 
-The presentation layer must not read the local wall clock and must not invent escalation deadlines.
+Canonical timestamp evidence uses UTC ISO-8601 `...Z` values. Supported aging presentation states are `FRESH`, `DUE`, `OVERDUE`, `AGING UNAVAILABLE`, with lifecycle overrides `ACKNOWLEDGED` and `CLEARED`.
 
-Canonical timestamp evidence uses UTC ISO-8601 `...Z` values. Supported aging presentation states are:
-
-- `FRESH`;
-- `DUE`;
-- `OVERDUE`;
-- `AGING UNAVAILABLE`;
-- lifecycle overrides `ACKNOWLEDGED` and `CLEARED`.
-
-Missing or malformed timestamp evidence must fail visibly to `AGING UNAVAILABLE` rather than guessing.
-
-Terminal and `/api/operations` must expose the same bounded escalation timeline, due/overdue counts and latest escalation actor/reason evidence where supplied.
+Missing or malformed timestamp evidence must fail visibly to `AGING UNAVAILABLE` rather than guessing. Terminal and `/api/operations` must expose the same bounded escalation timeline, due/overdue counts and latest escalation actor/reason evidence where supplied.
 
 AP-19 does not send notifications or advance escalation state.
 
 ## Authority acceptance
 
-AP-19 must not introduce any presentation action that can:
-
-- send notifications;
-- advance escalation state;
-- create acknowledgement requests;
-- acknowledge or resolve alerts or incidents;
-- clear a kill switch;
-- resume entries;
-- approve governed actions;
-- mutate Risk or Execution state;
-- synthesize fills;
-- override exchange-confirmed execution truth.
+AP-19 must not introduce any presentation action that can send notifications, advance escalation state, create acknowledgement requests, acknowledge or resolve alerts or incidents, clear a kill switch, resume entries, approve governed actions, mutate Risk or Execution state, synthesize fills or override exchange-confirmed execution truth.
 
 ## Cross-surface acceptance
 
-Terminal and web must remain semantically aligned for:
-
-- alert ids;
-- severity;
-- lifecycle state;
-- generation;
-- acknowledgement state;
-- attention/suppression class;
-- flapping state;
-- storm/suppression counts;
-- escalation aging state;
-- due/overdue counts;
-- read-only authority.
+Terminal and web must remain semantically aligned for alert ids, severity, lifecycle state, generation, acknowledgement state, attention/suppression class, flapping state, storm/suppression counts, escalation aging state, due/overdue counts and read-only authority.
 
 ## Regression acceptance
 
-Final-head Core CI must execute and pass the AP-19 regressions, including at least:
+Final-head Core CI must execute and pass at least:
 
 - `operator_alert_policy`;
 - `operator_alert_lifecycle`;
@@ -129,7 +69,7 @@ Final-head Core CI must execute and pass the AP-19 regressions, including at lea
 - UBSan;
 - TSan.
 
-The final head must also remain mergeable and the pull request must stay Draft until the required Core CI evidence succeeds for that same head.
+The final head must remain mergeable and the pull request must stay Draft until the required Core CI evidence succeeds for that same head.
 
 ## Acceptance state
 
