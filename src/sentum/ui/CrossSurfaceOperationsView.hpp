@@ -3,6 +3,7 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
+#include <sentum/ui/OperatorAlertCenterView.hpp>
 #include <sentum/ui/OperatorAuditQueueView.hpp>
 #include <sentum/ui/OperatorWorkflowView.hpp>
 #include <sentum/ui/TerminalWorkspacePolicy.hpp>
@@ -47,9 +48,11 @@ inline nlohmann::json operator_workflow_json(const OperatorWorkflowView& workflo
 inline nlohmann::json derive_cross_surface_operations_view(
 	const nlohmann::json& snapshot,
 	std::size_t approval_limit = 8,
-	std::size_t audit_limit = 12) {
+	std::size_t audit_limit = 12,
+	std::size_t alert_limit = 12) {
 	const auto surface = derive_operator_control_surface(snapshot, "SYSTEM");
 	const auto evidence = derive_operator_audit_queue_view(snapshot, approval_limit, audit_limit);
+	const auto alerts = derive_operator_alert_center_view(snapshot, alert_limit);
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
 	const auto maintenance = maintenance_operator_workflow(control_plane);
 	const auto incident = incident_operator_workflow(control_plane);
@@ -80,6 +83,28 @@ inline nlohmann::json derive_cross_surface_operations_view(
 		});
 	}
 
+	nlohmann::json alert_items = nlohmann::json::array();
+	for (const auto& item : alerts.items) {
+		alert_items.push_back({
+			{"id", item.id},
+			{"source", item.source},
+			{"severity", item.severity},
+			{"state", item.state},
+			{"generation", item.generation},
+			{"title", item.title},
+			{"message", item.message},
+			{"guidance", item.guidance},
+			{"recommended_workspace", item.recommended_workspace},
+			{"acknowledged_by", item.acknowledged_by},
+			{"acknowledgement_reason", item.acknowledgement_reason},
+			{"escalation_level", item.escalation_level},
+			{"acknowledgement_required", item.acknowledgement_required},
+			{"notification_candidate", item.notification_candidate},
+			{"active", item.active},
+			{"execution_authorized", false}
+		});
+	}
+
 	return {
 		{"schema_version", 1},
 		{"contract", "sentum.operations.v1"},
@@ -94,6 +119,18 @@ inline nlohmann::json derive_cross_surface_operations_view(
 			{"pending_approvals", surface.pending_approvals},
 			{"approval_summary", surface.approval_summary},
 			{"audit_summary", surface.audit_summary}
+		}},
+		{"alerts", {
+			{"total", alerts.total},
+			{"active", alerts.active},
+			{"acknowledged", alerts.acknowledged},
+			{"cleared", alerts.cleared},
+			{"critical", alerts.critical},
+			{"warning", alerts.warning},
+			{"attention", alerts.attention},
+			{"truncated", alerts.truncated},
+			{"execution_authorized", false},
+			{"items", std::move(alert_items)}
 		}},
 		{"workflows", {
 			{"maintenance", operator_workflow_json(maintenance)},
