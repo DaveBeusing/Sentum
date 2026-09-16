@@ -1,0 +1,34 @@
+{
+	"schema_version": 1,
+	"environment_class": "ci_rehearsal",
+	"required_resilience_status": "PASS",
+	"automated_actions": [
+		"collect_diagnostics",
+		"rotate_log_sink",
+		"refresh_non_authoritative_cache",
+		"restart_non_authoritative_worker"
+	],
+	"approval_required_actions": [
+		"resume_entries",
+		"clear_kill_switch",
+		"promote_recovery_candidate",
+		"accept_reconciliation",
+		"enter_maintenance",
+		"exit_maintenance"
+	],
+	"forbidden_actions": [
+		"synthesize_fill",
+		"mutate_risk_state",
+		"mutate_execution_state",
+		"override_exchange_confirmed_truth"
+	],
+	"required_audit_fields": [
+		"action",
+		"classification",
+		"actor",
+		"reason",
+		"git_sha",
+		"workflow_run_id",
+		"timestamp_utc"
+	]
+}
