@@ -19,6 +19,8 @@ public:
         buckets_[bucket_for(microseconds)].fetch_add(1, std::memory_order_relaxed);
     }
 
+    std::uint64_t count() const noexcept { return count_.load(std::memory_order_relaxed); }
+
     nlohmann::json snapshot() const {
         const auto count = count_.load(std::memory_order_relaxed);
         return {{"count",count},{"avg_us",count ? static_cast<double>(total_.load(std::memory_order_relaxed))/count : 0.0},
@@ -43,6 +45,24 @@ private:
     std::atomic<std::uint64_t> count_{0}, total_{0}, max_{0};
 };
 
+class LatencySampler {
+public:
+    explicit constexpr LatencySampler(std::uint32_t sample_every = 1) noexcept
+        : sample_every_(sample_every == 0 ? 1 : sample_every) {}
+
+    bool should_sample() noexcept {
+        ++counter_;
+        if (sample_every_ <= 1) return true;
+        return (counter_ % sample_every_) == 0;
+    }
+
+    std::uint32_t sample_every() const noexcept { return sample_every_; }
+
+private:
+    const std::uint32_t sample_every_;
+    std::uint32_t counter_ = 0;
+};
+
 class RuntimePerformanceMetrics {
 public:
     static RuntimePerformanceMetrics& global(){static RuntimePerformanceMetrics instance;return instance;}
@@ -51,15 +71,37 @@ public:
     LatencyHistogram strategy_decision_latency;
     LatencyHistogram sqlite_batch_latency;
     std::atomic<std::uint64_t> market_events{0};
+    std::atomic<std::uint64_t> queue_depth{0};
     std::atomic<std::uint64_t> queue_high_water{0};
+    std::atomic<std::uint64_t> queue_pressure_transitions{0};
+    std::atomic<std::uint64_t> queue_saturation_events{0};
+    std::atomic<std::uint64_t> queue_wakeups{0};
 
     void observe_queue_depth(std::uint64_t depth) noexcept {
+        queue_depth.store(depth, std::memory_order_relaxed);
         auto current=queue_high_water.load(std::memory_order_relaxed);
         while(depth>current && !queue_high_water.compare_exchange_weak(current,depth,std::memory_order_relaxed)){}
     }
+
+    void observe_queue_pressure_transition() noexcept {
+        queue_pressure_transitions.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void observe_queue_saturation() noexcept {
+        queue_saturation_events.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void observe_queue_wakeup() noexcept {
+        queue_wakeups.fetch_add(1, std::memory_order_relaxed);
+    }
+
     nlohmann::json snapshot() const {
         return {{"market_events_total",market_events.load(std::memory_order_relaxed)},
+                {"queue_depth",queue_depth.load(std::memory_order_relaxed)},
                 {"queue_high_water",queue_high_water.load(std::memory_order_relaxed)},
+                {"queue_pressure_transitions",queue_pressure_transitions.load(std::memory_order_relaxed)},
+                {"queue_saturation_events",queue_saturation_events.load(std::memory_order_relaxed)},
+                {"queue_wakeups",queue_wakeups.load(std::memory_order_relaxed)},
                 {"parse_latency",parse_latency.snapshot()},
                 {"event_dispatch_latency",event_dispatch_latency.snapshot()},
                 {"strategy_decision_latency",strategy_decision_latency.snapshot()},
@@ -73,6 +115,25 @@ public:
     ~ScopedLatency(){const auto us=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-start_).count();histogram_.observe(static_cast<std::uint64_t>(us<0?0:us));}
 private:
     LatencyHistogram& histogram_; std::chrono::steady_clock::time_point start_;
+};
+
+class SampledScopedLatency {
+public:
+    SampledScopedLatency(LatencyHistogram& histogram, LatencySampler& sampler) noexcept
+        : histogram_(&histogram), active_(sampler.should_sample()) {
+        if (active_) start_ = std::chrono::steady_clock::now();
+    }
+
+    ~SampledScopedLatency() {
+        if (!active_) return;
+        const auto us=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-start_).count();
+        histogram_->observe(static_cast<std::uint64_t>(us<0?0:us));
+    }
+
+private:
+    LatencyHistogram* histogram_;
+    bool active_;
+    std::chrono::steady_clock::time_point start_{};
 };
 
 } // namespace sentum::market
