@@ -134,4 +134,21 @@ inline std::string operator_alert_escalation_item_text(const OperatorAlertEscala
 	return text;
 }
 
+inline std::string operator_alert_escalation_timeline_text(
+	const nlohmann::json& snapshot,
+	std::size_t limit = 6) {
+	const auto view = derive_operator_alert_escalation_timeline(snapshot, limit);
+	std::string text = "ESCALATION TIMELINE total=" + std::to_string(view.total) +
+		" due=" + std::to_string(view.due) +
+		" overdue=" + std::to_string(view.overdue) +
+		" unavailable=" + std::to_string(view.unavailable) + "\n";
+	for (const auto& item : view.items) {
+		text += "   Escalation ";
+		text += operator_alert_escalation_item_text(item);
+		text += '\n';
+	}
+	if (view.truncated) text += "   Additional escalation evidence omitted from terminal view\n";
+	return text;
+}
+
 } // namespace sentum::ui
