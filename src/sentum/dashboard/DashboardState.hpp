@@ -10,6 +10,11 @@
 
 namespace sentum::dashboard {
 
+struct DashboardSnapshot {
+    std::uint64_t generation = 0;
+    nlohmann::json state = nlohmann::json::object();
+};
+
 class DashboardState {
 public:
     static DashboardState& global() {
@@ -34,6 +39,23 @@ public:
     nlohmann::json snapshot() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return state_;
+    }
+
+    DashboardSnapshot snapshot_versioned() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return DashboardSnapshot{generation_.load(std::memory_order_relaxed), state_};
+    }
+
+    bool snapshot_if_changed(std::uint64_t known_generation, DashboardSnapshot& out) const {
+        if (generation_.load(std::memory_order_acquire) == known_generation) return false;
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto current_generation = generation_.load(std::memory_order_relaxed);
+        if (current_generation == known_generation) return false;
+
+        out.generation = current_generation;
+        out.state = state_;
+        return true;
     }
 
     std::uint64_t generation() const noexcept {
