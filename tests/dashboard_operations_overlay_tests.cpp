@@ -89,6 +89,16 @@ void test_overlay_renders_notification_operations_read_only() {
 	require(overlay.find("INCIDENT_CANDIDATE") != std::string::npos, "incident candidate is not visually fail-closed");
 }
 
+void test_overlay_renders_governed_notification_incident_workflow() {
+	const std::string overlay(sentum::dashboard::kOperationsDashboardOverlay);
+	require(overlay.find("Notification Incident Workflow") != std::string::npos, "notification incident workflow section missing");
+	require(overlay.find("notification_incident_workflow") != std::string::npos, "notification incident workflow contract is not consumed");
+	require(overlay.find("opsNotificationIncidentWorkflow") != std::string::npos, "notification incident workflow target missing");
+	require(overlay.find("PROPOSAL_READY") != std::string::npos, "proposal-ready state is not visibly represented");
+	require(overlay.find("approval_status") != std::string::npos, "approval evidence is not rendered");
+	require(overlay.find("recovery_state") != std::string::npos, "recovery evidence is not rendered");
+}
+
 } // namespace
 
 int main() {
@@ -102,6 +112,7 @@ int main() {
 		test_overlay_exposes_transport_stale_and_recovery_state();
 		test_overlay_renders_read_only_escalation_timeline();
 		test_overlay_renders_notification_operations_read_only();
+		test_overlay_renders_governed_notification_incident_workflow();
 		std::cout << "dashboard operations overlay tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {
