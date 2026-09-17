@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <unordered_map>
@@ -93,8 +94,9 @@ inline NotificationOperationsView derive_notification_operations_view(
 	std::unordered_map<std::string, NotificationChannelOperations> channel_map;
 	for (const auto* record : latest) {
 		if (record == nullptr) continue;
-		auto& channel = channel_map[record->channel];
-		channel.channel = record->channel.empty() ? "UNKNOWN" : record->channel;
+		const auto channel_name = record->channel.empty() ? std::string("UNKNOWN") : record->channel;
+		auto& channel = channel_map[channel_name];
+		channel.channel = channel_name;
 		if (record->state == "PENDING") {
 			++view.pending;
 			++channel.active;
@@ -118,6 +120,9 @@ inline NotificationOperationsView derive_notification_operations_view(
 	view.backlog = view.pending + view.dispatched + view.retriable_failed;
 	view.channels.reserve(channel_map.size());
 	for (auto& [_, channel] : channel_map) view.channels.push_back(std::move(channel));
+	std::sort(view.channels.begin(), view.channels.end(), [](const auto& left, const auto& right) {
+		return left.channel < right.channel;
+	});
 
 	if (view.terminal_failed >= thresholds.terminal_failure_incident && thresholds.terminal_failure_incident > 0) {
 		view.health = NotificationOperationsHealth::IncidentCandidate;
