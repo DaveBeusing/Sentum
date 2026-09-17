@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include <nlohmann/json.hpp>
 #include <sentum/operations/NotificationDeliveryEvidence.hpp>
 
 namespace sentum::operations {
@@ -148,6 +149,73 @@ inline NotificationOperationsView unavailable_notification_operations_view() {
 	view.incident_authorized = false;
 	view.execution_authorized = false;
 	return view;
+}
+
+inline std::vector<NotificationDeliveryEvidenceRecord> notification_delivery_evidence_from_snapshot(
+	const nlohmann::json& snapshot) {
+	std::vector<NotificationDeliveryEvidenceRecord> evidence;
+	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
+	if (!control_plane.contains("notification_delivery_evidence") ||
+		!control_plane.at("notification_delivery_evidence").is_array()) return evidence;
+	for (const auto& item : control_plane.at("notification_delivery_evidence")) {
+		if (!item.is_object()) continue;
+		NotificationDeliveryEvidenceRecord record;
+		record.dedup_key = item.value("dedup_key", std::string{});
+		record.alert_id = item.value("alert_id", std::string{});
+		record.generation = item.value("generation", static_cast<std::size_t>(1));
+		record.channel = item.value("channel", std::string{});
+		record.audience = item.value("audience", std::string{});
+		record.state = item.value("state", std::string{});
+		record.attempt = item.value("attempt", static_cast<std::size_t>(0));
+		record.terminal = item.value("terminal", false);
+		record.provider_reference = item.value("provider_reference", std::string{});
+		record.failure_code = item.value("failure_code", std::string{});
+		record.failure_reason = item.value("failure_reason", std::string{});
+		record.observed_at_utc = item.value("observed_at_utc", std::string{});
+		record.delivery_authorized = item.value("delivery_authorized", false);
+		record.execution_authorized = false;
+		if (!record.dedup_key.empty() && !record.state.empty()) evidence.push_back(std::move(record));
+	}
+	return evidence;
+}
+
+inline NotificationOperationsView derive_notification_operations_view_from_snapshot(
+	const nlohmann::json& snapshot,
+	NotificationOperationsThresholds thresholds = {}) {
+	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
+	if (!control_plane.contains("notification_delivery_evidence") ||
+		!control_plane.at("notification_delivery_evidence").is_array()) {
+		return unavailable_notification_operations_view();
+	}
+	return derive_notification_operations_view(notification_delivery_evidence_from_snapshot(snapshot), thresholds);
+}
+
+inline nlohmann::json notification_operations_json(const NotificationOperationsView& view) {
+	nlohmann::json channels = nlohmann::json::array();
+	for (const auto& channel : view.channels) {
+		channels.push_back({
+			{"channel", channel.channel},
+			{"active", channel.active},
+			{"delivered", channel.delivered},
+			{"failed", channel.failed}
+		});
+	}
+	return {
+		{"status", view.status},
+		{"incident_signal", view.incident_signal},
+		{"current", view.current},
+		{"pending", view.pending},
+		{"dispatched", view.dispatched},
+		{"delivered", view.delivered},
+		{"failed", view.failed},
+		{"retriable_failed", view.retriable_failed},
+		{"terminal_failed", view.terminal_failed},
+		{"backlog", view.backlog},
+		{"evidence_available", view.evidence_available},
+		{"incident_authorized", false},
+		{"execution_authorized", false},
+		{"channels", std::move(channels)}
+	};
 }
 
 } // namespace sentum::operations
