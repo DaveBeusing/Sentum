@@ -1,0 +1,44 @@
+{
+	"schema_version": 1,
+	"authority": "NOTIFICATION_ROUTING_ONLY",
+	"default_action": "BLOCK",
+	"allowed_channels": [
+		"IN_APP",
+		"EMAIL",
+		"PAGER"
+	],
+	"routes": [
+		{
+			"severity": "CRITICAL",
+			"minimum_escalation_level": 3,
+			"channels": ["IN_APP", "PAGER"],
+			"audiences": ["OPERATIONS_ON_CALL"]
+		},
+		{
+			"severity": "WARNING",
+			"minimum_escalation_level": 2,
+			"channels": ["IN_APP", "EMAIL"],
+			"audiences": ["OPERATIONS"]
+		}
+	],
+	"required_fields": [
+		"alert_id",
+		"generation",
+		"severity",
+		"escalation_level",
+		"channel",
+		"audience",
+		"dedup_key"
+	],
+	"forbidden_side_effects": [
+		"acknowledge_alert",
+		"resolve_alert",
+		"clear_kill_switch",
+		"resume_entries",
+		"approve_governed_action",
+		"mutate_risk_state",
+		"mutate_execution_state",
+		"synthesize_fill",
+		"override_exchange_confirmed_truth"
+	]
+}
