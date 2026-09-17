@@ -3,6 +3,7 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
+#include <sentum/operations/NotificationIncidentWorkflowIntegration.hpp>
 #include <sentum/operations/NotificationOperationsObservability.hpp>
 #include <sentum/ui/OperatorAlertCenterView.hpp>
 #include <sentum/ui/OperatorAlertEscalationTimeline.hpp>
@@ -57,6 +58,7 @@ inline nlohmann::json derive_cross_surface_operations_view(
 	const auto alerts = derive_operator_alert_center_view(snapshot, alert_limit);
 	const auto escalation = derive_operator_alert_escalation_timeline(snapshot, alert_limit);
 	const auto notification_operations = sentum::operations::derive_notification_operations_view_from_snapshot(snapshot);
+	const auto notification_incident = sentum::operations::derive_notification_incident_workflow_integration(snapshot);
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
 	const auto maintenance = maintenance_operator_workflow(control_plane);
 	const auto incident = incident_operator_workflow(control_plane);
@@ -114,6 +116,7 @@ inline nlohmann::json derive_cross_surface_operations_view(
 			{"approval_summary", surface.approval_summary}, {"audit_summary", surface.audit_summary}
 		}},
 		{"notification_operations", sentum::operations::notification_operations_json(notification_operations)},
+		{"notification_incident_workflow", sentum::operations::notification_incident_workflow_integration_json(notification_incident)},
 		{"alerts", {
 			{"total", alerts.total}, {"active", alerts.active}, {"acknowledged", alerts.acknowledged},
 			{"cleared", alerts.cleared}, {"critical", alerts.critical}, {"warning", alerts.warning},
