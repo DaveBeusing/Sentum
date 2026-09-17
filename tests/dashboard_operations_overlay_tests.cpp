@@ -78,6 +78,17 @@ void test_overlay_renders_read_only_escalation_timeline() {
 	require(overlay.find("OVERDUE") != std::string::npos, "overdue escalation styling missing");
 }
 
+void test_overlay_renders_notification_operations_read_only() {
+	const std::string overlay(sentum::dashboard::kOperationsDashboardOverlay);
+	require(overlay.find("notification_operations") != std::string::npos, "notification operations contract is not consumed");
+	require(overlay.find("opsNotificationHealth") != std::string::npos, "notification health is not visible");
+	require(overlay.find("opsNotificationBacklog") != std::string::npos, "notification backlog is not visible");
+	require(overlay.find("opsNotificationFailures") != std::string::npos, "terminal notification failures are not visible");
+	require(overlay.find("opsNotificationIncident") != std::string::npos, "notification incident candidate is not visible");
+	require(overlay.find("Notification Channels") != std::string::npos, "notification channel projection is not visible");
+	require(overlay.find("INCIDENT_CANDIDATE") != std::string::npos, "incident candidate is not visually fail-closed");
+}
+
 } // namespace
 
 int main() {
@@ -90,6 +101,7 @@ int main() {
 		test_overlay_uses_bounded_resilient_refresh();
 		test_overlay_exposes_transport_stale_and_recovery_state();
 		test_overlay_renders_read_only_escalation_timeline();
+		test_overlay_renders_notification_operations_read_only();
 		std::cout << "dashboard operations overlay tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {

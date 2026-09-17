@@ -216,6 +216,11 @@ if(BUILD_TESTING)
 	add_test(NAME notification_provider_boundary COMMAND sentum_notification_provider_boundary_tests)
 	set_tests_properties(notification_provider_boundary PROPERTIES TIMEOUT 60)
 
+	add_executable(sentum_notification_operations_observability_tests tests/notification_operations_observability_tests.cpp)
+	target_link_libraries(sentum_notification_operations_observability_tests PRIVATE sentum_core)
+	add_test(NAME notification_operations_observability COMMAND sentum_notification_operations_observability_tests)
+	set_tests_properties(notification_operations_observability PROPERTIES TIMEOUT 60)
+
 	# The sanitizer workflow builds an explicit legacy regression target list. Keep
 	# new operator regressions attached to one of those targets so CTest never sees
 	# registered-but-unbuilt executables under ASan/UBSan/TSan.
@@ -236,6 +241,7 @@ if(BUILD_TESTING)
 		sentum_operator_alert_escalation_timeline_tests
 		sentum_notification_delivery_state_machine_tests
 		sentum_notification_provider_boundary_tests
+		sentum_notification_operations_observability_tests
 	)
 endif()
 

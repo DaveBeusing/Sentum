@@ -3,6 +3,7 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
+#include <sentum/operations/NotificationOperationsObservability.hpp>
 #include <sentum/ui/OperatorAlertCenterView.hpp>
 #include <sentum/ui/OperatorAlertEscalationTimeline.hpp>
 #include <sentum/ui/OperatorAuditQueueView.hpp>
@@ -55,6 +56,7 @@ inline nlohmann::json derive_cross_surface_operations_view(
 	const auto evidence = derive_operator_audit_queue_view(snapshot, approval_limit, audit_limit);
 	const auto alerts = derive_operator_alert_center_view(snapshot, alert_limit);
 	const auto escalation = derive_operator_alert_escalation_timeline(snapshot, alert_limit);
+	const auto notification_operations = sentum::operations::derive_notification_operations_view_from_snapshot(snapshot);
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
 	const auto maintenance = maintenance_operator_workflow(control_plane);
 	const auto incident = incident_operator_workflow(control_plane);
@@ -63,25 +65,16 @@ inline nlohmann::json derive_cross_surface_operations_view(
 	nlohmann::json approvals = nlohmann::json::array();
 	for (const auto& item : evidence.approvals) {
 		approvals.push_back({
-			{"request_id", item.request_id},
-			{"action", item.action},
-			{"classification", item.classification},
-			{"actor", item.actor},
-			{"reason", item.reason},
-			{"status", item.status},
-			{"execution_authorized", false}
+			{"request_id", item.request_id}, {"action", item.action}, {"classification", item.classification},
+			{"actor", item.actor}, {"reason", item.reason}, {"status", item.status}, {"execution_authorized", false}
 		});
 	}
 
 	nlohmann::json audit = nlohmann::json::array();
 	for (const auto& item : evidence.audit) {
 		audit.push_back({
-			{"request_id", item.request_id},
-			{"action", item.action},
-			{"actor", item.actor},
-			{"reason", item.reason},
-			{"outcome", item.outcome},
-			{"timestamp_utc", item.timestamp_utc}
+			{"request_id", item.request_id}, {"action", item.action}, {"actor", item.actor},
+			{"reason", item.reason}, {"outcome", item.outcome}, {"timestamp_utc", item.timestamp_utc}
 		});
 	}
 
@@ -112,9 +105,7 @@ inline nlohmann::json derive_cross_surface_operations_view(
 	}
 
 	return {
-		{"schema_version", 1},
-		{"contract", "sentum.operations.v1"},
-		{"authority", "READ_ONLY_PRESENTATION"},
+		{"schema_version", 1}, {"contract", "sentum.operations.v1"}, {"authority", "READ_ONLY_PRESENTATION"},
 		{"runtime", operator_status_json(surface.status)},
 		{"governance", {
 			{"state", surface.governance_state}, {"evidence_state", evidence.evidence_status},
@@ -122,6 +113,7 @@ inline nlohmann::json derive_cross_surface_operations_view(
 			{"recovery_state", surface.recovery_state}, {"pending_approvals", surface.pending_approvals},
 			{"approval_summary", surface.approval_summary}, {"audit_summary", surface.audit_summary}
 		}},
+		{"notification_operations", sentum::operations::notification_operations_json(notification_operations)},
 		{"alerts", {
 			{"total", alerts.total}, {"active", alerts.active}, {"acknowledged", alerts.acknowledged},
 			{"cleared", alerts.cleared}, {"critical", alerts.critical}, {"warning", alerts.warning},
