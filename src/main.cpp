@@ -231,7 +231,6 @@ int dashboard_main(const sentum::cli::Options& options) {
 
 int incident_main(const sentum::cli::Options& options) {
     const auto database_path = sentum::operations::operations_runtime_database_path();
-    sentum::operations::GovernedIncidentLifecycleRepository lifecycle(database_path);
 
     nlohmann::json result = {
         {"command", options.incident_command},
@@ -240,8 +239,16 @@ int incident_main(const sentum::cli::Options& options) {
     };
 
     if (options.incident_command == "status") {
+        sentum::operations::GovernedIncidentLifecycleRepository lifecycle(
+            database_path,
+            sentum::operations::GovernedIncidentLifecycleOpenMode::ReadOnly);
         result["state"] = lifecycle.control_plane_snapshot();
-    } else if (options.incident_command == "approve") {
+        std::cout << result.dump(2) << '\n';
+        return EXIT_SUCCESS;
+    }
+
+    sentum::operations::GovernedIncidentLifecycleRepository lifecycle(database_path);
+    if (options.incident_command == "approve") {
         const auto approval = lifecycle.approve_open_incident_request(
             options.target_id, options.actor, options.reason);
         result["request_id"] = options.target_id;
