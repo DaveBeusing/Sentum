@@ -107,9 +107,9 @@ void test_cross_surface_uses_authoritative_lifecycle_state() {
 			"cross-surface projection lost lifecycle state");
 		require(view.at("notification_incident_workflow").at("execution_authorized") == false,
 			"cross-surface incident projection gained execution authority");
-		require(view.at("runtime").at("kill_switch_active") == true,
+		require(base.at("kill_switch_active") == true,
 			"incident projection changed kill-switch evidence");
-		require(view.at("runtime").at("entries_paused") == true,
+		require(base.at("entries_paused") == true,
 			"incident projection changed entry-pause evidence");
 
 		{
