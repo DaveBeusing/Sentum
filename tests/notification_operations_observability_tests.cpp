@@ -94,6 +94,27 @@ void test_channel_projection_is_deterministic() {
 	require(view.channels[2].channel == "PAGER", "channels are not deterministically ordered");
 }
 
+void test_dispatch_runtime_metrics_are_projected_without_authority() {
+	nlohmann::json snapshot = {
+		{"operations_control_plane", {{"notification_delivery_evidence", nlohmann::json::array()}}},
+		{"notification_dispatch_runtime", {
+			{"status", "RUNNING"}, {"queued", 3}, {"dispatching", 1}, {"delivered", 7},
+			{"retriable_failed", 2}, {"terminal_failed", 1}, {"provider_latency_ms_last", 12.5},
+			{"provider_latency_ms_average", 8.25}, {"timeout_count", 4}, {"queue_rejections", 2},
+			{"execution_authorized", false}
+		}}
+	};
+	const auto view = sentum::operations::derive_notification_operations_view_from_snapshot(snapshot);
+	require(view.health == NotificationOperationsHealth::NoActivity, "dispatch metrics changed durable notification health");
+	require(view.dispatch_runtime.available && view.dispatch_runtime.status == "RUNNING", "dispatch runtime status missing");
+	require(view.dispatch_runtime.queued == 3 && view.dispatch_runtime.dispatching == 1, "dispatch queue metrics mismatch");
+	require(view.dispatch_runtime.delivered == 7 && view.dispatch_runtime.timeout_count == 4, "dispatch counters mismatch");
+	require(!view.dispatch_runtime.execution_authorized, "dispatch metrics gained execution authority");
+	const auto json = sentum::operations::notification_operations_json(view);
+	require(json["dispatch_runtime"]["status"] == "RUNNING", "dispatch runtime JSON projection missing");
+	require(json["dispatch_runtime"]["execution_authorized"] == false, "dispatch runtime JSON gained execution authority");
+}
+
 void test_unavailable_view_fails_closed() {
 	const auto view = sentum::operations::unavailable_notification_operations_view();
 	require(view.health == NotificationOperationsHealth::Unavailable, "unavailable health mismatch");
@@ -111,6 +132,7 @@ int main() {
 		test_terminal_failure_is_incident_candidate_only();
 		test_backlog_threshold_requires_attention();
 		test_channel_projection_is_deterministic();
+		test_dispatch_runtime_metrics_are_projected_without_authority();
 		test_unavailable_view_fails_closed();
 		std::cout << "notification operations observability tests passed\n";
 		return 0;
