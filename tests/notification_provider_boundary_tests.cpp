@@ -51,6 +51,7 @@ void test_provider_failure_preserves_retry_semantics() {
 	using namespace sentum::operations;
 	auto attempt = mark_notification_dispatched(begin_notification_delivery(eligible_intent(), 3));
 	NotificationDispatchResult result;
+	result.retryable = true;
 	result.failure_code = "TIMEOUT";
 	result.failure_reason = "provider timeout";
 	const auto next = apply_notification_dispatch_result(attempt, result);
