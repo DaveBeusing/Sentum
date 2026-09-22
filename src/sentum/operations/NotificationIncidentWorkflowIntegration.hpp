@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -70,6 +71,18 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 		}
 	}
 
+	return view;
+}
+
+inline NotificationIncidentWorkflowIntegration derive_notification_incident_workflow_integration(
+	const nlohmann::json& snapshot,
+	const NotificationDeliveryEvidenceRepository& repository,
+	NotificationOperationsThresholds thresholds = {},
+	std::size_t evidence_limit = 1024) {
+	auto view = derive_notification_incident_workflow_integration(snapshot, thresholds);
+	view.candidate = derive_notification_incident_candidate(repository, thresholds, evidence_limit);
+	view.incident_authorized = false;
+	view.execution_authorized = false;
 	return view;
 }
 

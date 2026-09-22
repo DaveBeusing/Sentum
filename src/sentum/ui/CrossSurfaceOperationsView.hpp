@@ -144,4 +144,18 @@ inline nlohmann::json derive_cross_surface_operations_view(
 	};
 }
 
+
+inline nlohmann::json derive_cross_surface_operations_view(
+	const nlohmann::json& snapshot,
+	const sentum::operations::NotificationDeliveryEvidenceRepository& notification_evidence,
+	std::size_t approval_limit = 8,
+	std::size_t audit_limit = 12,
+	std::size_t alert_limit = 12,
+	std::size_t notification_evidence_limit = 1024) {
+	const auto durable_snapshot = sentum::operations::notification_delivery_snapshot_from_repository(
+		snapshot, notification_evidence, notification_evidence_limit);
+	return derive_cross_surface_operations_view(
+		durable_snapshot, approval_limit, audit_limit, alert_limit);
+}
+
 } // namespace sentum::ui

@@ -8,7 +8,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <sentum/operations/NotificationDeliveryEvidence.hpp>
+#include <sentum/operations/NotificationDeliveryEvidenceRepository.hpp>
 
 namespace sentum::operations {
 
@@ -151,6 +151,50 @@ inline NotificationOperationsView unavailable_notification_operations_view() {
 	return view;
 }
 
+inline NotificationOperationsView derive_notification_operations_view(
+	const NotificationDeliveryEvidenceRepository& repository,
+	NotificationOperationsThresholds thresholds = {},
+	std::size_t evidence_limit = 1024) {
+	try {
+		const auto batch = repository.load_latest_per_dedup_key(evidence_limit);
+		if (batch.truncated) return unavailable_notification_operations_view();
+		std::vector<NotificationDeliveryEvidenceRecord> evidence;
+		evidence.reserve(batch.records.size());
+		for (const auto& persisted : batch.records) evidence.push_back(persisted.record);
+		return derive_notification_operations_view(evidence, thresholds);
+	} catch (...) {
+		return unavailable_notification_operations_view();
+	}
+}
+
+inline nlohmann::json notification_delivery_snapshot_from_repository(
+	const nlohmann::json& snapshot,
+	const NotificationDeliveryEvidenceRepository& repository,
+	std::size_t evidence_limit = 1024) {
+	auto durable_snapshot = snapshot;
+	if (!durable_snapshot.contains("operations_control_plane") ||
+		!durable_snapshot.at("operations_control_plane").is_object()) {
+		return durable_snapshot;
+	}
+
+	auto& control_plane = durable_snapshot["operations_control_plane"];
+	control_plane.erase("notification_delivery_evidence");
+	try {
+		const auto batch = repository.load_latest_per_dedup_key(evidence_limit);
+		if (batch.truncated) return durable_snapshot;
+
+		nlohmann::json evidence = nlohmann::json::array();
+		for (const auto& persisted : batch.records) {
+			evidence.push_back(notification_delivery_evidence_json(persisted.record));
+		}
+		control_plane["notification_delivery_evidence"] = std::move(evidence);
+	} catch (...) {
+		// Missing or unreadable durable evidence remains absent so the existing
+		// observability projection reports UNAVAILABLE and fails closed.
+	}
+	return durable_snapshot;
+}
+
 inline std::vector<NotificationDeliveryEvidenceRecord> notification_delivery_evidence_from_snapshot(
 	const nlohmann::json& snapshot) {
 	std::vector<NotificationDeliveryEvidenceRecord> evidence;
@@ -167,6 +211,8 @@ inline std::vector<NotificationDeliveryEvidenceRecord> notification_delivery_evi
 		record.audience = item.value("audience", std::string{});
 		record.state = item.value("state", std::string{});
 		record.attempt = item.value("attempt", static_cast<std::size_t>(0));
+		record.max_attempts = item.value("max_attempts", static_cast<std::size_t>(3));
+		record.retry_backoff_seconds = item.value("retry_backoff_seconds", static_cast<std::size_t>(0));
 		record.terminal = item.value("terminal", false);
 		record.provider_reference = item.value("provider_reference", std::string{});
 		record.failure_code = item.value("failure_code", std::string{});

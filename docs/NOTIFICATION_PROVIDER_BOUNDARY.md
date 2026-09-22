@@ -18,6 +18,7 @@ A provider result must never acknowledge or resolve an alert, clear a kill switc
 - alert id and generation;
 - channel and audience;
 - delivery state and attempt;
+- maximum attempts and retry backoff context;
 - terminal flag;
 - provider reference;
 - failure code/reason;
@@ -27,7 +28,9 @@ A provider result must never acknowledge or resolve an alert, clear a kill switc
 
 `append_notification_delivery_evidence()` appends only new state evidence and rejects immediate duplicate records. It never rewrites prior evidence.
 
-This is an in-memory contract boundary, not a durable append-only database implementation. Durable persistence, delivery metrics and incident integration belong to the following production-operations work.
+The in-memory append helper remains useful for local state-machine composition, but durable runtime truth is owned by `NotificationDeliveryEvidenceRepository`. The repository persists transitions append-only in SQLite, suppresses replayed transitions across restart, orders evidence by persistent sequence and keeps `execution_authorized = false` as a database invariant.
+
+Read-only operations consumers never create or mutate delivery evidence. See `NOTIFICATION_DELIVERY_PERSISTENCE.md` for schema, recovery, bounded-query and retention behavior.
 
 ## Retry and idempotency
 

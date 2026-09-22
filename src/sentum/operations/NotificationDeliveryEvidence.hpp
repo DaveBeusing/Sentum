@@ -17,6 +17,8 @@ struct NotificationDeliveryEvidenceRecord {
 	std::string audience;
 	std::string state;
 	std::size_t attempt = 0;
+	std::size_t max_attempts = 3;
+	std::size_t retry_backoff_seconds = 0;
 	bool terminal = false;
 	std::string provider_reference;
 	std::string failure_code;
@@ -37,6 +39,8 @@ inline NotificationDeliveryEvidenceRecord notification_delivery_evidence_record(
 		attempt.audience,
 		notification_delivery_state_name(attempt.state),
 		attempt.attempt,
+		attempt.max_attempts,
+		attempt.retry_backoff_seconds,
 		attempt.terminal,
 		attempt.provider_reference,
 		attempt.failure_code,
@@ -57,6 +61,8 @@ inline nlohmann::json notification_delivery_evidence_json(
 		{"audience", record.audience},
 		{"state", record.state},
 		{"attempt", record.attempt},
+		{"max_attempts", record.max_attempts},
+		{"retry_backoff_seconds", record.retry_backoff_seconds},
 		{"terminal", record.terminal},
 		{"provider_reference", record.provider_reference},
 		{"failure_code", record.failure_code},
