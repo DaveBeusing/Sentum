@@ -949,10 +949,11 @@ nlohmann::json GovernedIncidentLifecycleRepository::control_plane_snapshot(
 		}
 	}
 
+	const auto audit_total = scalar_count(db_, "SELECT COUNT(*) FROM operations_incident_history;");
 	control_plane["approval_queue_total"] = pending_total;
 	control_plane["approval_queue_truncated"] = pending_total > control_plane["approval_queue"].size();
-	control_plane["audit_timeline_truncated"] =
-		scalar_count(db_, "SELECT COUNT(*) FROM operations_incident_history;") > control_plane["audit_timeline"].size();
+	control_plane["audit_timeline_total"] = audit_total;
+	control_plane["audit_timeline_truncated"] = audit_total > control_plane["audit_timeline"].size();
 	control_plane["execution_authorized"] = false;
 	return control_plane;
 }
@@ -1007,7 +1008,18 @@ nlohmann::json merge_governed_incident_lifecycle_snapshot(
 			if (!is_incident_action(item)) audit_rows.push_back(item);
 		}
 	}
+	const auto existing_audit_total = control_plane.value(
+		"audit_timeline_total",
+		existing_audit.is_array() ? existing_audit.size() : std::size_t{0});
+	const auto existing_incident_audit_visible = existing_audit.is_array()
+		? static_cast<std::size_t>(std::count_if(existing_audit.begin(), existing_audit.end(), is_incident_action))
+		: std::size_t{0};
+	const auto nonincident_audit_total = existing_audit_total > existing_incident_audit_visible
+		? existing_audit_total - existing_incident_audit_visible
+		: audit_rows.size();
 	for (const auto& item : lifecycle.at("audit_timeline")) audit_rows.push_back(item);
+	const auto combined_audit_total =
+		nonincident_audit_total + lifecycle.value("audit_timeline_total", lifecycle.at("audit_timeline").size());
 	std::stable_sort(audit_rows.begin(), audit_rows.end(), [](const auto& lhs, const auto& rhs) {
 		return lhs.value("timestamp_utc", std::string{}) > rhs.value("timestamp_utc", std::string{});
 	});
@@ -1030,7 +1042,9 @@ nlohmann::json merge_governed_incident_lifecycle_snapshot(
 		combined_pending > control_plane["approval_queue"].size() ||
 		lifecycle.value("approval_queue_truncated", false);
 	control_plane["audit_timeline"] = std::move(audit);
+	control_plane["audit_timeline_total"] = combined_audit_total;
 	control_plane["audit_timeline_truncated"] =
+		combined_audit_total > control_plane["audit_timeline"].size() ||
 		control_plane.value("audit_timeline_truncated", false) ||
 		lifecycle.value("audit_timeline_truncated", false);
 
