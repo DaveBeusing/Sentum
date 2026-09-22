@@ -170,6 +170,36 @@ void test_runtime_restart_preserves_explicit_decision() {
 	cleanup_database(path);
 }
 
+void test_runtime_thread_and_readers_share_state_safely() {
+	const auto path = temporary_path("_concurrency.sqlite3");
+	try {
+		seed_terminal_failure(path);
+		sentum::operations::GovernedIncidentLifecycleRuntime runtime(
+			path.string(), "test-sha", std::chrono::milliseconds(10));
+		runtime.start();
+		{
+			sentum::operations::GovernedIncidentLifecycleRepository reader(
+				path.string(), sentum::operations::GovernedIncidentLifecycleOpenMode::ReadOnly);
+			for (int index = 0; index < 25; ++index) {
+				const auto snapshot = reader.control_plane_snapshot();
+				require(snapshot.at("execution_authorized") == false,
+					"concurrent lifecycle projection gained execution authority");
+				std::this_thread::sleep_for(std::chrono::milliseconds(2));
+			}
+		}
+		runtime.stop();
+
+		sentum::operations::GovernedIncidentLifecycleRepository reader(
+			path.string(), sentum::operations::GovernedIncidentLifecycleOpenMode::ReadOnly);
+		require(reader.control_plane_snapshot().at("pending_approvals") == 1,
+			"runtime thread did not preserve idempotent pending request");
+	} catch (...) {
+		cleanup_database(path);
+		throw;
+	}
+	cleanup_database(path);
+}
+
 void test_missing_notification_evidence_never_invents_incident() {
 	const auto path = temporary_path("_missing.sqlite3");
 	try {
@@ -198,6 +228,7 @@ int main() {
 		test_runtime_creates_only_governed_request();
 		test_cross_surface_uses_authoritative_lifecycle_state();
 		test_runtime_restart_preserves_explicit_decision();
+		test_runtime_thread_and_readers_share_state_safely();
 		test_missing_notification_evidence_never_invents_incident();
 		std::cout << "governed incident lifecycle runtime tests passed\n";
 		return 0;
