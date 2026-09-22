@@ -1,5 +1,6 @@
 #include <sentum/operations/NotificationDeliveryEvidenceRepository.hpp>
 #include <sentum/operations/NotificationIncidentWorkflowBridge.hpp>
+#include <sentum/operations/NotificationIncidentWorkflowIntegration.hpp>
 #include <sentum/operations/NotificationOperationsObservability.hpp>
 
 #include <chrono>
@@ -221,6 +222,18 @@ void test_observability_and_incident_semantics_match_durable_truth() {
 		require(durable_candidate.status == expected_candidate.status, "durable incident candidate status drifted");
 		require(durable_candidate.state == NotificationIncidentCandidateState::ProposalReady, "terminal durable failure did not produce governed proposal");
 		require(!durable_candidate.incident_authorized && !durable_candidate.execution_authorized, "durable incident projection gained authority");
+
+		nlohmann::json snapshot = {{"operations_control_plane", {
+			{"incident_workflow", {{"state", "OPENING"}, {"action", "OPEN_INCIDENT"}, {"request_id", "req-17"}}},
+			{"approval_queue", nlohmann::json::array({{{"request_id", "req-17"}, {"action", "OPEN_INCIDENT"}, {"status", "PENDING"}}})},
+			{"audit_timeline", nlohmann::json::array({{{"request_id", "req-17"}, {"action", "OPEN_INCIDENT"}, {"outcome", "REQUESTED"}}})},
+			{"recovery_workflow", {{"state", "IDLE"}}}
+		}}};
+		const auto integration = sentum::operations::derive_notification_incident_workflow_integration(snapshot, repository);
+		require(integration.candidate.state == NotificationIncidentCandidateState::ProposalReady, "durable AP22 integration lost incident proposal");
+		require(integration.request_id == "req-17" && integration.approval_status == "PENDING", "durable AP22 approval correlation drifted");
+		require(integration.audit_outcome == "REQUESTED" && integration.recovery_evidence_available, "durable AP22 evidence correlation drifted");
+		require(!integration.incident_authorized && !integration.execution_authorized, "durable AP22 integration gained authority");
 	}
 	cleanup_database(path);
 }
