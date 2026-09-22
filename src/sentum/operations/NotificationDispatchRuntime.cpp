@@ -125,6 +125,10 @@ void NotificationDispatchRuntime::recover() {
 				"dispatch interrupted before a durable provider result",
 				true);
 			persist(attempt);
+			if (attempt.terminal) {
+				terminal_failed_total_.fetch_add(1, std::memory_order_relaxed);
+				continue;
+			}
 		}
 		const auto delay = attempt.state == NotificationDeliveryState::Failed
 			? std::chrono::seconds(attempt.retry_backoff_seconds)
@@ -162,6 +166,20 @@ void NotificationDispatchRuntime::start() {
 		accepting_.store(false, std::memory_order_release);
 		stop_requested_.store(true, std::memory_order_release);
 		provider_cancellation_.store(true, std::memory_order_release);
+		queue_cv_.notify_all();
+		control_cv_.notify_all();
+		if (scheduler_thread_.joinable() && scheduler_thread_.get_id() != std::this_thread::get_id()) {
+			scheduler_thread_.join();
+		}
+		for (auto& worker : workers_) {
+			if (worker.joinable() && worker.get_id() != std::this_thread::get_id()) worker.join();
+		}
+		workers_.clear();
+		{
+			std::lock_guard<std::mutex> lock(queue_mutex_);
+			queue_.clear();
+			queued_.store(0, std::memory_order_release);
+		}
 		started_.store(false, std::memory_order_release);
 		throw;
 	}
