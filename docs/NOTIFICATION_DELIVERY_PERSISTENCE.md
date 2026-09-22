@@ -20,7 +20,8 @@ The repository uses the configured runtime database path exposed as `db_path`. N
 
 The repository follows the existing SQLite conventions:
 
-- SQLite is opened with a 5 second busy timeout;
+- the writer uses a 5 second busy timeout;
+- read-only operations consumers use a 1 second busy timeout;
 - the writer uses WAL mode;
 - the writer uses `synchronous=NORMAL`;
 - schema creation occurs when the read-write repository is constructed;
