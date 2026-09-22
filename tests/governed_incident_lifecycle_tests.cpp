@@ -218,6 +218,94 @@ void test_restart_reconstructs_every_non_terminal_state() {
 	cleanup_database(path);
 }
 
+void test_merge_preserves_other_control_plane_evidence() {
+	const auto path = temporary_path("_merge.sqlite3");
+	try {
+		GovernedIncidentLifecycleRepository repository(path.string());
+		const auto request = repository.submit_open_incident_request(
+			"NOTIFICATION_OPERATIONS:merge:1", "notification-runtime", "terminal delivery failure");
+
+		nlohmann::json base = {
+			{"operations_control_plane", {
+				{"governance_state", "CONTROLLED"},
+				{"evidence_status", "AVAILABLE"},
+				{"pending_approvals", 3},
+				{"approval_queue", nlohmann::json::array({
+					{{"request_id", "maintenance-1"}, {"action", "enter_maintenance"},
+					 {"classification", "APPROVAL_REQUIRED"}, {"actor", "operator-z"},
+					 {"reason", "maintenance window"}, {"status", "PENDING"}}
+				})},
+				{"audit_timeline", nlohmann::json::array({
+					{{"request_id", "maintenance-0"}, {"action", "enter_maintenance"},
+					 {"actor", "operator-z"}, {"reason", "scheduled"},
+					 {"outcome", "APPROVED"}, {"timestamp_utc", "2026-09-22T20:00:00Z"}}
+				})},
+				{"recovery_state", "WAITING_RECONCILIATION"},
+				{"recovery_workflow", {
+					{"state", "WAITING_RECONCILIATION"},
+					{"request_id", "recovery-general"},
+					{"execution_authorized", false}
+				}}
+			}}
+		};
+
+		auto merged = sentum::operations::merge_governed_incident_lifecycle_snapshot(base, repository);
+		const auto& control = merged.at("operations_control_plane");
+		require(control.at("incident_state") == "APPROVAL_PENDING", "incident state was not projected");
+		require(control.at("pending_approvals") == 4, "non-incident pending approval total was replaced");
+		require(control.at("approval_queue").size() == 2, "non-incident approval row was replaced");
+		require(control.at("approval_queue_truncated") == true, "combined bounded approval queue lost truncation");
+		require(control.at("audit_timeline").size() == 2, "non-incident audit row was replaced");
+		require(control.at("recovery_state") == "WAITING_RECONCILIATION",
+			"incident lifecycle replaced general recovery state");
+		require(control.at("incident_recovery_state") == "IDLE", "idle incident recovery projection mismatch");
+		require(control.at("recovery_workflow").at("request_id") == "recovery-general",
+			"incident lifecycle replaced general recovery workflow");
+
+		const auto incident = repository.approve_open_incident_request(
+			request.request_id, "operator-a", "approve merge test").incident_id;
+		repository.acknowledge_incident(incident, "operator-a", "investigating");
+		repository.begin_recovery(incident, "operator-a", "reconciled", "reconciliation-merge");
+
+		merged = sentum::operations::merge_governed_incident_lifecycle_snapshot(base, repository);
+		const auto& recovering = merged.at("operations_control_plane");
+		require(recovering.at("recovery_state") == "WAITING_RECONCILIATION",
+			"incident recovery replaced active general recovery state");
+		require(recovering.at("incident_recovery_state") == "IN_PROGRESS",
+			"incident recovery state was not projected separately");
+		require(recovering.at("incident_recovery_workflow").at("reconciliation_evidence_id") == "reconciliation-merge",
+			"incident recovery evidence was not projected");
+		require(recovering.at("recovery_workflow").at("request_id") == "recovery-general",
+			"incident recovery replaced general recovery workflow");
+	} catch (...) {
+		cleanup_database(path);
+		throw;
+	}
+	cleanup_database(path);
+}
+
+void test_resolution_without_recovery_keeps_recovery_idle() {
+	const auto path = temporary_path("_resolve_without_recovery.sqlite3");
+	try {
+		GovernedIncidentLifecycleRepository repository(path.string());
+		const auto request = repository.submit_open_incident_request(
+			"NOTIFICATION_OPERATIONS:no-recovery:1", "notification-runtime", "terminal delivery failure");
+		const auto incident = repository.approve_open_incident_request(
+			request.request_id, "operator-a", "approve incident").incident_id;
+		repository.acknowledge_incident(incident, "operator-a", "acknowledged");
+		repository.resolve_incident(incident, "operator-a", "resolved without recovery");
+
+		const auto snapshot = repository.control_plane_snapshot();
+		require(snapshot.at("incident_state") == "RESOLVED", "incident did not resolve");
+		require(snapshot.at("recovery_state") == "IDLE", "resolution without recovery invented recovery state");
+		require(snapshot.at("recovery_workflow").empty(), "resolution without recovery invented recovery evidence");
+	} catch (...) {
+		cleanup_database(path);
+		throw;
+	}
+	cleanup_database(path);
+}
+
 void test_read_only_and_bounded_history_fail_closed() {
 	const auto path = temporary_path("_readonly.sqlite3");
 	try {
@@ -250,6 +338,8 @@ int main() {
 		test_denial_creates_no_incident();
 		test_lifecycle_transitions_and_recovery_prerequisites();
 		test_restart_reconstructs_every_non_terminal_state();
+		test_merge_preserves_other_control_plane_evidence();
+		test_resolution_without_recovery_keeps_recovery_idle();
 		test_read_only_and_bounded_history_fail_closed();
 		std::cout << "governed incident lifecycle tests passed\n";
 		return 0;
