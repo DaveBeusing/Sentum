@@ -311,6 +311,24 @@ void test_restart_recovery_and_delivered_suppression() {
 		cleanup_database(path);
 	}
 	{
+		const auto path = temporary_path("_failed-restart.sqlite3");
+		const auto routes = plan({{"failed-restart", "PAGER"}});
+		auto retryable = evidence(routes.intents[0].dedup_key, "FAILED", 1, false);
+		retryable.failure_code = "TIMEOUT";
+		retryable.failure_reason = "temporary provider timeout";
+		seed(path, retryable);
+		auto provider = std::make_shared<ScriptedProvider>(std::vector<NotificationDispatchResult>{delivered("retry-recovered")});
+		NotificationProviderRegistry registry;
+		registry.add("PAGER", provider);
+		NotificationDispatchRuntime runtime(configuration(), routing_policy(), std::move(registry), path.string());
+		runtime.start();
+		const auto record = wait_latest(path, routes.intents[0].dedup_key, "DELIVERED", 7000ms);
+		require(record.attempt == 2, "restart after retryable failure did not resume the next attempt");
+		runtime.stop();
+		require(provider->calls() == 1, "restart after retryable failure dispatched an unexpected number of attempts");
+		cleanup_database(path);
+	}
+	{
 		const auto path = temporary_path("_dispatched.sqlite3");
 		const auto routes = plan({{"dispatched-restart", "PAGER"}});
 		seed(path, evidence(routes.intents[0].dedup_key, "DISPATCHED", 1, false));
