@@ -48,10 +48,15 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 		}
 	}
 
-	const auto recovery = control_plane.value("recovery_workflow", nlohmann::json::object());
+	const auto recovery = control_plane.contains("incident_recovery_workflow")
+		? control_plane.value("incident_recovery_workflow", nlohmann::json::object())
+		: control_plane.value("recovery_workflow", nlohmann::json::object());
 	if (recovery.is_object() && !recovery.empty()) {
-		view.recovery_state = recovery.value("state", std::string("UNAVAILABLE"));
-		view.recovery_evidence_available = true;
+		const auto recovery_request_id = recovery.value("request_id", std::string{});
+		if (view.request_id.empty() || recovery_request_id.empty() || recovery_request_id == view.request_id) {
+			view.recovery_state = recovery.value("state", std::string("UNAVAILABLE"));
+			view.recovery_evidence_available = true;
+		}
 	}
 
 	const auto approvals = control_plane.value("approval_queue", nlohmann::json::array());
