@@ -23,6 +23,7 @@
 #include <sentum/core/ExecutionEngine.hpp>
 #include <sentum/dashboard/DashboardServer.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
+#include <sentum/operations/GovernedIncidentLifecycleRuntime.hpp>
 #include <sentum/operations/NotificationDispatchBootstrap.hpp>
 #include <sentum/research/ResearchPlatform.hpp>
 #include <sentum/time/Clock.hpp>
@@ -165,21 +166,24 @@ int paper_main(const sentum::cli::Options& options) {
     auto engine = std::make_unique<ExecutionEngine>();
     engine->start();
     auto notifications = sentum::operations::start_notification_dispatch_runtime();
+    auto incidents = sentum::operations::start_governed_incident_lifecycle_runtime(SENTUM_GIT_COMMIT);
     std::unique_ptr<sentum::ui::TerminalUi> tui;
     if (options.tui && sentum::ui::stdout_is_terminal()) { tui = std::make_unique<sentum::ui::TerminalUi>(); tui->start(); }
     while (engine->is_running() && !shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     const auto shutdown_started = std::chrono::steady_clock::now();
     if (tui) tui->stop();
-    render_shutdown_progress(1, 8, "Stopping notification dispatch", shutdown_started);
+    render_shutdown_progress(1, 9, "Stopping governed incident lifecycle", shutdown_started);
+    if (incidents) incidents->stop();
+    render_shutdown_progress(2, 9, "Stopping notification dispatch", shutdown_started);
     if (notifications) notifications->stop();
     auto progress = [shutdown_started](std::size_t step, std::size_t, const std::string& detail) {
-        render_shutdown_progress(step + 1, 8, detail, shutdown_started);
+        render_shutdown_progress(step + 2, 9, detail, shutdown_started);
     };
     engine->stop(progress);
-    render_shutdown_progress(8, 8, "Stopping local web dashboard", shutdown_started);
+    render_shutdown_progress(9, 9, "Stopping local web dashboard", shutdown_started);
     dashboard->stop();
-    render_shutdown_progress(8, 8, "Shutdown complete", shutdown_started);
+    render_shutdown_progress(9, 9, "Shutdown complete", shutdown_started);
     if (sentum::ui::stdout_is_terminal()) std::cout << "\n";
     return EXIT_SUCCESS;
 }
@@ -193,20 +197,23 @@ int testnet_main(const sentum::cli::Options& options) {
     sentum::execution::TestnetStrategyRuntime runtime(options.symbol,risk,std::make_unique<MomentumStrategy>(),std::move(venue));
     runtime.start(); dashboard.set("health","healthy");
     auto notifications = sentum::operations::start_notification_dispatch_runtime();
+    auto incidents = sentum::operations::start_governed_incident_lifecycle_runtime(SENTUM_GIT_COMMIT);
     std::unique_ptr<sentum::ui::TerminalUi> tui;
     if (options.tui && sentum::ui::stdout_is_terminal()) { tui = std::make_unique<sentum::ui::TerminalUi>(); tui->start(); }
     while(runtime.running()&&!shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     const auto shutdown_started = std::chrono::steady_clock::now();
     if (tui) tui->stop();
-    render_shutdown_progress(1, 4, "Stopping notification dispatch", shutdown_started);
+    render_shutdown_progress(1, 5, "Stopping governed incident lifecycle", shutdown_started);
+    if (incidents) incidents->stop();
+    render_shutdown_progress(2, 5, "Stopping notification dispatch", shutdown_started);
     if (notifications) notifications->stop();
-    render_shutdown_progress(2, 4, "Stopping Testnet strategy runtime", shutdown_started);
+    render_shutdown_progress(3, 5, "Stopping Testnet strategy runtime", shutdown_started);
     runtime.stop();
     dashboard.merge({{"health","stopping"},{"trader_active",false}});
-    render_shutdown_progress(3, 4, "Stopping local web dashboard", shutdown_started);
+    render_shutdown_progress(4, 5, "Stopping local web dashboard", shutdown_started);
     dashboard_server->stop();
     dashboard.set("health","stopped");
-    render_shutdown_progress(4, 4, "Shutdown complete", shutdown_started);
+    render_shutdown_progress(5, 5, "Shutdown complete", shutdown_started);
     if (sentum::ui::stdout_is_terminal()) std::cout << "\n";
     return EXIT_SUCCESS;
 }
@@ -221,6 +228,61 @@ int dashboard_main(const sentum::cli::Options& options) {
     if (sentum::ui::stdout_is_terminal()) std::cout << "\n";
     return EXIT_SUCCESS;
 }
+
+int incident_main(const sentum::cli::Options& options) {
+    const auto database_path = sentum::operations::operations_runtime_database_path();
+
+    nlohmann::json result = {
+        {"command", options.incident_command},
+        {"database_path", database_path},
+        {"execution_authorized", false}
+    };
+
+    if (options.incident_command == "status") {
+        sentum::operations::GovernedIncidentLifecycleRepository lifecycle(
+            database_path,
+            sentum::operations::GovernedIncidentLifecycleOpenMode::ReadOnly);
+        result["state"] = lifecycle.control_plane_snapshot();
+        std::cout << result.dump(2) << '\n';
+        return EXIT_SUCCESS;
+    }
+
+    sentum::operations::GovernedIncidentLifecycleRepository lifecycle(database_path);
+    if (options.incident_command == "approve") {
+        const auto approval = lifecycle.approve_open_incident_request(
+            options.target_id, options.actor, options.reason);
+        result["request_id"] = options.target_id;
+        result["incident_id"] = approval.incident_id;
+        result["opened"] = approval.opened;
+        result["state"] = lifecycle.control_plane_snapshot();
+    } else if (options.incident_command == "deny") {
+        lifecycle.deny_open_incident_request(options.target_id, options.actor, options.reason);
+        result["request_id"] = options.target_id;
+        result["state"] = lifecycle.control_plane_snapshot();
+    } else if (options.incident_command == "acknowledge") {
+        lifecycle.acknowledge_incident(options.target_id, options.actor, options.reason);
+        result["incident_id"] = options.target_id;
+        result["state"] = lifecycle.control_plane_snapshot();
+    } else if (options.incident_command == "recover") {
+        lifecycle.begin_recovery(options.target_id, options.actor, options.reason, options.evidence_id);
+        result["incident_id"] = options.target_id;
+        result["reconciliation_evidence_id"] = options.evidence_id;
+        result["state"] = lifecycle.control_plane_snapshot();
+    } else if (options.incident_command == "resolve") {
+        lifecycle.resolve_incident(options.target_id, options.actor, options.reason);
+        result["incident_id"] = options.target_id;
+        result["state"] = lifecycle.control_plane_snapshot();
+    } else if (options.incident_command == "close") {
+        lifecycle.close_incident(options.target_id, options.actor, options.reason);
+        result["incident_id"] = options.target_id;
+        result["state"] = lifecycle.control_plane_snapshot();
+    } else {
+        throw std::runtime_error("unsupported incident command: " + options.incident_command);
+    }
+
+    std::cout << result.dump(2) << '\n';
+    return EXIT_SUCCESS;
+}
 }
 
 int main(int argc,char**argv) {
@@ -233,6 +295,7 @@ int main(int argc,char**argv) {
             case sentum::cli::Mode::Research: return research_main(options);
             case sentum::cli::Mode::Testnet: return testnet_main(options);
             case sentum::cli::Mode::Dashboard: return dashboard_main(options);
+            case sentum::cli::Mode::Incident: return incident_main(options);
             case sentum::cli::Mode::Help: std::cout << sentum::cli::usage(); return EXIT_SUCCESS;
             case sentum::cli::Mode::Version: std::cout << "Sentum " << SENTUM_GIT_COMMIT << '\n'; return EXIT_SUCCESS;
         }

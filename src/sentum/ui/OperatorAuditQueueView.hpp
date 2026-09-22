@@ -76,7 +76,9 @@ inline OperatorAuditQueueView derive_operator_audit_queue_view(
 	const auto audit = control_plane.value("audit_timeline", nlohmann::json::array());
 
 	if (approvals.is_array()) {
-		view.approval_total = approvals.size();
+		view.approval_total = std::max<std::size_t>(
+			approvals.size(),
+			control_plane.value("approval_queue_total", approvals.size()));
 		const auto count = std::min<std::size_t>(approval_limit, approvals.size());
 		view.approvals.reserve(count);
 		for (std::size_t index = 0; index < count; ++index) {
@@ -100,7 +102,9 @@ inline OperatorAuditQueueView derive_operator_audit_queue_view(
 	}
 
 	if (audit.is_array()) {
-		view.audit_total = audit.size();
+		view.audit_total = std::max<std::size_t>(
+			audit.size(),
+			control_plane.value("audit_timeline_total", audit.size()));
 		const auto count = std::min<std::size_t>(audit_limit, audit.size());
 		view.audit.reserve(count);
 		for (std::size_t index = 0; index < count; ++index) {
@@ -116,7 +120,11 @@ inline OperatorAuditQueueView derive_operator_audit_queue_view(
 		}
 	}
 
-	view.truncated = view.approval_total > view.approvals.size() || view.audit_total > view.audit.size();
+	view.truncated =
+		control_plane.value("approval_queue_truncated", false) ||
+		control_plane.value("audit_timeline_truncated", false) ||
+		view.approval_total > view.approvals.size() ||
+		view.audit_total > view.audit.size();
 	return view;
 }
 

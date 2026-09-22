@@ -114,7 +114,20 @@ Primary runtime commands:
 ./sentum replay data/btcusdt.csv BTCUSDT
 ./sentum research config/research.json
 ./sentum dashboard
+./sentum incident status
 ```
+
+Governed incident mutations are explicit operator commands. For example:
+
+```bash
+./sentum incident approve <request-id> <actor> "<reason>"
+./sentum incident acknowledge <incident-id> <actor> "<reason>"
+./sentum incident recover <incident-id> <actor> <reconciliation-evidence-id> "<reason>"
+./sentum incident resolve <incident-id> <actor> "<reason>"
+./sentum incident close <incident-id> <actor> "<reason>"
+```
+
+Notification failures can create an approval-required incident request, but they cannot approve or open an incident automatically.
 
 Legacy flag forms such as `--paper`, `--testnet`, `--replay`, `--research` and `--dashboard` remain accepted.
 
@@ -303,7 +316,7 @@ Historical datasets -> deterministic replay -> research/portfolio experiments
 Important runtime and research artifacts include:
 
 ```text
-log/klines.sqlite3
+log/klines.sqlite3  # market data plus governed notification/incident operations state
 log/paper_account.json
 log/status.json
 log/replay.sqlite3
@@ -356,6 +369,7 @@ Long-running Paper soak tests, sanitizer builds, reconnect/reconciliation scenar
 - [Binance Spot Testnet runtime](docs/TESTNET_RUNTIME.md)
 - [Account reconciliation and recovery](docs/ACCOUNT_RECONCILIATION.md)
 - [Execution safety](docs/LIVE_TRADING_SAFETY.md)
+- [Governed incident lifecycle](docs/GOVERNED_INCIDENT_LIFECYCLE.md)
 
 ## Disclaimer
 

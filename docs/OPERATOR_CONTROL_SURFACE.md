@@ -86,7 +86,7 @@ The supported workflow views are:
 - `incident_workflow` for acknowledgement and governed incident-response steps;
 - `recovery_workflow` for recovery-candidate and reconciliation-related approval paths.
 
-These records are views only. They do not execute transitions, acknowledge incidents, promote recovery candidates or resume entries.
+These records remain views only. Terminal and browser presentation do not execute transitions. Mutating incident lifecycle actions are separate controlled CLI operations backed by the durable operations-control-plane repository; they never resume entries or mutate Risk/Execution.
 
 Any active workflow action without an upstream classification fails closed as `FORBIDDEN / BLOCKED`. `execution_authorized` remains false for every maintenance, incident and recovery view.
 

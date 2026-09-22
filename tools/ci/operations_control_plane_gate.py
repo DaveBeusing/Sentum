@@ -46,7 +46,7 @@ def main() -> int:
 	if automated & approval or automated & forbidden or approval & forbidden:
 		violations.append("governance action classes must be disjoint")
 
-	required_protected = {"resume_entries", "clear_kill_switch", "accept_reconciliation"}
+	required_protected = {"OPEN_INCIDENT", "resume_entries", "clear_kill_switch", "accept_reconciliation"}
 	missing_protected = sorted(required_protected - approval)
 	if missing_protected:
 		violations.append("missing approval-required actions: " + ", ".join(missing_protected))
@@ -80,6 +80,7 @@ def main() -> int:
 		("collect_diagnostics", "AUTOMATED"),
 		("resume_entries", "APPROVAL_REQUIRED"),
 		("clear_kill_switch", "APPROVAL_REQUIRED"),
+		("OPEN_INCIDENT", "APPROVAL_REQUIRED"),
 		("synthesize_fill", "FORBIDDEN"),
 		("mutate_execution_state", "FORBIDDEN"),
 	]

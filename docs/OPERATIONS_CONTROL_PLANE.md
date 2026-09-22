@@ -27,6 +27,7 @@ Examples:
 Actions that can alter operational acceptance, resume trading or cross a safety boundary require explicit operator approval and an audit record.
 
 Examples:
+- open an incident from a governed proposal;
 - resume entries;
 - clear kill switch;
 - promote a recovery candidate;
@@ -63,6 +64,16 @@ The control-plane gate consumes the resilience guardrail evidence for the same G
 The emitted governance state is:
 - `CONTROLLED` when policy, upstream evidence and classifications are valid;
 - `BLOCKED` when evidence is missing/mismatched or a governance invariant is violated.
+
+## Governed incident lifecycle
+
+The operations control plane now persists the `OPEN_INCIDENT` request, decision, incident state, recovery state and transition history in the configured runtime SQLite database.
+
+Terminal notification failure evidence may submit an idempotent approval-required request. It cannot approve the request or open the incident. Approval and denial require an explicit operator identity and reason.
+
+Acknowledgement remains distinct from recovery and resolution. Recovery requires prior acknowledgement plus reconciliation evidence. Resolution and closure never clear a kill switch, resume entries, alter Risk/Execution state or create exchange truth.
+
+See `GOVERNED_INCIDENT_LIFECYCLE.md` for the state and operator-command contract.
 
 ## Fail-closed behavior
 

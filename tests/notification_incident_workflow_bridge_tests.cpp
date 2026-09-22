@@ -86,10 +86,23 @@ void test_candidate_does_not_invent_control_plane_evidence() {
 void test_existing_control_plane_evidence_is_correlated() {
 	auto snapshot = incident_candidate_snapshot();
 	auto& cp = snapshot["operations_control_plane"];
-	cp["incident_workflow"] = {{"state", "OPENING"}, {"action", "OPEN_INCIDENT"}, {"request_id", "req-42"}, {"classification", "APPROVAL_REQUIRED"}};
-	cp["approval_queue"] = nlohmann::json::array({{{"request_id", "req-42"}, {"action", "OPEN_INCIDENT"}, {"status", "PENDING"}, {"classification", "APPROVAL_REQUIRED"}}});
-	cp["audit_timeline"] = nlohmann::json::array({{{"request_id", "req-42"}, {"action", "OPEN_INCIDENT"}, {"outcome", "REQUESTED"}}});
-	cp["recovery_workflow"] = {{"state", "PENDING_RECONCILIATION"}};
+	cp["incident_workflow"] = {
+		{"state", "OPENING"}, {"action", "OPEN_INCIDENT"}, {"request_id", "req-42"},
+		{"source_correlation_id", "NOTIFICATION_OPERATIONS:alert-1:1"},
+		{"classification", "APPROVAL_REQUIRED"}
+	};
+	cp["approval_queue"] = nlohmann::json::array({{
+		{"request_id", "req-42"}, {"source_correlation_id", "NOTIFICATION_OPERATIONS:alert-1:1"},
+		{"action", "OPEN_INCIDENT"}, {"status", "PENDING"}, {"classification", "APPROVAL_REQUIRED"}
+	}});
+	cp["audit_timeline"] = nlohmann::json::array({{
+		{"request_id", "req-42"}, {"source_correlation_id", "NOTIFICATION_OPERATIONS:alert-1:1"},
+		{"action", "OPEN_INCIDENT"}, {"outcome", "REQUESTED"}
+	}});
+	cp["recovery_workflow"] = {
+		{"state", "PENDING_RECONCILIATION"}, {"request_id", "req-42"},
+		{"source_correlation_id", "NOTIFICATION_OPERATIONS:alert-1:1"}
+	};
 	const auto view = sentum::operations::derive_notification_incident_workflow_integration(snapshot);
 	require(view.request_id == "req-42", "request correlation failed");
 	require(view.approval_status == "PENDING", "approval evidence missing");
@@ -109,6 +122,36 @@ void test_unrelated_evidence_is_not_attached() {
 	const auto view = sentum::operations::derive_notification_incident_workflow_integration(snapshot);
 	require(!view.approval_evidence_available, "unrelated approval was attached");
 	require(!view.audit_evidence_available, "unrelated audit was attached");
+}
+
+
+void test_mismatched_open_incident_evidence_fails_closed() {
+	auto snapshot = incident_candidate_snapshot();
+	auto& cp = snapshot["operations_control_plane"];
+	cp["incident_workflow"] = {
+		{"state", "OPEN"}, {"action", "OPEN_INCIDENT"}, {"request_id", "req-other"},
+		{"source_correlation_id", "NOTIFICATION_OPERATIONS:other-alert:9"}
+	};
+	cp["approval_queue"] = nlohmann::json::array({{
+		{"request_id", "req-other"}, {"source_correlation_id", "NOTIFICATION_OPERATIONS:other-alert:9"},
+		{"action", "OPEN_INCIDENT"}, {"status", "PENDING"}
+	}});
+	cp["audit_timeline"] = nlohmann::json::array({{
+		{"request_id", "req-other"}, {"source_correlation_id", "NOTIFICATION_OPERATIONS:other-alert:9"},
+		{"action", "OPEN_INCIDENT"}, {"event_type", "APPROVAL_DECIDED"}, {"outcome", "APPROVED"}
+	}});
+	cp["recovery_workflow"] = {
+		{"state", "IN_PROGRESS"}, {"request_id", "req-other"},
+		{"source_correlation_id", "NOTIFICATION_OPERATIONS:other-alert:9"}
+	};
+
+	const auto view = sentum::operations::derive_notification_incident_workflow_integration(snapshot);
+	require(view.request_id.empty(), "mismatched request was attached");
+	require(view.incident_state == "IDLE", "mismatched incident state was attached");
+	require(view.approval_status == "NOT_REQUESTED", "mismatched approval was attached");
+	require(view.recovery_state == "IDLE", "mismatched recovery state was attached");
+	require(!view.approval_evidence_available && !view.audit_evidence_available && !view.recovery_evidence_available,
+		"mismatched governed evidence was treated as authoritative");
 }
 
 void test_json_contract_is_read_only() {
@@ -132,6 +175,7 @@ int main() {
 		test_candidate_does_not_invent_control_plane_evidence();
 		test_existing_control_plane_evidence_is_correlated();
 		test_unrelated_evidence_is_not_attached();
+		test_mismatched_open_incident_evidence_fails_closed();
 		test_json_contract_is_read_only();
 		std::cout << "notification incident workflow bridge tests passed\n";
 		return 0;
