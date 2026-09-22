@@ -6,7 +6,7 @@ AP-20 keeps notification delivery outside all trading, safety and execution auth
 
 `NotificationDispatchRequest` contains only notification transport fields: dedup key, alert id, alert generation, channel, audience and attempt number. It exposes `delivery_authorized` but always keeps `execution_authorized = false`.
 
-A provider returns `NotificationDispatchResult` with delivery confirmation, provider reference and failure evidence. Applying that result can only advance the notification delivery state machine to `DELIVERED` or `FAILED`.
+A provider returns `NotificationDispatchResult` with delivery confirmation, retryability, provider reference and failure evidence. Applying that result can only advance the notification delivery state machine to `DELIVERED` or `FAILED`. Non-retryable provider failures become terminal immediately; retryable failures retain the state machine's bounded attempt and backoff semantics.
 
 A provider result must never acknowledge or resolve an alert, clear a kill switch, resume entries, approve a governed action, mutate Risk/Execution, synthesize fills or override exchange-confirmed execution truth.
 
@@ -35,3 +35,10 @@ Read-only operations consumers never create or mutate delivery evidence. See `NO
 ## Retry and idempotency
 
 Delivery retries remain bounded by the state machine. The provider boundary does not sleep, schedule or retry by itself. A terminal delivery or terminal failure remains idempotently closed for the same generation-safe dedup key.
+
+
+## Runtime adapter
+
+`NotificationDispatchRuntime` executes this boundary through an explicit channel-to-provider registry. The production `HTTP_JSON` adapter uses the existing libcurl dependency with HTTPS, bounded connect/request timeouts, cancellation and the generation-safe dedup key as provider idempotency metadata. Credentials are referenced by environment-variable name and are never stored in repository configuration.
+
+See `NOTIFICATION_DISPATCH_RUNTIME.md` for lifecycle, queue, restart and operations behavior.

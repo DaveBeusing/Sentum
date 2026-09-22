@@ -26,7 +26,7 @@ The cross-surface operations endpoint opens delivery evidence read-only from the
 
 Channel rows are sorted deterministically.
 
-## Health states
+## Dispatch runtime diagnostics\n\nThe same notification operations object exposes a `dispatch_runtime` diagnostic projection. It reports runtime status, queue depth, active dispatches, cumulative delivered/retriable/terminal outcomes, provider latency, timeout count and queue rejection count. These counters are diagnostics only; durable latest-state delivery evidence remains authoritative for health and incident-candidate reduction.\n\nAll runtime metrics retain `execution_authorized = false`.\n\n## Health states
 
 The initial code-owned projection exposes:
 
@@ -63,6 +63,6 @@ Notification delivery health cannot clear a kill switch, resume entries, approve
 - channel output is deterministic;
 - unavailable evidence remains fail-closed and authority-free.
 
-`notification_delivery_evidence_repository_tests` additionally verifies restart-safe idempotency, retry recovery, terminal-state persistence, bounded-query fail-closed behavior and durable cross-surface consumption.
+`notification_delivery_evidence_repository_tests` additionally verifies restart-safe idempotency, retry recovery, terminal-state persistence, bounded-query fail-closed behavior and durable cross-surface consumption. `notification_dispatch_runtime_tests` verifies bounded provider execution, queue saturation evidence, restart scheduling, cancellation and final projection integration.
 
-Both notification regressions remain attached to the sanitizer build graph for ASan, UBSan and TSan coverage. Durable schema and retention details are documented in `NOTIFICATION_DELIVERY_PERSISTENCE.md`.
+The notification regressions remain attached to the sanitizer build graph for ASan, UBSan and TSan coverage. Durable schema and retention details are documented in `NOTIFICATION_DELIVERY_PERSISTENCE.md`.

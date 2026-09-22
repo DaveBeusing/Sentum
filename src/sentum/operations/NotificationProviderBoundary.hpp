@@ -54,7 +54,7 @@ inline NotificationDeliveryAttempt apply_notification_dispatch_result(
 	}
 	const auto code = result.failure_code.empty() ? "PROVIDER_FAILURE" : result.failure_code;
 	const auto reason = result.failure_reason.empty() ? "notification provider did not confirm delivery" : result.failure_reason;
-	return mark_notification_failed(std::move(attempt), code, reason);
+	return mark_notification_failed(std::move(attempt), code, reason, result.retryable);
 }
 
 } // namespace sentum::operations

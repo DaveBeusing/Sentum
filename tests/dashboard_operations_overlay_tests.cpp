@@ -82,6 +82,11 @@ void test_overlay_renders_notification_operations_read_only() {
 	const std::string overlay(sentum::dashboard::kOperationsDashboardOverlay);
 	require(overlay.find("notification_operations") != std::string::npos, "notification operations contract is not consumed");
 	require(overlay.find("opsNotificationHealth") != std::string::npos, "notification health is not visible");
+	require(overlay.find("dispatch_runtime") != std::string::npos, "notification dispatch runtime metrics are not consumed");
+	require(overlay.find("opsNotificationDispatch") != std::string::npos, "notification dispatch runtime status is not visible");
+	require(overlay.find("opsNotificationQueue") != std::string::npos, "notification dispatch queue metrics are not visible");
+	require(overlay.find("opsNotificationTimeouts") != std::string::npos, "notification dispatch timeout metrics are not visible");
+	require(overlay.find("opsNotificationLatency") != std::string::npos, "notification provider latency is not visible");
 	require(overlay.find("opsNotificationBacklog") != std::string::npos, "notification backlog is not visible");
 	require(overlay.find("opsNotificationFailures") != std::string::npos, "terminal notification failures are not visible");
 	require(overlay.find("opsNotificationIncident") != std::string::npos, "notification incident candidate is not visible");

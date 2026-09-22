@@ -30,7 +30,7 @@ Destructors are a last safety net and must not be the primary shutdown mechanism
 | `ExecutionEngine` coordinator | `paper_main` | `ExecutionEngine::start()` | `running=false`, shutdown CV notification | `ExecutionEngine::stop()` | no independent queue | <= current coordinator wait after explicit wake |
 | `ExecutionEngine` scanner worker | `ExecutionEngine` | coordinator startup | `running=false`, scanner CV notification | `ExecutionEngine::stop()` | pending symbol notification may be discarded during shutdown | bounded after explicit wake |
 | paper `TradeEngine` worker | `ExecutionEngine` | symbol selection/runtime control | `TradeEngine::stop()` | `ExecutionEngine::stop_trader()` | trade engine owns its internal completion policy | bounded by trade engine stop contract |
-| `TerminalUi` | owning CLI mode | mode startup when stdout is a terminal | `running_=false` | `TerminalUi::stop()` | no durable queue | bounded by refresh/input loop interval |
+| `NotificationDispatchRuntime` | owning `paper` / `testnet` CLI mode | after trading runtime initialization when dispatch is enabled | reject submissions, provider cancellation, scheduler/worker wake-up | `NotificationDispatchRuntime::stop()` | durable queued state is left for restart recovery; active provider I/O is bounded | configured provider timeout plus worker join |\n| `TerminalUi` | owning CLI mode | mode startup when stdout is a terminal | `running_=false` | `TerminalUi::stop()` | no durable queue | bounded by refresh/input loop interval |
 | `TestnetStrategyRuntime` | `testnet_main` stack | `runtime.start()` | `running_=false`, then market stream stop and execution venue stop | component stop methods own their worker joins | no synthetic fills; exchange-confirmed state remains authoritative | bounded by market stream and venue stop contracts |
 | `BinanceWebsocketClient` | trade/testnet runtime | `start()` | `running=false`, WebSocket close/stop | `stop()` | no durable queue | bounded by WebSocket shutdown |
 
@@ -50,7 +50,7 @@ The collector rejects new external intake by clearing `running`, then stops and 
 
 The writer wake predicate follows the same contract: during shutdown it sleeps while the producer can still publish and wakes for either queued work or final producer completion. Once producer completion is visible, all remaining SQLite batches are drained before the writer is joined.
 
-### Async logger
+### Notification dispatch\n\nNotification dispatch stops accepting new work before the trading runtime is stopped. Provider cancellation is signalled and all notification workers are explicitly awakened. Active HTTP calls are bounded by configured connect/request timeouts and cancellation. Queued work is not forced through provider I/O during shutdown; its already-persisted `PENDING` or retriable `FAILED` state is intentionally left for restart recovery.\n\n### Async logger
 
 The logger queue is always inspected and swapped while holding its mutex. On stop the worker is explicitly awakened and exits only when the queue is empty. Concurrent producers cannot race an unlocked `std::queue::empty()` check.
 

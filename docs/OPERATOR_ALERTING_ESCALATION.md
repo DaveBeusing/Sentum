@@ -32,7 +32,7 @@ The initial presentation levels are:
 - `WARNING` / level 2 — acknowledgement required and eligible for notification;
 - `CRITICAL` / level 3 — immediate operator attention, acknowledgement required and eligible for notification.
 
-This slice only classifies presentation urgency. No paging provider, email, SMS, webhook or desktop notification is sent yet.
+This alert policy only classifies presentation urgency and remains side-effect free. Governed eligible alerts can now be dispatched separately by `NotificationDispatchRuntime` when notification dispatch is explicitly enabled and a provider is configured for the routed channel. The alert policy itself still performs no transport.
 
 ## Initial alert sources
 
@@ -65,7 +65,7 @@ Alerts cannot:
 
 `execution_authorized` is always false in alert presentation records.
 
-Acknowledgement requirements are presentation metadata only in this slice. A later slice may add a governed acknowledgement request model, but the UI must not invent successful acknowledgement locally.
+Acknowledgement requirements remain presentation metadata. Notification providers cannot acknowledge or resolve alerts, and the UI must not invent successful acknowledgement locally.
 
 ## Fail-closed behavior
 
@@ -90,6 +90,6 @@ Unknown alert severity values are not consumed from external input in this polic
 
 The test target is attached to the existing sanitizer dependency graph so ASan, UBSan and TSan build it before CTest execution.
 
-## Next slice
+## Notification dispatch integration
 
-The next AP-19 slice should introduce alert lifecycle identity, deduplication and acknowledgement presentation semantics so repeated snapshots do not create alert storms and operators can distinguish new, active, acknowledged and cleared conditions without granting local authority.
+Routing, delivery state, durable evidence and provider execution are implemented outside the alert presentation policy. See `NOTIFICATION_DISPATCH_RUNTIME.md`. Notification delivery never changes alert lifecycle authority.

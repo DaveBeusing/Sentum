@@ -1,0 +1,12 @@
+{
+	"schema_version": 1,
+	"enabled": false,
+	"routing_policy_path": "config/notification_routing_policy.json",
+	"queue_capacity": 128,
+	"worker_count": 2,
+	"max_attempts": 3,
+	"snapshot_poll_interval_ms": 500,
+	"recovery_limit": 1024,
+	"enabled_channels": [],
+	"providers": []
+}

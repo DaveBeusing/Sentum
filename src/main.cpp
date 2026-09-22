@@ -23,6 +23,7 @@
 #include <sentum/core/ExecutionEngine.hpp>
 #include <sentum/dashboard/DashboardServer.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
+#include <sentum/operations/NotificationDispatchBootstrap.hpp>
 #include <sentum/research/ResearchPlatform.hpp>
 #include <sentum/time/Clock.hpp>
 #include <sentum/trader/TradeEngine.hpp>
@@ -163,19 +164,22 @@ int paper_main(const sentum::cli::Options& options) {
     auto dashboard = start_dashboard(options);
     auto engine = std::make_unique<ExecutionEngine>();
     engine->start();
+    auto notifications = sentum::operations::start_notification_dispatch_runtime();
     std::unique_ptr<sentum::ui::TerminalUi> tui;
     if (options.tui && sentum::ui::stdout_is_terminal()) { tui = std::make_unique<sentum::ui::TerminalUi>(); tui->start(); }
     while (engine->is_running() && !shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     const auto shutdown_started = std::chrono::steady_clock::now();
     if (tui) tui->stop();
+    render_shutdown_progress(1, 8, "Stopping notification dispatch", shutdown_started);
+    if (notifications) notifications->stop();
     auto progress = [shutdown_started](std::size_t step, std::size_t, const std::string& detail) {
-        render_shutdown_progress(step, 7, detail, shutdown_started);
+        render_shutdown_progress(step + 1, 8, detail, shutdown_started);
     };
     engine->stop(progress);
-    render_shutdown_progress(7, 7, "Stopping local web dashboard", shutdown_started);
+    render_shutdown_progress(8, 8, "Stopping local web dashboard", shutdown_started);
     dashboard->stop();
-    render_shutdown_progress(7, 7, "Shutdown complete", shutdown_started);
+    render_shutdown_progress(8, 8, "Shutdown complete", shutdown_started);
     if (sentum::ui::stdout_is_terminal()) std::cout << "\n";
     return EXIT_SUCCESS;
 }
@@ -188,18 +192,21 @@ int testnet_main(const sentum::cli::Options& options) {
     auto venue = std::make_unique<sentum::execution::BinanceTestnetExecutionVenue>();
     sentum::execution::TestnetStrategyRuntime runtime(options.symbol,risk,std::make_unique<MomentumStrategy>(),std::move(venue));
     runtime.start(); dashboard.set("health","healthy");
+    auto notifications = sentum::operations::start_notification_dispatch_runtime();
     std::unique_ptr<sentum::ui::TerminalUi> tui;
     if (options.tui && sentum::ui::stdout_is_terminal()) { tui = std::make_unique<sentum::ui::TerminalUi>(); tui->start(); }
     while(runtime.running()&&!shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     const auto shutdown_started = std::chrono::steady_clock::now();
     if (tui) tui->stop();
-    render_shutdown_progress(1, 3, "Stopping Testnet strategy runtime", shutdown_started);
+    render_shutdown_progress(1, 4, "Stopping notification dispatch", shutdown_started);
+    if (notifications) notifications->stop();
+    render_shutdown_progress(2, 4, "Stopping Testnet strategy runtime", shutdown_started);
     runtime.stop();
     dashboard.merge({{"health","stopping"},{"trader_active",false}});
-    render_shutdown_progress(2, 3, "Stopping local web dashboard", shutdown_started);
+    render_shutdown_progress(3, 4, "Stopping local web dashboard", shutdown_started);
     dashboard_server->stop();
     dashboard.set("health","stopped");
-    render_shutdown_progress(3, 3, "Shutdown complete", shutdown_started);
+    render_shutdown_progress(4, 4, "Shutdown complete", shutdown_started);
     if (sentum::ui::stdout_is_terminal()) std::cout << "\n";
     return EXIT_SUCCESS;
 }
