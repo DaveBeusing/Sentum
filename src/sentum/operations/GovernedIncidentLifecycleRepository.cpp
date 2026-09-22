@@ -839,9 +839,12 @@ nlohmann::json GovernedIncidentLifecycleRepository::control_plane_snapshot(
 			"failed to prepare governed active incident projection");
 		if (sqlite3_step(active.get()) == SQLITE_ROW) {
 			const auto state = column_text(active.get(), 3);
+			const auto reconciliation_evidence_id = column_text(active.get(), 6);
+			const bool recovery_started = !reconciliation_evidence_id.empty();
 			control_plane["incident_state"] = state;
-			control_plane["recovery_state"] = state == "RECOVERY_IN_PROGRESS" ? "IN_PROGRESS" :
-				(state == "RESOLVED" ? "RESOLVED" : "IDLE");
+			control_plane["recovery_state"] =
+				state == "RECOVERY_IN_PROGRESS" ? "IN_PROGRESS" :
+				(state == "RESOLVED" && recovery_started ? "RESOLVED" : "IDLE");
 			control_plane["incident_workflow"] = {
 				{"state", state},
 				{"action", ""},
@@ -854,12 +857,13 @@ nlohmann::json GovernedIncidentLifecycleRepository::control_plane_snapshot(
 				{"updated_at_utc", column_text(active.get(), 7)},
 				{"execution_authorized", false}
 			};
-			if (state == "RECOVERY_IN_PROGRESS") {
+			if (state == "RECOVERY_IN_PROGRESS" || (state == "RESOLVED" && recovery_started)) {
 				control_plane["recovery_workflow"] = {
-					{"state", "IN_PROGRESS"},
+					{"state", state == "RECOVERY_IN_PROGRESS" ? "IN_PROGRESS" : "RESOLVED"},
 					{"incident_id", column_text(active.get(), 0)},
 					{"request_id", column_text(active.get(), 1)},
-					{"reconciliation_evidence_id", column_text(active.get(), 6)},
+					{"source_correlation_id", column_text(active.get(), 2)},
+					{"reconciliation_evidence_id", reconciliation_evidence_id},
 					{"execution_authorized", false}
 				};
 			}
@@ -895,16 +899,19 @@ nlohmann::json GovernedIncidentLifecycleRepository::control_plane_snapshot(
 		Statement latest(
 			db_,
 			"SELECT r.request_id,r.source_correlation_id,r.status,r.actor,r.reason,r.created_at_utc,"
-			"COALESCE(i.incident_id,''),COALESCE(i.state,'') "
+			"COALESCE(i.incident_id,''),COALESCE(i.state,''),COALESCE(i.reconciliation_evidence_id,'') "
 			"FROM operations_incident_requests r LEFT JOIN operations_incidents i ON i.request_id=r.request_id "
 			"ORDER BY r.created_at_utc DESC,r.request_id DESC LIMIT 1;",
 			"failed to prepare governed incident latest projection");
 		if (sqlite3_step(latest.get()) == SQLITE_ROW) {
 			const auto request_status = column_text(latest.get(), 2);
 			const auto incident_state = column_text(latest.get(), 7);
+			const auto reconciliation_evidence_id = column_text(latest.get(), 8);
 			const auto state = !incident_state.empty() ? incident_state : request_status;
+			const bool recovery_started = !reconciliation_evidence_id.empty();
 			control_plane["incident_state"] = state == "CLOSED" ? "NONE" : state;
-			control_plane["recovery_state"] = state == "CLOSED" || state == "RESOLVED" ? state : "IDLE";
+			control_plane["recovery_state"] =
+				recovery_started && (state == "RESOLVED" || state == "CLOSED") ? state : "IDLE";
 			control_plane["incident_workflow"] = {
 				{"state", state},
 				{"action", request_status == "APPROVAL_PENDING" ? "OPEN_INCIDENT" : ""},
@@ -917,6 +924,16 @@ nlohmann::json GovernedIncidentLifecycleRepository::control_plane_snapshot(
 				{"incident_id", column_text(latest.get(), 6)},
 				{"execution_authorized", false}
 			};
+			if (recovery_started && (state == "RESOLVED" || state == "CLOSED")) {
+				control_plane["recovery_workflow"] = {
+					{"state", state},
+					{"incident_id", column_text(latest.get(), 6)},
+					{"request_id", column_text(latest.get(), 0)},
+					{"source_correlation_id", column_text(latest.get(), 1)},
+					{"reconciliation_evidence_id", reconciliation_evidence_id},
+					{"execution_authorized", false}
+				};
+			}
 		}
 	}
 
@@ -950,12 +967,24 @@ nlohmann::json merge_governed_incident_lifecycle_snapshot(
 
 	nlohmann::json approvals = nlohmann::json::array();
 	const auto existing_approvals = control_plane.value("approval_queue", nlohmann::json::array());
+	std::size_t existing_incident_approvals = 0;
 	if (existing_approvals.is_array()) {
 		for (const auto& item : existing_approvals) {
-			if (!is_incident_action(item)) approvals.push_back(item);
+			if (is_incident_action(item)) {
+				++existing_incident_approvals;
+				continue;
+			}
+			approvals.push_back(item);
 		}
 	}
+	const auto existing_pending = control_plane.value(
+		"pending_approvals",
+		existing_approvals.is_array() ? existing_approvals.size() : std::size_t{0});
+	const auto nonincident_pending = existing_pending > existing_incident_approvals
+		? existing_pending - existing_incident_approvals
+		: approvals.size();
 	for (const auto& item : lifecycle.at("approval_queue")) approvals.push_back(item);
+	const auto combined_pending = nonincident_pending + lifecycle.value("pending_approvals", std::size_t{0});
 
 	std::vector<nlohmann::json> audit_rows;
 	const auto existing_audit = control_plane.value("audit_timeline", nlohmann::json::array());
@@ -981,21 +1010,32 @@ nlohmann::json merge_governed_incident_lifecycle_snapshot(
 	control_plane["incident_state"] = lifecycle.at("incident_state");
 	control_plane["incident_workflow"] = lifecycle.at("incident_workflow");
 	control_plane["approval_queue"] = std::move(approvals);
-	control_plane["pending_approvals"] = control_plane["approval_queue"].size();
-	control_plane["approval_queue_total"] = control_plane["approval_queue"].size();
-	control_plane["approval_queue_truncated"] = lifecycle.value("approval_queue_truncated", false);
+	control_plane["pending_approvals"] = combined_pending;
+	control_plane["approval_queue_total"] = combined_pending;
+	control_plane["approval_queue_truncated"] =
+		combined_pending > control_plane["approval_queue"].size() ||
+		lifecycle.value("approval_queue_truncated", false);
 	control_plane["audit_timeline"] = std::move(audit);
 	control_plane["audit_timeline_truncated"] =
 		control_plane.value("audit_timeline_truncated", false) ||
 		lifecycle.value("audit_timeline_truncated", false);
 
 	const auto lifecycle_recovery = lifecycle.at("recovery_workflow");
-	if (lifecycle_recovery.is_object() && !lifecycle_recovery.empty()) {
-		control_plane["recovery_workflow"] = lifecycle_recovery;
-		control_plane["recovery_state"] = lifecycle.at("recovery_state");
-	} else if (!control_plane.contains("recovery_state")) {
+	control_plane["incident_recovery_state"] = lifecycle.at("recovery_state");
+	control_plane["incident_recovery_workflow"] = lifecycle_recovery;
+	const auto existing_recovery_state = control_plane.value("recovery_state", std::string{});
+	const bool general_recovery_idle =
+		existing_recovery_state.empty() || existing_recovery_state == "IDLE" || existing_recovery_state == "NONE";
+	if (general_recovery_idle && lifecycle.at("recovery_state") != "IDLE") {
 		control_plane["recovery_state"] = lifecycle.at("recovery_state");
 	}
+	if ((!control_plane.contains("recovery_workflow") ||
+		 !control_plane["recovery_workflow"].is_object() ||
+		 control_plane["recovery_workflow"].empty()) &&
+		lifecycle_recovery.is_object() && !lifecycle_recovery.empty()) {
+		control_plane["recovery_workflow"] = lifecycle_recovery;
+	}
+	if (!control_plane.contains("recovery_state")) control_plane["recovery_state"] = "IDLE";
 
 	control_plane["execution_authorized"] = false;
 	merged["operations_control_plane"] = std::move(control_plane);
