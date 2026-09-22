@@ -96,11 +96,9 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 	const NotificationDeliveryEvidenceRepository& repository,
 	NotificationOperationsThresholds thresholds = {},
 	std::size_t evidence_limit = 1024) {
-	auto view = derive_notification_incident_workflow_integration(snapshot, thresholds);
-	view.candidate = derive_notification_incident_candidate(repository, thresholds, evidence_limit);
-	view.incident_authorized = false;
-	view.execution_authorized = false;
-	return view;
+	const auto durable_snapshot = notification_delivery_snapshot_from_repository(
+		snapshot, repository, evidence_limit);
+	return derive_notification_incident_workflow_integration(durable_snapshot, thresholds);
 }
 
 inline nlohmann::json notification_incident_workflow_integration_json(
