@@ -32,6 +32,21 @@ struct NotificationChannelOperations {
 	std::size_t failed = 0;
 };
 
+struct NotificationDispatchOperationsMetrics {
+	bool available = false;
+	std::string status = "UNAVAILABLE";
+	std::size_t queued = 0;
+	std::size_t dispatching = 0;
+	std::uint64_t delivered = 0;
+	std::uint64_t retriable_failed = 0;
+	std::uint64_t terminal_failed = 0;
+	double provider_latency_ms_last = 0.0;
+	double provider_latency_ms_average = 0.0;
+	std::uint64_t timeout_count = 0;
+	std::uint64_t queue_rejections = 0;
+	bool execution_authorized = false;
+};
+
 struct NotificationOperationsView {
 	NotificationOperationsHealth health = NotificationOperationsHealth::Unavailable;
 	std::string status = "UNAVAILABLE";
@@ -45,6 +60,7 @@ struct NotificationOperationsView {
 	std::size_t terminal_failed = 0;
 	std::size_t backlog = 0;
 	std::vector<NotificationChannelOperations> channels;
+	NotificationDispatchOperationsMetrics dispatch_runtime;
 	bool evidence_available = false;
 	bool incident_authorized = false;
 	bool execution_authorized = false;
@@ -225,15 +241,39 @@ inline std::vector<NotificationDeliveryEvidenceRecord> notification_delivery_evi
 	return evidence;
 }
 
+inline NotificationDispatchOperationsMetrics notification_dispatch_metrics_from_snapshot(
+	const nlohmann::json& snapshot) {
+	NotificationDispatchOperationsMetrics metrics;
+	const auto runtime = snapshot.value("notification_dispatch_runtime", nlohmann::json::object());
+	if (!runtime.is_object() || !runtime.contains("status")) return metrics;
+	metrics.available = true;
+	metrics.status = runtime.value("status", std::string("UNAVAILABLE"));
+	metrics.queued = runtime.value("queued", static_cast<std::size_t>(0));
+	metrics.dispatching = runtime.value("dispatching", static_cast<std::size_t>(0));
+	metrics.delivered = runtime.value("delivered", static_cast<std::uint64_t>(0));
+	metrics.retriable_failed = runtime.value("retriable_failed", static_cast<std::uint64_t>(0));
+	metrics.terminal_failed = runtime.value("terminal_failed", static_cast<std::uint64_t>(0));
+	metrics.provider_latency_ms_last = runtime.value("provider_latency_ms_last", 0.0);
+	metrics.provider_latency_ms_average = runtime.value("provider_latency_ms_average", 0.0);
+	metrics.timeout_count = runtime.value("timeout_count", static_cast<std::uint64_t>(0));
+	metrics.queue_rejections = runtime.value("queue_rejections", static_cast<std::uint64_t>(0));
+	metrics.execution_authorized = false;
+	return metrics;
+}
+
 inline NotificationOperationsView derive_notification_operations_view_from_snapshot(
 	const nlohmann::json& snapshot,
 	NotificationOperationsThresholds thresholds = {}) {
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
+	NotificationOperationsView view;
 	if (!control_plane.contains("notification_delivery_evidence") ||
 		!control_plane.at("notification_delivery_evidence").is_array()) {
-		return unavailable_notification_operations_view();
+		view = unavailable_notification_operations_view();
+	} else {
+		view = derive_notification_operations_view(notification_delivery_evidence_from_snapshot(snapshot), thresholds);
 	}
-	return derive_notification_operations_view(notification_delivery_evidence_from_snapshot(snapshot), thresholds);
+	view.dispatch_runtime = notification_dispatch_metrics_from_snapshot(snapshot);
+	return view;
 }
 
 inline nlohmann::json notification_operations_json(const NotificationOperationsView& view) {
@@ -246,6 +286,20 @@ inline nlohmann::json notification_operations_json(const NotificationOperationsV
 			{"failed", channel.failed}
 		});
 	}
+	const auto dispatch_runtime = nlohmann::json{
+		{"available", view.dispatch_runtime.available},
+		{"status", view.dispatch_runtime.status},
+		{"queued", view.dispatch_runtime.queued},
+		{"dispatching", view.dispatch_runtime.dispatching},
+		{"delivered", view.dispatch_runtime.delivered},
+		{"retriable_failed", view.dispatch_runtime.retriable_failed},
+		{"terminal_failed", view.dispatch_runtime.terminal_failed},
+		{"provider_latency_ms_last", view.dispatch_runtime.provider_latency_ms_last},
+		{"provider_latency_ms_average", view.dispatch_runtime.provider_latency_ms_average},
+		{"timeout_count", view.dispatch_runtime.timeout_count},
+		{"queue_rejections", view.dispatch_runtime.queue_rejections},
+		{"execution_authorized", false}
+	};
 	return {
 		{"status", view.status},
 		{"incident_signal", view.incident_signal},
@@ -260,6 +314,7 @@ inline nlohmann::json notification_operations_json(const NotificationOperationsV
 		{"evidence_available", view.evidence_available},
 		{"incident_authorized", false},
 		{"execution_authorized", false},
+		{"dispatch_runtime", dispatch_runtime},
 		{"channels", std::move(channels)}
 	};
 }
