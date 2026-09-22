@@ -86,7 +86,9 @@ NotificationDeliveryEvidenceRepository::NotificationDeliveryEvidenceRepository(
 	}
 
 	try {
-		sqlite3_busy_timeout(db_, 5000);
+		sqlite3_busy_timeout(
+			db_,
+			mode_ == NotificationDeliveryEvidenceOpenMode::ReadOnly ? 1000 : 5000);
 		if (mode_ == NotificationDeliveryEvidenceOpenMode::ReadOnly) return;
 
 		exec_or_throw("PRAGMA journal_mode=WAL;");
