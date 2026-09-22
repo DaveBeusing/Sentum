@@ -3,6 +3,7 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
+#include <sentum/operations/GovernedIncidentLifecycleRepository.hpp>
 #include <sentum/operations/NotificationIncidentWorkflowIntegration.hpp>
 #include <sentum/operations/NotificationOperationsObservability.hpp>
 #include <sentum/ui/OperatorAlertCenterView.hpp>
@@ -156,6 +157,22 @@ inline nlohmann::json derive_cross_surface_operations_view(
 		snapshot, notification_evidence, notification_evidence_limit);
 	return derive_cross_surface_operations_view(
 		durable_snapshot, approval_limit, audit_limit, alert_limit);
+}
+
+inline nlohmann::json derive_cross_surface_operations_view(
+	const nlohmann::json& snapshot,
+	const sentum::operations::NotificationDeliveryEvidenceRepository& notification_evidence,
+	const sentum::operations::GovernedIncidentLifecycleRepository& incident_lifecycle,
+	std::size_t approval_limit = 8,
+	std::size_t audit_limit = 12,
+	std::size_t alert_limit = 12,
+	std::size_t notification_evidence_limit = 1024) {
+	const auto durable_notification_snapshot = sentum::operations::notification_delivery_snapshot_from_repository(
+		snapshot, notification_evidence, notification_evidence_limit);
+	const auto authoritative_snapshot = sentum::operations::merge_governed_incident_lifecycle_snapshot(
+		durable_notification_snapshot, incident_lifecycle, approval_limit, audit_limit);
+	return derive_cross_surface_operations_view(
+		authoritative_snapshot, approval_limit, audit_limit, alert_limit);
 }
 
 } // namespace sentum::ui
