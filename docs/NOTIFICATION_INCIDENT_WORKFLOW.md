@@ -41,6 +41,12 @@ The bridge must not:
 
 Missing notification evidence fails closed and exposes no actionable incident proposal.
 
-## Initial acceptance
+## Durable evidence integration
 
-The first AP-22 slice requires deterministic regression coverage for healthy, attention, incident-candidate and unavailable delivery states, plus sanitizer build integration. Cross-surface proposal presentation, approval evidence, recovery workflow integration and final AP-22 acceptance remain subsequent slices.
+The incident candidate is derived from the same durable latest-state notification evidence used by operations observability. Delivery evidence is loaded read-only from the configured runtime SQLite database and remains ordered by persistent sequence.
+
+If durable evidence is missing, unreadable, corrupt or incomplete because a bounded current-state query was truncated, the notification health projection becomes `UNAVAILABLE` and the incident candidate becomes `BLOCKED`.
+
+Existing incident, approval, audit and recovery evidence continues to come from the operations control plane. Durable notification persistence does not create or advance any of those workflows.
+
+Regression coverage verifies that terminal durable delivery failures produce the same governed proposal semantics as equivalent in-memory evidence and that approval, audit and recovery correlation remains unchanged across repository reopen.
