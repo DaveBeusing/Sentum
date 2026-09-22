@@ -23,11 +23,18 @@ struct NotificationDeliveryEvidenceBatch {
 	bool truncated = false;
 };
 
+enum class NotificationDeliveryEvidenceOpenMode {
+	ReadWriteCreate,
+	ReadOnly
+};
+
 class NotificationDeliveryEvidenceRepository {
 public:
 	static constexpr std::size_t kMaximumQueryLimit = 4096;
 
-	explicit NotificationDeliveryEvidenceRepository(std::string path);
+	explicit NotificationDeliveryEvidenceRepository(
+		std::string path,
+		NotificationDeliveryEvidenceOpenMode mode = NotificationDeliveryEvidenceOpenMode::ReadWriteCreate);
 	~NotificationDeliveryEvidenceRepository();
 
 	NotificationDeliveryEvidenceRepository(const NotificationDeliveryEvidenceRepository&) = delete;
@@ -39,6 +46,7 @@ public:
 	std::vector<NotificationDeliveryAttempt> restore_active_delivery_state(std::size_t limit = 1024) const;
 
 	const std::string& path() const noexcept { return path_; }
+	bool read_only() const noexcept { return mode_ == NotificationDeliveryEvidenceOpenMode::ReadOnly; }
 
 private:
 	static std::size_t bounded_limit(std::size_t requested) noexcept;
@@ -47,6 +55,7 @@ private:
 	NotificationDeliveryEvidenceBatch load_batch(const char* sql, std::size_t limit, std::size_t total) const;
 
 	std::string path_;
+	NotificationDeliveryEvidenceOpenMode mode_ = NotificationDeliveryEvidenceOpenMode::ReadWriteCreate;
 	sqlite3* db_ = nullptr;
 	mutable std::mutex mutex_;
 };
