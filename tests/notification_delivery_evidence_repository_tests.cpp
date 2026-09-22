@@ -2,6 +2,7 @@
 #include <sentum/operations/NotificationIncidentWorkflowBridge.hpp>
 #include <sentum/operations/NotificationIncidentWorkflowIntegration.hpp>
 #include <sentum/operations/NotificationOperationsObservability.hpp>
+#include <sentum/ui/CrossSurfaceOperationsView.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -238,6 +239,54 @@ void test_observability_and_incident_semantics_match_durable_truth() {
 	cleanup_database(path);
 }
 
+void test_read_only_cross_surface_consumers_use_durable_truth() {
+	const auto path = temporary_database_path();
+	{
+		NotificationDeliveryEvidenceRepository writer(path.string());
+		auto terminal = record("durable-critical", "FAILED", 3, true);
+		terminal.failure_code = "TIMEOUT";
+		require(writer.append(terminal), "durable cross-surface evidence missing");
+	}
+	{
+		NotificationDeliveryEvidenceRepository reader(
+			path.string(),
+			sentum::operations::NotificationDeliveryEvidenceOpenMode::ReadOnly);
+		require(reader.read_only(), "read-only repository mode was not retained");
+		bool append_blocked = false;
+		try {
+			(void)reader.append(record("forbidden-write", "PENDING"));
+		} catch (const std::logic_error&) {
+			append_blocked = true;
+		}
+		require(append_blocked, "read-only notification evidence consumer allowed writes");
+
+		nlohmann::json snapshot = {{"operations_control_plane", {
+			{"governance_state", "CONTROLLED"},
+			{"notification_delivery_evidence", nlohmann::json::array({
+				{{"dedup_key", "volatile"}, {"alert_id", "volatile"}, {"state", "DELIVERED"}, {"terminal", true}}
+			})}
+		}}};
+		const auto view = sentum::ui::derive_cross_surface_operations_view(snapshot, reader);
+		require(view["notification_operations"]["status"] == "INCIDENT_CANDIDATE", "cross-surface view did not consume durable notification truth");
+		require(view["notification_operations"]["terminal_failed"] == 1, "durable terminal failure count mismatch");
+		require(view["notification_incident_workflow"]["candidate"]["status"] == "PROPOSAL_READY", "durable cross-surface incident proposal missing");
+		require(view["notification_incident_workflow"]["execution_authorized"] == false, "durable cross-surface view gained execution authority");
+	}
+	cleanup_database(path);
+
+	const auto missing = temporary_database_path("_missing");
+	bool missing_rejected = false;
+	try {
+		NotificationDeliveryEvidenceRepository reader(
+			missing.string(),
+			sentum::operations::NotificationDeliveryEvidenceOpenMode::ReadOnly);
+	} catch (const std::runtime_error&) {
+		missing_rejected = true;
+	}
+	require(missing_rejected, "read-only consumer created missing durable evidence storage");
+	cleanup_database(missing);
+}
+
 void test_persistence_failure_and_unsafe_evidence_fail_closed() {
 	const auto corrupt = temporary_database_path("_corrupt");
 	{
@@ -279,6 +328,7 @@ int main() {
 		test_restart_recovery_preserves_terminal_and_retriable_state();
 		test_bounded_queries_fail_closed_for_incomplete_current_state();
 		test_observability_and_incident_semantics_match_durable_truth();
+		test_read_only_cross_surface_consumers_use_durable_truth();
 		test_persistence_failure_and_unsafe_evidence_fail_closed();
 		std::cout << "notification delivery evidence repository tests passed\n";
 		return 0;
