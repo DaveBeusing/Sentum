@@ -246,6 +246,11 @@ if(BUILD_TESTING)
 	add_test(NAME governed_incident_lifecycle_runtime COMMAND sentum_governed_incident_lifecycle_runtime_tests)
 	set_tests_properties(governed_incident_lifecycle_runtime PROPERTIES TIMEOUT 60)
 
+	add_executable(sentum_governed_incident_cli_tests tests/governed_incident_cli_tests.cpp)
+	target_link_libraries(sentum_governed_incident_cli_tests PRIVATE sentum_core)
+	add_test(NAME governed_incident_cli COMMAND sentum_governed_incident_cli_tests)
+	set_tests_properties(governed_incident_cli PROPERTIES TIMEOUT 60)
+
 	# The sanitizer workflow builds an explicit legacy regression target list. Keep
 	# new operator regressions attached to one of those targets so CTest never sees
 	# registered-but-unbuilt executables under ASan/UBSan/TSan.
@@ -272,6 +277,7 @@ if(BUILD_TESTING)
 		sentum_notification_incident_workflow_bridge_tests
 		sentum_governed_incident_lifecycle_tests
 		sentum_governed_incident_lifecycle_runtime_tests
+		sentum_governed_incident_cli_tests
 	)
 endif()
 
