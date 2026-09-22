@@ -29,13 +29,21 @@ jobs:
           path: evidence/rc
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
+      - name: Validate RC handoff evidence
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          python3 tools/ci/validate_rc_handoff.py \
+            --artifact-root evidence/rc \
+            --expected-sha "${GITHUB_SHA}"
       - name: Enforce production operations baseline
         env:
           GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
           SOURCE_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           python3 tools/ci/production_operations_gate.py \
-            --rc-report evidence/rc/rc_package.json \
+            --rc-report evidence/rc/log/rc_package.json \
             --expected-sha "${GITHUB_SHA}" \
             --report log/production_operations_gate.json \
             --summary log/production_operations_gate.md
