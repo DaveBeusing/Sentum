@@ -14,7 +14,8 @@
 		"promote_recovery_candidate",
 		"accept_reconciliation",
 		"enter_maintenance",
-		"exit_maintenance"
+		"exit_maintenance",
+		"OPEN_INCIDENT"
 	],
 	"forbidden_actions": [
 		"synthesize_fill",
