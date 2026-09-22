@@ -72,9 +72,19 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 			if (!item.is_object() || item.value("action", std::string{}) != "OPEN_INCIDENT") continue;
 			if (!view.request_id.empty() && item.value("request_id", std::string{}) != view.request_id) continue;
 			view.request_id = item.value("request_id", view.request_id);
-			view.audit_outcome = item.value("outcome", std::string{});
-			view.audit_evidence_available = true;
-			break;
+			if (!view.audit_evidence_available) {
+				view.audit_outcome = item.value("outcome", std::string{});
+				view.audit_evidence_available = true;
+			}
+			if (!view.approval_evidence_available &&
+				item.value("event_type", std::string{}) == "APPROVAL_DECIDED") {
+				const auto decision = item.value("outcome", std::string{});
+				if (decision == "APPROVED" || decision == "DENIED") {
+					view.approval_status = decision;
+					view.approval_evidence_available = true;
+				}
+			}
+			if (view.audit_evidence_available && view.approval_evidence_available) break;
 		}
 	}
 
