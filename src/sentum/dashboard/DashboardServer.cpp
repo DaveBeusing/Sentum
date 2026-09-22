@@ -18,6 +18,7 @@
 #include <sentum/dashboard/DashboardOperationsOverlay.hpp>
 #include <sentum/dashboard/DashboardRepository.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
+#include <sentum/operations/GovernedIncidentLifecycleRepository.hpp>
 #include <sentum/operations/NotificationDeliveryEvidenceRepository.hpp>
 #include <sentum/ui/CrossSurfaceOperationsView.hpp>
 
@@ -98,7 +99,27 @@ nlohmann::json operations_view_from_durable_notification_evidence(const nlohmann
         sentum::operations::NotificationDeliveryEvidenceRepository notification_evidence(
             database_path,
             sentum::operations::NotificationDeliveryEvidenceOpenMode::ReadOnly);
-        return sentum::ui::derive_cross_surface_operations_view(state, notification_evidence);
+        try {
+            sentum::operations::GovernedIncidentLifecycleRepository incident_lifecycle(
+                database_path,
+                sentum::operations::GovernedIncidentLifecycleOpenMode::ReadOnly);
+            return sentum::ui::derive_cross_surface_operations_view(
+                state, notification_evidence, incident_lifecycle);
+        } catch (...) {
+            auto stale_state = sentum::operations::notification_delivery_snapshot_from_repository(
+                state, notification_evidence);
+            auto& control_plane = stale_state["operations_control_plane"];
+            control_plane["evidence_status"] = "STALE";
+            control_plane["evidence_stale"] = true;
+            control_plane["incident_state"] = "UNAVAILABLE";
+            control_plane["recovery_state"] = "UNAVAILABLE";
+            control_plane["pending_approvals"] = 0;
+            control_plane["approval_queue"] = nlohmann::json::array();
+            control_plane["audit_timeline"] = nlohmann::json::array();
+            control_plane["incident_workflow"] = nlohmann::json::object();
+            control_plane["recovery_workflow"] = nlohmann::json::object();
+            return sentum::ui::derive_cross_surface_operations_view(stale_state);
+        }
     } catch (...) {
         return sentum::ui::derive_cross_surface_operations_view(unavailable_state);
     }
