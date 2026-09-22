@@ -69,6 +69,12 @@ The governed recovery sequence is:
 7. Require explicit operator approval for any action that can resume trading or alter authoritative acceptance.
 8. Reconcile authoritative external state before entries can resume where applicable.
 
+## Incident recovery lifecycle
+
+Incident acknowledgement and incident recovery are separate durable states. Acknowledgement alone does not imply recovery, reconciliation acceptance, kill-switch clearing or entry resumption.
+
+The incident lifecycle may enter `RECOVERY_IN_PROGRESS` only after acknowledgement and only with explicit reconciliation evidence. Resolving or closing the incident records operational state only; it does not perform or authorize any trading recovery action.
+
 ## Fail-closed requirements
 
 Missing, stale, mismatched or failed upstream evidence produces FAIL.
