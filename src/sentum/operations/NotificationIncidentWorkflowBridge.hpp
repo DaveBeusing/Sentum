@@ -99,4 +99,12 @@ inline NotificationIncidentCandidate derive_notification_incident_candidate_from
 		derive_notification_operations_view_from_snapshot(snapshot, thresholds));
 }
 
+inline NotificationIncidentCandidate derive_notification_incident_candidate(
+	const NotificationDeliveryEvidenceRepository& repository,
+	NotificationOperationsThresholds thresholds = {},
+	std::size_t evidence_limit = 1024) {
+	return derive_notification_incident_candidate(
+		derive_notification_operations_view(repository, thresholds, evidence_limit));
+}
+
 } // namespace sentum::operations
