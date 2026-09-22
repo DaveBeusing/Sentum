@@ -325,6 +325,22 @@ void test_restart_recovery_and_delivered_suppression() {
 		cleanup_database(path);
 	}
 	{
+		const auto path = temporary_path("_exhausted-restart.sqlite3");
+		const auto routes = plan({{"exhausted-restart", "PAGER"}});
+		seed(path, evidence(routes.intents[0].dedup_key, "DISPATCHED", 3, false));
+		auto provider = std::make_shared<ScriptedProvider>(std::vector<NotificationDispatchResult>{delivered()});
+		NotificationProviderRegistry registry;
+		registry.add("PAGER", provider);
+		NotificationDispatchRuntime runtime(configuration(), routing_policy(), std::move(registry), path.string());
+		runtime.start();
+		const auto record = wait_latest(path, routes.intents[0].dedup_key, "FAILED");
+		require(record.terminal && record.failure_code == "INTERRUPTED", "restart exceeded the persisted attempt budget");
+		std::this_thread::sleep_for(50ms);
+		runtime.stop();
+		require(provider->calls() == 0, "exhausted restart state called provider again");
+		cleanup_database(path);
+	}
+	{
 		const auto path = temporary_path("_delivered.sqlite3");
 		const auto routes = plan({{"delivered-restart", "PAGER"}});
 		auto delivered_record = evidence(routes.intents[0].dedup_key, "DELIVERED", 1, true);
