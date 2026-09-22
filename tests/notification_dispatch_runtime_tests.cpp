@@ -3,6 +3,7 @@
 #include <sentum/operations/NotificationIncidentWorkflowBridge.hpp>
 #include <sentum/operations/NotificationOperationsObservability.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
