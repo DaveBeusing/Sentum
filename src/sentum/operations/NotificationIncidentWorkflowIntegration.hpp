@@ -11,6 +11,7 @@ namespace sentum::operations {
 struct NotificationIncidentWorkflowIntegration {
 	NotificationIncidentCandidate candidate;
 	std::string request_id;
+	std::string source_correlation_id;
 	std::string approval_status = "NOT_REQUESTED";
 	std::string audit_outcome;
 	std::string incident_state = "IDLE";
@@ -29,15 +30,21 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 	view.candidate = derive_notification_incident_candidate_from_snapshot(snapshot, thresholds);
 	view.incident_authorized = false;
 	view.execution_authorized = false;
+	view.source_correlation_id = view.candidate.source_correlation_id;
 
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
 	if (!control_plane.is_object()) return view;
 
 	const auto incident = control_plane.value("incident_workflow", nlohmann::json::object());
 	if (incident.is_object()) {
-		view.incident_state = incident.value("state", std::string("IDLE"));
-		if (incident.value("action", std::string{}) == "OPEN_INCIDENT") {
+		const auto incident_correlation = incident.value("source_correlation_id", std::string{});
+		const bool correlation_matches =
+			view.source_correlation_id.empty() || incident_correlation.empty() ||
+			incident_correlation == view.source_correlation_id;
+		if (correlation_matches) {
+			view.incident_state = incident.value("state", std::string("IDLE"));
 			view.request_id = incident.value("request_id", std::string{});
+			if (view.source_correlation_id.empty()) view.source_correlation_id = incident_correlation;
 		}
 	}
 
@@ -91,6 +98,7 @@ inline nlohmann::json notification_incident_workflow_integration_json(
 	return {
 		{"candidate", notification_incident_candidate_json(view.candidate)},
 		{"request_id", view.request_id},
+		{"source_correlation_id", view.source_correlation_id},
 		{"approval_status", view.approval_status},
 		{"audit_outcome", view.audit_outcome},
 		{"incident_state", view.incident_state},
