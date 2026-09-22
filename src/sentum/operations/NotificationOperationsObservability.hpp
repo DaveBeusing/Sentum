@@ -167,6 +167,34 @@ inline NotificationOperationsView derive_notification_operations_view(
 	}
 }
 
+inline nlohmann::json notification_delivery_snapshot_from_repository(
+	const nlohmann::json& snapshot,
+	const NotificationDeliveryEvidenceRepository& repository,
+	std::size_t evidence_limit = 1024) {
+	auto durable_snapshot = snapshot;
+	if (!durable_snapshot.contains("operations_control_plane") ||
+		!durable_snapshot.at("operations_control_plane").is_object()) {
+		return durable_snapshot;
+	}
+
+	auto& control_plane = durable_snapshot["operations_control_plane"];
+	control_plane.erase("notification_delivery_evidence");
+	try {
+		const auto batch = repository.load_latest_per_dedup_key(evidence_limit);
+		if (batch.truncated) return durable_snapshot;
+
+		nlohmann::json evidence = nlohmann::json::array();
+		for (const auto& persisted : batch.records) {
+			evidence.push_back(notification_delivery_evidence_json(persisted.record));
+		}
+		control_plane["notification_delivery_evidence"] = std::move(evidence);
+	} catch (...) {
+		// Missing or unreadable durable evidence remains absent so the existing
+		// observability projection reports UNAVAILABLE and fails closed.
+	}
+	return durable_snapshot;
+}
+
 inline std::vector<NotificationDeliveryEvidenceRecord> notification_delivery_evidence_from_snapshot(
 	const nlohmann::json& snapshot) {
 	std::vector<NotificationDeliveryEvidenceRecord> evidence;
