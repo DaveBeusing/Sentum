@@ -149,6 +149,7 @@ void append_history(
 	const std::string& incident_id,
 	const std::string& source_correlation_id,
 	const std::string& event_type,
+	const std::string& action,
 	const std::string& from_state,
 	const std::string& to_state,
 	const std::string& actor,
@@ -160,7 +161,7 @@ void append_history(
 		"INSERT INTO operations_incident_history("
 		"event_id,request_id,incident_id,source_correlation_id,event_type,from_state,to_state,action,actor,reason,"
 		"reconciliation_evidence_id,timestamp_utc,execution_authorized"
-		") VALUES(?,?,?,?,?,?,?,'OPEN_INCIDENT',?,?,?,?,0);",
+		") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0);",
 		"failed to prepare governed incident history insert");
 	bind_text(statement.get(), 1, event_id);
 	bind_text(statement.get(), 2, request_id);
@@ -169,10 +170,11 @@ void append_history(
 	bind_text(statement.get(), 5, event_type);
 	bind_text(statement.get(), 6, from_state);
 	bind_text(statement.get(), 7, to_state);
-	bind_text(statement.get(), 8, actor);
-	bind_text(statement.get(), 9, reason);
-	bind_text(statement.get(), 10, reconciliation_evidence_id);
-	bind_text(statement.get(), 11, timestamp);
+	bind_text(statement.get(), 8, action);
+	bind_text(statement.get(), 9, actor);
+	bind_text(statement.get(), 10, reason);
+	bind_text(statement.get(), 11, reconciliation_evidence_id);
+	bind_text(statement.get(), 12, timestamp);
 	step_done(db, statement.get(), "failed to persist governed incident history");
 }
 
@@ -182,6 +184,7 @@ void transition_incident(
 	const std::vector<std::string>& allowed_states,
 	const std::string& next_state,
 	const std::string& event_type,
+	const std::string& action,
 	const std::string& actor,
 	const std::string& reason,
 	const std::string& reconciliation_evidence_id) {
@@ -214,6 +217,7 @@ void transition_incident(
 		incident.incident_id,
 		incident.source_correlation_id,
 		event_type,
+		action,
 		incident.state,
 		next_state,
 		actor,
@@ -415,6 +419,7 @@ IncidentRequestSubmission GovernedIncidentLifecycleRepository::submit_open_incid
 				"",
 				source_correlation_id,
 				"REQUEST_SUBMITTED",
+				"OPEN_INCIDENT",
 				"NONE",
 				"APPROVAL_PENDING",
 				actor,
@@ -492,6 +497,7 @@ IncidentApprovalResult GovernedIncidentLifecycleRepository::approve_open_inciden
 			"",
 			request.source_correlation_id,
 			"APPROVAL_DECIDED",
+			"OPEN_INCIDENT",
 			"APPROVAL_PENDING",
 			"APPROVED",
 			approver,
@@ -523,6 +529,7 @@ IncidentApprovalResult GovernedIncidentLifecycleRepository::approve_open_inciden
 			incident_id,
 			request.source_correlation_id,
 			"INCIDENT_OPENED",
+			"OPEN_INCIDENT",
 			"APPROVED",
 			"OPEN",
 			approver,
@@ -590,6 +597,7 @@ bool GovernedIncidentLifecycleRepository::deny_open_incident_request(
 			"",
 			request.source_correlation_id,
 			"APPROVAL_DECIDED",
+			"OPEN_INCIDENT",
 			"APPROVAL_PENDING",
 			"DENIED",
 			approver,
@@ -615,7 +623,9 @@ bool GovernedIncidentLifecycleRepository::acknowledge_incident(
 	begin_transaction();
 	try {
 		const auto incident = load_incident(db_, incident_id);
-		transition_incident(db_, incident, {"OPEN"}, "ACKNOWLEDGED", "INCIDENT_ACKNOWLEDGED", actor, reason, "");
+		transition_incident(
+			db_, incident, {"OPEN"}, "ACKNOWLEDGED", "INCIDENT_ACKNOWLEDGED",
+			"ACKNOWLEDGE_INCIDENT", actor, reason, "");
 		commit_transaction();
 		return true;
 	} catch (...) {
@@ -644,6 +654,7 @@ bool GovernedIncidentLifecycleRepository::begin_recovery(
 			{"ACKNOWLEDGED"},
 			"RECOVERY_IN_PROGRESS",
 			"RECOVERY_STARTED",
+			"BEGIN_INCIDENT_RECOVERY",
 			actor,
 			reason,
 			reconciliation_evidence_id);
@@ -671,6 +682,7 @@ bool GovernedIncidentLifecycleRepository::resolve_incident(
 			{"ACKNOWLEDGED", "RECOVERY_IN_PROGRESS"},
 			"RESOLVED",
 			"INCIDENT_RESOLVED",
+			"RESOLVE_INCIDENT",
 			actor,
 			reason,
 			incident.reconciliation_evidence_id);
@@ -698,6 +710,7 @@ bool GovernedIncidentLifecycleRepository::close_incident(
 			{"RESOLVED"},
 			"CLOSED",
 			"INCIDENT_CLOSED",
+			"CLOSE_INCIDENT",
 			actor,
 			reason,
 			incident.reconciliation_evidence_id);
@@ -790,7 +803,7 @@ nlohmann::json GovernedIncidentLifecycleRepository::control_plane_snapshot(
 	{
 		Statement statement(
 			db_,
-			"SELECT request_id,incident_id,source_correlation_id,event_type,from_state,to_state,actor,reason,"
+			"SELECT request_id,incident_id,source_correlation_id,event_type,from_state,to_state,action,actor,reason,"
 			"reconciliation_evidence_id,timestamp_utc "
 			"FROM operations_incident_history ORDER BY sequence DESC LIMIT ?;",
 			"failed to prepare governed incident audit timeline");
@@ -806,11 +819,11 @@ nlohmann::json GovernedIncidentLifecycleRepository::control_plane_snapshot(
 				{"event_type", column_text(statement.get(), 3)},
 				{"from_state", column_text(statement.get(), 4)},
 				{"to_state", column_text(statement.get(), 5)},
-				{"action", "OPEN_INCIDENT"},
-				{"actor", column_text(statement.get(), 6)},
-				{"reason", column_text(statement.get(), 7)},
-				{"reconciliation_evidence_id", column_text(statement.get(), 8)},
-				{"timestamp_utc", column_text(statement.get(), 9)},
+				{"action", column_text(statement.get(), 6)},
+				{"actor", column_text(statement.get(), 7)},
+				{"reason", column_text(statement.get(), 8)},
+				{"reconciliation_evidence_id", column_text(statement.get(), 9)},
+				{"timestamp_utc", column_text(statement.get(), 10)},
 				{"outcome", column_text(statement.get(), 5)},
 				{"execution_authorized", false}
 			});
