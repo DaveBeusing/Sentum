@@ -982,6 +982,7 @@ nlohmann::json merge_governed_incident_lifecycle_snapshot(
 	std::size_t existing_incident_approvals = 0;
 	if (existing_approvals.is_array()) {
 		for (const auto& item : existing_approvals) {
+			if (!item.is_object()) continue;
 			if (is_incident_action(item)) {
 				++existing_incident_approvals;
 				continue;
@@ -1002,6 +1003,7 @@ nlohmann::json merge_governed_incident_lifecycle_snapshot(
 	const auto existing_audit = control_plane.value("audit_timeline", nlohmann::json::array());
 	if (existing_audit.is_array()) {
 		for (const auto& item : existing_audit) {
+			if (!item.is_object()) continue;
 			if (!is_incident_action(item)) audit_rows.push_back(item);
 		}
 	}
