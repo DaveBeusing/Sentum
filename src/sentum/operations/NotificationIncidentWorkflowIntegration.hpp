@@ -38,9 +38,9 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 	const auto incident = control_plane.value("incident_workflow", nlohmann::json::object());
 	if (incident.is_object()) {
 		const auto incident_correlation = incident.value("source_correlation_id", std::string{});
-		const bool correlation_matches =
-			view.source_correlation_id.empty() || incident_correlation.empty() ||
-			incident_correlation == view.source_correlation_id;
+		const bool correlation_matches = view.source_correlation_id.empty()
+			? true
+			: incident_correlation == view.source_correlation_id;
 		if (correlation_matches) {
 			view.incident_state = incident.value("state", std::string("IDLE"));
 			view.request_id = incident.value("request_id", std::string{});
@@ -53,7 +53,13 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 		: control_plane.value("recovery_workflow", nlohmann::json::object());
 	if (recovery.is_object() && !recovery.empty()) {
 		const auto recovery_request_id = recovery.value("request_id", std::string{});
-		if (view.request_id.empty() || recovery_request_id.empty() || recovery_request_id == view.request_id) {
+		const auto recovery_correlation = recovery.value("source_correlation_id", std::string{});
+		const bool request_matches = !view.request_id.empty() && recovery_request_id == view.request_id;
+		const bool correlation_matches =
+			view.request_id.empty() && !view.source_correlation_id.empty() &&
+			recovery_correlation == view.source_correlation_id;
+		if (request_matches || correlation_matches ||
+			(view.request_id.empty() && view.source_correlation_id.empty())) {
 			view.recovery_state = recovery.value("state", std::string("UNAVAILABLE"));
 			view.recovery_evidence_available = true;
 		}
@@ -63,8 +69,15 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 	if (approvals.is_array()) {
 		for (const auto& item : approvals) {
 			if (!item.is_object() || item.value("action", std::string{}) != "OPEN_INCIDENT") continue;
-			if (!view.request_id.empty() && item.value("request_id", std::string{}) != view.request_id) continue;
-			view.request_id = item.value("request_id", view.request_id);
+			const auto item_request_id = item.value("request_id", std::string{});
+			const auto item_correlation = item.value("source_correlation_id", std::string{});
+			if (!view.request_id.empty() && item_request_id != view.request_id) continue;
+			if (view.request_id.empty() && !view.source_correlation_id.empty() &&
+				item_correlation != view.source_correlation_id) {
+				continue;
+			}
+			view.request_id = item_request_id;
+			if (view.source_correlation_id.empty()) view.source_correlation_id = item_correlation;
 			view.approval_status = item.value("status", std::string("PENDING"));
 			view.approval_evidence_available = true;
 			break;
@@ -75,8 +88,15 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 	if (audit.is_array()) {
 		for (const auto& item : audit) {
 			if (!item.is_object() || item.value("action", std::string{}) != "OPEN_INCIDENT") continue;
-			if (!view.request_id.empty() && item.value("request_id", std::string{}) != view.request_id) continue;
-			view.request_id = item.value("request_id", view.request_id);
+			const auto item_request_id = item.value("request_id", std::string{});
+			const auto item_correlation = item.value("source_correlation_id", std::string{});
+			if (!view.request_id.empty() && item_request_id != view.request_id) continue;
+			if (view.request_id.empty() && !view.source_correlation_id.empty() &&
+				item_correlation != view.source_correlation_id) {
+				continue;
+			}
+			view.request_id = item_request_id;
+			if (view.source_correlation_id.empty()) view.source_correlation_id = item_correlation;
 			if (!view.audit_evidence_available) {
 				view.audit_outcome = item.value("outcome", std::string{});
 				view.audit_evidence_available = true;
