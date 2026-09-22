@@ -197,6 +197,7 @@ int testnet_main(const sentum::cli::Options& options) {
     sentum::execution::TestnetStrategyRuntime runtime(options.symbol,risk,std::make_unique<MomentumStrategy>(),std::move(venue));
     runtime.start(); dashboard.set("health","healthy");
     auto notifications = sentum::operations::start_notification_dispatch_runtime();
+    auto incidents = sentum::operations::start_governed_incident_lifecycle_runtime(SENTUM_GIT_COMMIT);
     std::unique_ptr<sentum::ui::TerminalUi> tui;
     if (options.tui && sentum::ui::stdout_is_terminal()) { tui = std::make_unique<sentum::ui::TerminalUi>(); tui->start(); }
     while(runtime.running()&&!shutdown_requested.load(std::memory_order_relaxed)) std::this_thread::sleep_for(std::chrono::milliseconds(100));
