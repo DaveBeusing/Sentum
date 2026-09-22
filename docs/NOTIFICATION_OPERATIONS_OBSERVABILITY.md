@@ -14,11 +14,15 @@ The projection answers operational questions without calling providers and witho
 - which channels currently carry active, delivered or failed work;
 - whether the evidence indicates normal operation, attention or an incident candidate.
 
-## Current-state reduction
+## Durable current-state reduction
 
-Delivery evidence is append-only. Operational counts therefore use only the latest evidence record for each generation-safe delivery `dedup_key`.
+Delivery evidence is append-only and persisted in SQLite through `NotificationDeliveryEvidenceRepository`. Operational counts use only the latest persistent evidence record for each generation-safe delivery `dedup_key`.
 
-Historical transitions such as `PENDING -> DISPATCHED -> DELIVERED` remain in the evidence log but count as one current delivery whose latest state is `DELIVERED`.
+Persistent sequence, not wall-clock timestamp, defines transition order. Historical transitions such as `PENDING -> DISPATCHED -> DELIVERED` remain in the evidence log but count as one current delivery whose latest state is `DELIVERED`.
+
+The default durable latest-state query is bounded to 1024 dedup keys with a hard repository ceiling of 4096 records. A truncated current-state set is not accepted as partial truth and produces `UNAVAILABLE`.
+
+The cross-surface operations endpoint opens delivery evidence read-only from the configured runtime database and replaces volatile notification evidence with the durable latest-state set before reduction. Missing, unreadable or corrupt persistence fails closed. The endpoint never loads the full notification history during a normal refresh.
 
 Channel rows are sorted deterministically.
 
@@ -59,4 +63,6 @@ Notification delivery health cannot clear a kill switch, resume entries, approve
 - channel output is deterministic;
 - unavailable evidence remains fail-closed and authority-free.
 
-The target is attached to the existing sanitizer build graph for ASan, UBSan and TSan coverage.
+`notification_delivery_evidence_repository_tests` additionally verifies restart-safe idempotency, retry recovery, terminal-state persistence, bounded-query fail-closed behavior and durable cross-surface consumption.
+
+Both notification regressions remain attached to the sanitizer build graph for ASan, UBSan and TSan coverage. Durable schema and retention details are documented in `NOTIFICATION_DELIVERY_PERSISTENCE.md`.
