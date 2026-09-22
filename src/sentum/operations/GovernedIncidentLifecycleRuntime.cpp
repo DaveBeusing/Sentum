@@ -29,6 +29,7 @@ GovernedIncidentLifecycleRuntime::~GovernedIncidentLifecycleRuntime() {
 }
 
 void GovernedIncidentLifecycleRuntime::start() {
+	sentum::dashboard::DashboardState::global().set("db_path", database_path_);
 	bool expected = false;
 	if (!running_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
 	try {
