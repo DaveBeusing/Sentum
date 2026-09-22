@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -245,6 +246,17 @@ GovernedIncidentLifecycleRepository::GovernedIncidentLifecycleRepository(
 	GovernedIncidentLifecycleOpenMode mode)
 	: path_(std::move(path)), mode_(mode) {
 	if (path_.empty()) throw std::invalid_argument("governed incident lifecycle database path is empty");
+	if (mode_ == GovernedIncidentLifecycleOpenMode::ReadWriteCreate && path_ != ":memory:") {
+		const auto parent = std::filesystem::path(path_).parent_path();
+		if (!parent.empty()) {
+			std::error_code error;
+			std::filesystem::create_directories(parent, error);
+			if (error) {
+				throw std::runtime_error(
+					"failed to create governed incident lifecycle database directory: " + error.message());
+			}
+		}
+	}
 
 	const auto flags = mode_ == GovernedIncidentLifecycleOpenMode::ReadOnly
 		? SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
