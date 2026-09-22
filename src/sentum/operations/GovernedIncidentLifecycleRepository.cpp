@@ -938,12 +938,65 @@ nlohmann::json merge_governed_incident_lifecycle_snapshot(
 	if (!control_plane.is_object()) control_plane = nlohmann::json::object();
 
 	const auto lifecycle = repository.control_plane_snapshot(approval_limit, audit_limit);
-	for (auto it = lifecycle.begin(); it != lifecycle.end(); ++it) {
-		if ((it.key() == "governance_state" || it.key() == "evidence_status") && control_plane.contains(it.key())) {
-			continue;
+	const auto is_incident_action = [](const nlohmann::json& item) {
+		if (!item.is_object()) return false;
+		const auto action = item.value("action", std::string{});
+		return action == "OPEN_INCIDENT" ||
+			action == "ACKNOWLEDGE_INCIDENT" ||
+			action == "BEGIN_INCIDENT_RECOVERY" ||
+			action == "RESOLVE_INCIDENT" ||
+			action == "CLOSE_INCIDENT";
+	};
+
+	nlohmann::json approvals = nlohmann::json::array();
+	const auto existing_approvals = control_plane.value("approval_queue", nlohmann::json::array());
+	if (existing_approvals.is_array()) {
+		for (const auto& item : existing_approvals) {
+			if (!is_incident_action(item)) approvals.push_back(item);
 		}
-		control_plane[it.key()] = it.value();
 	}
+	for (const auto& item : lifecycle.at("approval_queue")) approvals.push_back(item);
+
+	std::vector<nlohmann::json> audit_rows;
+	const auto existing_audit = control_plane.value("audit_timeline", nlohmann::json::array());
+	if (existing_audit.is_array()) {
+		for (const auto& item : existing_audit) {
+			if (!is_incident_action(item)) audit_rows.push_back(item);
+		}
+	}
+	for (const auto& item : lifecycle.at("audit_timeline")) audit_rows.push_back(item);
+	std::stable_sort(audit_rows.begin(), audit_rows.end(), [](const auto& lhs, const auto& rhs) {
+		return lhs.value("timestamp_utc", std::string{}) > rhs.value("timestamp_utc", std::string{});
+	});
+	nlohmann::json audit = nlohmann::json::array();
+	for (auto& item : audit_rows) audit.push_back(std::move(item));
+
+	if (!control_plane.contains("governance_state")) {
+		control_plane["governance_state"] = lifecycle.at("governance_state");
+	}
+	if (!control_plane.contains("evidence_status")) {
+		control_plane["evidence_status"] = lifecycle.at("evidence_status");
+	}
+
+	control_plane["incident_state"] = lifecycle.at("incident_state");
+	control_plane["incident_workflow"] = lifecycle.at("incident_workflow");
+	control_plane["approval_queue"] = std::move(approvals);
+	control_plane["pending_approvals"] = control_plane["approval_queue"].size();
+	control_plane["approval_queue_total"] = control_plane["approval_queue"].size();
+	control_plane["approval_queue_truncated"] = lifecycle.value("approval_queue_truncated", false);
+	control_plane["audit_timeline"] = std::move(audit);
+	control_plane["audit_timeline_truncated"] =
+		control_plane.value("audit_timeline_truncated", false) ||
+		lifecycle.value("audit_timeline_truncated", false);
+
+	const auto lifecycle_recovery = lifecycle.at("recovery_workflow");
+	if (lifecycle_recovery.is_object() && !lifecycle_recovery.empty()) {
+		control_plane["recovery_workflow"] = lifecycle_recovery;
+		control_plane["recovery_state"] = lifecycle.at("recovery_state");
+	} else if (!control_plane.contains("recovery_state")) {
+		control_plane["recovery_state"] = lifecycle.at("recovery_state");
+	}
+
 	control_plane["execution_authorized"] = false;
 	merged["operations_control_plane"] = std::move(control_plane);
 	return merged;
