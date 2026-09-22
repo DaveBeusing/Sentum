@@ -121,12 +121,13 @@ struct IncidentRow {
 	std::string request_id;
 	std::string source_correlation_id;
 	std::string state;
+	std::string reconciliation_evidence_id;
 };
 
 IncidentRow load_incident(sqlite3* db, const std::string& incident_id) {
 	Statement statement(
 		db,
-		"SELECT incident_id,request_id,source_correlation_id,state FROM operations_incidents WHERE incident_id=?;",
+		"SELECT incident_id,request_id,source_correlation_id,state,reconciliation_evidence_id FROM operations_incidents WHERE incident_id=?;",
 		"failed to prepare governed incident lookup");
 	bind_text(statement.get(), 1, incident_id);
 	if (sqlite3_step(statement.get()) != SQLITE_ROW) {
@@ -137,6 +138,7 @@ IncidentRow load_incident(sqlite3* db, const std::string& incident_id) {
 	row.request_id = column_text(statement.get(), 1);
 	row.source_correlation_id = column_text(statement.get(), 2);
 	row.state = column_text(statement.get(), 3);
+	row.reconciliation_evidence_id = column_text(statement.get(), 4);
 	return row;
 }
 
@@ -671,7 +673,7 @@ bool GovernedIncidentLifecycleRepository::resolve_incident(
 			"INCIDENT_RESOLVED",
 			actor,
 			reason,
-			incident.state == "RECOVERY_IN_PROGRESS" ? "PRESERVED" : "");
+			incident.reconciliation_evidence_id);
 		commit_transaction();
 		return true;
 	} catch (...) {
@@ -690,7 +692,15 @@ bool GovernedIncidentLifecycleRepository::close_incident(
 	begin_transaction();
 	try {
 		const auto incident = load_incident(db_, incident_id);
-		transition_incident(db_, incident, {"RESOLVED"}, "CLOSED", "INCIDENT_CLOSED", actor, reason, "");
+		transition_incident(
+			db_,
+			incident,
+			{"RESOLVED"},
+			"CLOSED",
+			"INCIDENT_CLOSED",
+			actor,
+			reason,
+			incident.reconciliation_evidence_id);
 		commit_transaction();
 		return true;
 	} catch (...) {
