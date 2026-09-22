@@ -69,11 +69,15 @@ NotificationDeliveryAttempt restore_attempt(const NotificationDeliveryEvidenceRe
 
 } // namespace
 
-NotificationDeliveryEvidenceRepository::NotificationDeliveryEvidenceRepository(std::string path)
-	: path_(std::move(path)) {
+NotificationDeliveryEvidenceRepository::NotificationDeliveryEvidenceRepository(
+	std::string path,
+	NotificationDeliveryEvidenceOpenMode mode)
+	: path_(std::move(path)), mode_(mode) {
 	if (path_.empty()) throw std::invalid_argument("notification delivery evidence database path is empty");
 
-	const auto flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
+	const auto flags = mode_ == NotificationDeliveryEvidenceOpenMode::ReadOnly
+		? SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+		: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
 	if (sqlite3_open_v2(path_.c_str(), &db_, flags, nullptr) != SQLITE_OK) {
 		const auto message = sqlite_message(db_, "failed to open notification delivery evidence database");
 		if (db_) sqlite3_close(db_);
@@ -83,6 +87,8 @@ NotificationDeliveryEvidenceRepository::NotificationDeliveryEvidenceRepository(s
 
 	try {
 		sqlite3_busy_timeout(db_, 5000);
+		if (mode_ == NotificationDeliveryEvidenceOpenMode::ReadOnly) return;
+
 		exec_or_throw("PRAGMA journal_mode=WAL;");
 		exec_or_throw("PRAGMA synchronous=NORMAL;");
 		exec_or_throw(
@@ -142,6 +148,9 @@ void NotificationDeliveryEvidenceRepository::exec_or_throw(const char* sql) {
 }
 
 bool NotificationDeliveryEvidenceRepository::append(const NotificationDeliveryEvidenceRecord& record) {
+	if (mode_ == NotificationDeliveryEvidenceOpenMode::ReadOnly) {
+		throw std::logic_error("notification delivery evidence repository is read-only");
+	}
 	if (record.dedup_key.empty() || record.state.empty()) return false;
 	if (record.execution_authorized) {
 		throw std::invalid_argument("notification delivery evidence cannot authorize execution");
