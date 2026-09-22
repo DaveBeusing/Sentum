@@ -1,5 +1,6 @@
 #include <sentum/operations/GovernedIncidentLifecycleRuntime.hpp>
 #include <sentum/operations/NotificationDeliveryEvidenceRepository.hpp>
+#include <sentum/ui/CrossSurfaceOperationsView.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -78,6 +79,61 @@ void test_runtime_creates_only_governed_request() {
 	cleanup_database(path);
 }
 
+void test_cross_surface_uses_authoritative_lifecycle_state() {
+	const auto path = temporary_path("_projection.sqlite3");
+	try {
+		seed_terminal_failure(path);
+		sentum::operations::GovernedIncidentLifecycleRuntime runtime(path.string(), "test-sha");
+		runtime.tick_once();
+
+		sentum::operations::NotificationDeliveryEvidenceRepository notification(
+			path.string(), sentum::operations::NotificationDeliveryEvidenceOpenMode::ReadOnly);
+		sentum::operations::GovernedIncidentLifecycleRepository lifecycle(
+			path.string(), sentum::operations::GovernedIncidentLifecycleOpenMode::ReadOnly);
+		nlohmann::json base = {
+			{"health", "healthy"},
+			{"kill_switch_active", true},
+			{"market_data_connected", true},
+			{"entries_paused", true},
+			{"performance", {{"queue_pressure", "normal"}}}
+		};
+
+		auto view = sentum::ui::derive_cross_surface_operations_view(base, notification, lifecycle);
+		const auto request_id = view.at("notification_incident_workflow").at("request_id").get<std::string>();
+		require(!request_id.empty(), "cross-surface projection lost durable request identity");
+		require(view.at("notification_incident_workflow").at("approval_status") == "PENDING",
+			"cross-surface projection lost pending approval evidence");
+		require(view.at("notification_incident_workflow").at("incident_state") == "APPROVAL_PENDING",
+			"cross-surface projection lost lifecycle state");
+		require(view.at("notification_incident_workflow").at("execution_authorized") == false,
+			"cross-surface incident projection gained execution authority");
+		require(view.at("runtime").at("kill_switch_active") == true,
+			"incident projection changed kill-switch evidence");
+		require(view.at("runtime").at("entries_paused") == true,
+			"incident projection changed entry-pause evidence");
+
+		{
+			sentum::operations::GovernedIncidentLifecycleRepository writer(path.string());
+			writer.approve_open_incident_request(
+				request_id,
+				"operator-a",
+				"validated notification incident",
+				"NOTIFICATION_OPERATIONS:alert-7:2");
+		}
+		view = sentum::ui::derive_cross_surface_operations_view(base, notification, lifecycle);
+		require(view.at("notification_incident_workflow").at("approval_status") == "APPROVED",
+			"decided approval evidence disappeared from cross-surface projection");
+		require(view.at("notification_incident_workflow").at("incident_state") == "OPEN",
+			"approved incident state missing from cross-surface projection");
+		require(view.at("notification_incident_workflow").at("execution_authorized") == false,
+			"approved incident projection gained execution authority");
+	} catch (...) {
+		cleanup_database(path);
+		throw;
+	}
+	cleanup_database(path);
+}
+
 void test_runtime_restart_preserves_explicit_decision() {
 	const auto path = temporary_path("_restart.sqlite3");
 	try {
@@ -140,6 +196,7 @@ void test_missing_notification_evidence_never_invents_incident() {
 int main() {
 	try {
 		test_runtime_creates_only_governed_request();
+		test_cross_surface_uses_authoritative_lifecycle_state();
 		test_runtime_restart_preserves_explicit_decision();
 		test_missing_notification_evidence_never_invents_incident();
 		std::cout << "governed incident lifecycle runtime tests passed\n";
