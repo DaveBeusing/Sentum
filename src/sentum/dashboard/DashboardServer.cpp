@@ -18,6 +18,7 @@
 #include <sentum/dashboard/DashboardOperationsOverlay.hpp>
 #include <sentum/dashboard/DashboardRepository.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
+#include <sentum/operations/NotificationDeliveryEvidenceRepository.hpp>
 #include <sentum/ui/CrossSurfaceOperationsView.hpp>
 
 namespace sentum::dashboard {
@@ -85,6 +86,24 @@ nlohmann::json merged_runtime_state(const std::string& host, std::uint16_t port)
     return state;
 }
 
+nlohmann::json operations_view_from_durable_notification_evidence(const nlohmann::json& state) {
+    auto unavailable_state = state;
+    if (unavailable_state.contains("operations_control_plane") &&
+        unavailable_state["operations_control_plane"].is_object()) {
+        unavailable_state["operations_control_plane"].erase("notification_delivery_evidence");
+    }
+
+    const auto database_path = state.value("db_path", std::string("log/klines.sqlite3"));
+    try {
+        sentum::operations::NotificationDeliveryEvidenceRepository notification_evidence(
+            database_path,
+            sentum::operations::NotificationDeliveryEvidenceOpenMode::ReadOnly);
+        return sentum::ui::derive_cross_surface_operations_view(state, notification_evidence);
+    } catch (...) {
+        return sentum::ui::derive_cross_surface_operations_view(unavailable_state);
+    }
+}
+
 http::response<http::string_body> json_response(const nlohmann::json& value, unsigned version) {
     http::response<http::string_body> response{http::status::ok, version};
     response.set(http::field::content_type, "application/json; charset=utf-8");
@@ -118,7 +137,7 @@ http::response<http::string_body> build_response(const http::request<http::strin
             return json_response(merged_runtime_state(host, port), request.version());
         if (starts_with(target, "/api/operations")) {
             const auto state = merged_runtime_state(host, port);
-            return json_response(sentum::ui::derive_cross_surface_operations_view(state), request.version());
+            return json_response(operations_view_from_durable_notification_evidence(state), request.version());
         }
         if (starts_with(target, "/api/trades"))
             return json_response(repository.recent_trades(query_limit(target, 100, 1000)), request.version());
