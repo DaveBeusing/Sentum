@@ -54,7 +54,8 @@ void GovernedIncidentLifecycleRuntime::tick_once() {
 	try {
 		const auto candidate = derive_notification_incident_candidate(notification_evidence_);
 		if (candidate.state == NotificationIncidentCandidateState::ProposalReady &&
-			!candidate.source_correlation_id.empty()) {
+			!candidate.source_correlation_id.empty() &&
+			!lifecycle_.request_id_for_correlation(candidate.source_correlation_id).has_value()) {
 			lifecycle_.submit_open_incident_request(
 				candidate.source_correlation_id,
 				"notification-runtime",
