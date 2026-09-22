@@ -113,7 +113,8 @@ inline NotificationDeliveryAttempt mark_notification_delivered(
 inline NotificationDeliveryAttempt mark_notification_failed(
 	NotificationDeliveryAttempt current,
 	std::string failure_code,
-	std::string failure_reason) {
+	std::string failure_reason,
+	bool retryable = true) {
 	if (current.state != NotificationDeliveryState::Dispatched || current.terminal) {
 		current.execution_authorized = false;
 		return current;
@@ -121,8 +122,25 @@ inline NotificationDeliveryAttempt mark_notification_failed(
 	current.state = NotificationDeliveryState::Failed;
 	current.failure_code = std::move(failure_code);
 	current.failure_reason = std::move(failure_reason);
-	current.terminal = current.attempt >= current.max_attempts;
+	current.terminal = !retryable || current.attempt >= current.max_attempts;
 	current.retry_backoff_seconds = current.terminal ? 0 : notification_retry_backoff_seconds(current.attempt);
+	current.execution_authorized = false;
+	return current;
+}
+
+inline NotificationDeliveryAttempt mark_notification_terminal_failure(
+	NotificationDeliveryAttempt current,
+	std::string failure_code,
+	std::string failure_reason) {
+	if (current.state == NotificationDeliveryState::Delivered || current.terminal) {
+		current.execution_authorized = false;
+		return current;
+	}
+	current.state = NotificationDeliveryState::Failed;
+	current.failure_code = std::move(failure_code);
+	current.failure_reason = std::move(failure_reason);
+	current.retry_backoff_seconds = 0;
+	current.terminal = true;
 	current.execution_authorized = false;
 	return current;
 }
