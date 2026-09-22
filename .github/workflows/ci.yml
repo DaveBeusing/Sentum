@@ -288,6 +288,11 @@ jobs:
             --report log/rc_package.json \
             --summary log/rc_package.md
           cat log/rc_package.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Validate release candidate handoff layout
+        run: |
+          python3 tools/ci/validate_rc_handoff.py \
+            --artifact-root . \
+            --expected-sha "${GITHUB_SHA}"
       - name: Upload release candidate handoff
         uses: actions/upload-artifact@v4
         with:

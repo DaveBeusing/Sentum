@@ -117,7 +117,7 @@ def main() -> int:
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_sha": os.environ.get("GITHUB_SHA", "unknown"),
-        "workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
+        "workflow_run_id": os.environ.get("SOURCE_WORKFLOW_RUN_ID", os.environ.get("GITHUB_RUN_ID", "unknown")),
         "environment_class": "ci_rehearsal",
         "status": status,
         "checks": checks,

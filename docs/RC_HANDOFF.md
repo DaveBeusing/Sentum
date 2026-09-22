@@ -33,6 +33,23 @@ The RC bundle contains:
 - `MANIFEST.json` with file sizes and SHA-256 digests;
 - `SHA256SUMS` for files inside the bundle.
 
+## CI artifact handoff layout
+
+The GitHub Actions handoff artifact is named `sentum-rc-<full-git-sha>`. The uploaded artifact preserves one canonical repository-relative layout:
+
+```text
+artifacts/sentum-rc-<first-12-git-sha>.tar.gz
+artifacts/sentum-rc-<first-12-git-sha>.tar.gz.sha256
+log/rc_package.json
+log/rc_package.md
+```
+
+When the downstream production-operations workflow downloads that artifact into `evidence/rc`, the RC package report is therefore consumed from `evidence/rc/log/rc_package.json`.
+
+Before the production-operations gate executes, `tools/ci/validate_rc_handoff.py` verifies the exact directory structure, report schema and PASS state, full Git SHA, expected archive path, archive SHA-256 and checksum-file contents. Missing, malformed or commit-mismatched evidence is a hard failure; alternate fallback locations are not accepted.
+
+The downstream workflow selects the artifact by the completed Core CI run's `head_sha` and `run-id`. Production-operations evidence retains that source workflow run ID so reports remain traceable to the exact Core CI execution that produced the RC.
+
 The following are deliberately excluded:
 
 - `config/config.json`;
