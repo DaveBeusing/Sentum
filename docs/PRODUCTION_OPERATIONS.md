@@ -16,6 +16,19 @@ A production promotion must not begin unless all of the following are true:
 - an operator is identified for promotion, verification and rollback ownership;
 - trading remains fail-closed until runtime health, market connectivity and reconciliation are verified.
 
+## Automated RC evidence preflight
+
+The production-operations workflow consumes the completed Core CI artifact `sentum-rc-<full-git-sha>` for the exact evaluated `head_sha` and source workflow run ID.
+
+After download into `evidence/rc`, the required evidence locations are:
+
+- `evidence/rc/log/rc_package.json`;
+- `evidence/rc/log/rc_package.md`;
+- `evidence/rc/artifacts/sentum-rc-<first-12-git-sha>.tar.gz`;
+- `evidence/rc/artifacts/sentum-rc-<first-12-git-sha>.tar.gz.sha256`.
+
+The handoff validator checks this structure, the RC report status and schema, Git SHA equality, archive path, actual archive digest and checksum evidence before the production-operations gate runs. Any mismatch remains fail-closed.
+
 ## Deployment procedure
 
 1. Record the RC Git SHA, archive checksum, target environment, operator and deployment start time.
