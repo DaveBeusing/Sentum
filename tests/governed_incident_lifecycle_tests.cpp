@@ -240,6 +240,8 @@ void test_merge_preserves_other_control_plane_evidence() {
 					 {"actor", "operator-z"}, {"reason", "scheduled"},
 					 {"outcome", "APPROVED"}, {"timestamp_utc", "2026-09-22T20:00:00Z"}}
 				})},
+				{"audit_timeline_total", 5},
+				{"audit_timeline_truncated", true},
 				{"recovery_state", "WAITING_RECONCILIATION"},
 				{"recovery_workflow", {
 					{"state", "WAITING_RECONCILIATION"},
@@ -256,6 +258,8 @@ void test_merge_preserves_other_control_plane_evidence() {
 		require(control.at("approval_queue").size() == 2, "non-incident approval row was replaced");
 		require(control.at("approval_queue_truncated") == true, "combined bounded approval queue lost truncation");
 		require(control.at("audit_timeline").size() == 2, "non-incident audit row was replaced");
+		require(control.at("audit_timeline_total") == 6, "bounded non-incident audit total was lost");
+		require(control.at("audit_timeline_truncated") == true, "combined audit truncation was lost");
 		require(control.at("recovery_state") == "WAITING_RECONCILIATION",
 			"incident lifecycle replaced general recovery state");
 		require(control.at("incident_recovery_state") == "IDLE", "idle incident recovery projection mismatch");
