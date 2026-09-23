@@ -4,7 +4,6 @@
 
 import argparse
 import json
-import math
 import os
 import subprocess
 import sys
@@ -319,13 +318,14 @@ def main():
     started_utc = utc_now()
     overall_started = time.monotonic()
     failures = []
-    commands = []
+    command_specs = []
+    command_results = []
     parsed_results = []
 
     try:
-        commands = scenario_commands(args)
+        command_specs = scenario_commands(args)
         remaining_timeout = args.timeout_seconds
-        for command in commands:
+        for command in command_specs:
             result = monitor_command(
                 command,
                 max(0.1, remaining_timeout),
@@ -333,6 +333,7 @@ def main():
             )
             parsed = parse_json_line(result["stdout"])
             result["parsed_result"] = parsed
+            command_results.append(result)
             parsed_results.append(parsed if parsed is not None else {})
             if result["timed_out"]:
                 failures.append("qualification command timed out")
@@ -351,7 +352,7 @@ def main():
         failures.append(str(error))
 
     actual_duration = time.monotonic() - overall_started
-    rss = merge_rss(commands, args.max_rss_growth_kib) if commands else summarize_rss([], args.max_rss_growth_kib)
+    rss = merge_rss(command_results, args.max_rss_growth_kib) if command_results else summarize_rss([], args.max_rss_growth_kib)
     if rss["unbounded_growth_detected"]:
         failures.append(
             f"RSS growth guardrail exceeded: growth={rss['growth_kib']} KiB "
@@ -359,20 +360,20 @@ def main():
         )
 
     metrics = aggregate_scenario_metrics(parsed_results)
-    timed_out = any(command.get("timed_out", False) for command in commands)
-    command_failures = any(command.get("returncode", 1) != 0 for command in commands)
+    timed_out = any(command.get("timed_out", False) for command in command_results)
+    command_failures = any(command.get("returncode", 1) != 0 for command in command_results)
     git_sha = resolve_git_sha()
-    scenario_evidence_present = bool(commands) and all(
+    scenario_evidence_present = bool(command_results) and all(
         command.get("parsed_result") is not None
-        for command in commands
+        for command in command_results
         if args.scenario not in ("runtime-restart", "persistence-write-failure")
     )
     if args.scenario in ("runtime-restart", "persistence-write-failure"):
-        scenario_evidence_present = bool(commands) and not command_failures
+        scenario_evidence_present = bool(command_results) and not command_failures
 
     evidence_complete = (
         git_sha != "unknown"
-        and bool(commands)
+        and bool(command_results)
         and scenario_evidence_present
         and not timed_out
         and not command_failures
@@ -411,7 +412,7 @@ def main():
                 "elapsed_seconds": command["elapsed_seconds"],
                 "stderr": command["stderr"][-4000:],
             }
-            for command in commands
+            for command in command_results
         ],
     }
 
