@@ -13,11 +13,11 @@
       "runner_image": "ubuntu-24.04",
       "compiler": "GNU 13.3.0",
       "observed_ns_per_event": {
-        "500x2000": 62.10,
+        "500x2000": 62.1,
         "1000x1000": 77.74,
         "2000x500": 63.64
       },
-      "observed_parser_allocations_per_parse": 0.0
+      "observed_parser_allocations_per_parse": 0
     },
     "ui_and_scanner_qualification": {
       "workflow_run_ids": [
@@ -37,17 +37,103 @@
       "runner_image": "ubuntu-24.04",
       "compiler": "GNU 13.3.0",
       "scanner_ns_per_event": {
-        "500x200": [314.07, 301.53, 291.17, 297.98, 294.89],
-        "1000x100": [324.53, 324.00, 316.19, 318.59, 325.11],
-        "2000x50": [332.68, 318.55, 325.37, 352.43, 331.16]
+        "500x200": [
+          314.07,
+          301.53,
+          291.17,
+          297.98,
+          294.89
+        ],
+        "1000x100": [
+          324.53,
+          324,
+          316.19,
+          318.59,
+          325.11
+        ],
+        "2000x50": [
+          332.68,
+          318.55,
+          325.37,
+          352.43,
+          331.16
+        ]
       },
       "dashboard_snapshot_ns_per_poll": {
-        "unconditional": [25484.73, 25652.20, 25613.78, 25394.74, 32495.01],
-        "unchanged_conditional": [24.33, 24.26, 24.27, 24.30, 46.55]
+        "unconditional": [
+          25484.73,
+          25652.2,
+          25613.78,
+          25394.74,
+          32495.01
+        ],
+        "unchanged_conditional": [
+          24.33,
+          24.26,
+          24.27,
+          24.3,
+          46.55
+        ]
       },
       "terminal_render_ns_per_frame": {
-        "unchanged": [851.721, 854.565, 904.793, 848.88, 884.717],
-        "changed": [1033.91, 1047.48, 1099.58, 1029.88, 1106.61]
+        "unchanged": [
+          851.721,
+          854.565,
+          904.793,
+          848.88,
+          884.717
+        ],
+        "changed": [
+          1033.91,
+          1047.48,
+          1099.58,
+          1029.88,
+          1106.61
+        ]
+      },
+      "build_mode": "Release",
+      "successful_runs": 5,
+      "statistic_note": "Median, worst sample and coefficient of variation are recorded across five successful hosted-runner runs. Cross-run p95/p99 are not used because five samples are insufficient for meaningful tail-percentile qualification.",
+      "scanner_summary": {
+        "500x200": {
+          "median_ns_per_event": 297.98,
+          "worst_ns_per_event": 314.07,
+          "coefficient_of_variation_percent": 2.93
+        },
+        "1000x100": {
+          "median_ns_per_event": 324,
+          "worst_ns_per_event": 325.11,
+          "coefficient_of_variation_percent": 1.25
+        },
+        "2000x50": {
+          "median_ns_per_event": 331.16,
+          "worst_ns_per_event": 352.43,
+          "coefficient_of_variation_percent": 3.82
+        }
+      },
+      "dashboard_snapshot_summary": {
+        "unconditional": {
+          "median_ns_per_poll": 25613.78,
+          "worst_ns_per_poll": 32495.01,
+          "coefficient_of_variation_percent": 11.56
+        },
+        "unchanged_conditional": {
+          "median_ns_per_poll": 24.3,
+          "worst_ns_per_poll": 46.55,
+          "coefficient_of_variation_percent": 34.64
+        }
+      },
+      "terminal_render_summary": {
+        "unchanged": {
+          "median_ns_per_frame": 854.565,
+          "worst_ns_per_frame": 904.793,
+          "coefficient_of_variation_percent": 2.84
+        },
+        "changed": {
+          "median_ns_per_frame": 1047.48,
+          "worst_ns_per_frame": 1106.61,
+          "coefficient_of_variation_percent": 3.46
+        }
       }
     }
   },
@@ -59,28 +145,28 @@
         "name": "500x2000",
         "symbols": 500,
         "events_per_symbol": 2000,
-        "max_median_ns_per_event": 250.0,
-        "max_worst_ns_per_event": 400.0
+        "max_median_ns_per_event": 250,
+        "max_worst_ns_per_event": 400
       },
       {
         "name": "1000x1000",
         "symbols": 1000,
         "events_per_symbol": 1000,
-        "max_median_ns_per_event": 250.0,
-        "max_worst_ns_per_event": 400.0
+        "max_median_ns_per_event": 250,
+        "max_worst_ns_per_event": 400
       },
       {
         "name": "2000x500",
         "symbols": 2000,
         "events_per_symbol": 500,
-        "max_median_ns_per_event": 250.0,
-        "max_worst_ns_per_event": 400.0
+        "max_median_ns_per_event": 250,
+        "max_worst_ns_per_event": 400
       }
     ]
   },
   "parser": {
     "allocation_state": "ENFORCED",
-    "max_allocations_per_parse": 0.0
+    "max_allocations_per_parse": 0
   },
   "scanner_hot_path": {
     "timing_state": "ENFORCED",
@@ -92,24 +178,24 @@
         "symbols": 500,
         "events_per_symbol": 200,
         "expected_top_count": 5,
-        "max_median_ns_per_event": 375.0,
-        "max_worst_ns_per_event": 450.0
+        "max_median_ns_per_event": 375,
+        "max_worst_ns_per_event": 450
       },
       {
         "name": "1000x100",
         "symbols": 1000,
         "events_per_symbol": 100,
         "expected_top_count": 5,
-        "max_median_ns_per_event": 390.0,
-        "max_worst_ns_per_event": 475.0
+        "max_median_ns_per_event": 390,
+        "max_worst_ns_per_event": 475
       },
       {
         "name": "2000x50",
         "symbols": 2000,
         "events_per_symbol": 50,
         "expected_top_count": 5,
-        "max_median_ns_per_event": 420.0,
-        "max_worst_ns_per_event": 525.0
+        "max_median_ns_per_event": 420,
+        "max_worst_ns_per_event": 525
       }
     ]
   },
@@ -125,10 +211,10 @@
     "repetitions": 5,
     "iterations": 250000,
     "max_unchanged_payload_bytes": 0,
-    "max_median_unchanged_ns_per_frame": 1050.0,
-    "max_worst_unchanged_ns_per_frame": 1300.0,
-    "max_median_changed_ns_per_frame": 1300.0,
-    "max_worst_changed_ns_per_frame": 1600.0
+    "max_median_unchanged_ns_per_frame": 1050,
+    "max_worst_unchanged_ns_per_frame": 1300,
+    "max_median_changed_ns_per_frame": 1300,
+    "max_worst_changed_ns_per_frame": 1600
   },
   "runtime_qualification": {
     "memory_state": "OBSERVED",
