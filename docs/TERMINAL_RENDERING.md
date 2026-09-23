@@ -107,9 +107,9 @@ The header reports runtime truth only; it does not infer exchange state or inven
 1. unconditional `snapshot()` copying;
 2. `snapshot_if_changed()` while the generation is unchanged.
 
-CI records this benchmark as **OBSERVED** evidence. AP-05 does not derive a production SLA from hosted-runner timing.
+CI keeps dashboard snapshot timing as **OBSERVED** evidence because the hosted-runner measurements show materially higher variance than the scanner and terminal-render benchmarks. No production SLA is derived from that timing.
 
-The correctness requirement is stronger than the timing observation: unchanged conditional polling must report zero snapshot copies.
+The correctness requirement is independently **ENFORCED** by the consolidated performance gate: unchanged conditional polling must report zero snapshot copies.
 
 CI also runs dashboard snapshot consistency and terminal refresh-policy tests in Release, ASan, UBSan and TSan configurations.
 
