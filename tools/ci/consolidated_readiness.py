@@ -105,8 +105,10 @@ def validate_evidence(
 			f"environment class expected one of {allowed_environments}, got {environment}"
 		)
 
+	bindings: dict[str, Any] = {}
 	for field in contract.get("required_fields", []):
 		value = nested_value(payload, str(field))
+		bindings[str(field)] = value
 		if value is None or value == "":
 			violations.append(f"required field missing: {field}")
 
@@ -131,6 +133,7 @@ def validate_evidence(
 		"timestamp_field": timestamp_field,
 		"age_hours": age_hours,
 		"workflow_run_id": payload.get("workflow_run_id"),
+		"bindings": bindings,
 		"result": "PASS" if not violations else "FAIL",
 		"violations": violations,
 	}
@@ -198,10 +201,27 @@ def evaluate(
 				"result": "FAIL",
 				"violations": [str(error)],
 			}
+		rc_result = next((item for item in results if item.get("name") == "rc_package"), None)
+		rc_binary_sha256 = (
+			rc_result.get("bindings", {}).get("binary_sha256")
+			if isinstance(rc_result, dict)
+			else None
+		)
+		target_artifact_sha256 = checked.get("bindings", {}).get("artifact_sha256")
+		if (
+			checked.get("result") == "PASS"
+			and rc_binary_sha256 is not None
+			and target_artifact_sha256 != rc_binary_sha256
+		):
+			checked["violations"].append(
+				"artifact_sha256 does not match the RC package binary_sha256"
+			)
+			checked["result"] = "FAIL"
 		target_result = {
 			"state": "ACCEPTED" if checked["result"] == "PASS" else "REJECTED",
 			"result": checked["result"],
 			"evidence": checked,
+			"expected_artifact_sha256": rc_binary_sha256,
 		}
 		if checked["result"] != "PASS":
 			violations.extend(
