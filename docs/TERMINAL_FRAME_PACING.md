@@ -1,6 +1,6 @@
 # Terminal renderer and frame pacing contract
 
-AP-06 separates terminal diff generation and pacing policy from `TerminalUi` so renderer behavior can be tested and benchmarked without writing to a real terminal, while the production terminal consumes the same contract.
+terminal frame-pacing separates terminal diff generation and pacing policy from `TerminalUi` so renderer behavior can be tested and benchmarked without writing to a real terminal, while the production terminal consumes the same contract.
 
 ## Rendering invariants
 
@@ -35,4 +35,4 @@ This keeps presentation cadence bounded without making UI timing part of trading
 
 ## Operational boundary
 
-AP-06 changes presentation work only. It does not alter Strategy, Risk, Execution, Position/Trade State or Persistence semantics. Full redraws remain explicit UI events, and the terminal remains a consumer of runtime truth rather than an execution authority.
+terminal frame-pacing changes presentation work only. It does not alter Strategy, Risk, Execution, Position/Trade State or Persistence semantics. Full redraws remain explicit UI events, and the terminal remains a consumer of runtime truth rather than an execution authority.
