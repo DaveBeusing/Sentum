@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -17,6 +18,14 @@ def load_json(path: Path) -> dict:
 	return json.loads(path.read_text(encoding="utf-8"))
 
 
+def sha256(path: Path) -> str:
+	digest = hashlib.sha256()
+	with path.open("rb") as stream:
+		for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+			digest.update(chunk)
+	return digest.hexdigest()
+
+
 def main() -> int:
 	parser = argparse.ArgumentParser(description="Validate Sentum production control-plane governance")
 	parser.add_argument("--policy", default="config/operations_governance_policy.json")
@@ -27,7 +36,8 @@ def main() -> int:
 	args = parser.parse_args()
 
 	policy = load_json(Path(args.policy))
-	resilience = load_json(Path(args.resilience))
+	resilience_path = Path(args.resilience)
+	resilience = load_json(resilience_path)
 	violations: list[str] = []
 
 	expected_environment = str(policy.get("environment_class", "ci_rehearsal"))
@@ -104,6 +114,7 @@ def main() -> int:
 			"resilience_status": resilience.get("status"),
 			"resilience_git_sha": resilience.get("git_sha"),
 			"resilience_environment_class": resilience.get("environment_class"),
+			"resilience_sha256": sha256(resilience_path),
 		},
 		"action_classes": {
 			"automated": sorted(automated),

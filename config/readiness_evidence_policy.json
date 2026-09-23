@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "required_repository_evidence": {
+    "rc_package": {
+      "producer": "Sentum Core CI / Release candidate package",
+      "schema_version": 1,
+      "git_sha_field": "git_sha",
+      "status_field": "status",
+      "accepted_statuses": [
+        "PASS"
+      ],
+      "environment_field": "environment_class",
+      "allowed_environment_classes": [
+        "ci_artifact"
+      ],
+      "timestamp_fields": [
+        "generated_at"
+      ],
+      "max_age_hours": 720,
+      "required_fields": [
+        "binary_sha256",
+        "archive_sha256",
+        "manifest.release_readiness_sha256"
+      ]
+    },
+    "production_operations": {
+      "producer": "Sentum Production Operations Gate",
+      "schema_version": 1,
+      "git_sha_field": "git_sha",
+      "status_field": "status",
+      "accepted_statuses": [
+        "PASS"
+      ],
+      "environment_field": "environment_class",
+      "allowed_environment_classes": [
+        "ci_rehearsal"
+      ],
+      "timestamp_fields": [
+        "generated_at"
+      ],
+      "max_age_hours": 720,
+      "required_fields": [
+        "rc_package.sha256"
+      ]
+    },
+    "operational_validation": {
+      "producer": "operational_validation_rehearsal.py",
+      "schema_version": 1,
+      "git_sha_field": "git_sha",
+      "status_field": "status",
+      "accepted_statuses": [
+        "PASS"
+      ],
+      "environment_field": "environment_class",
+      "allowed_environment_classes": [
+        "ci_rehearsal"
+      ],
+      "timestamp_fields": [
+        "generated_at"
+      ],
+      "max_age_hours": 720
+    },
+    "continuous_readiness": {
+      "producer": "continuous_readiness_rehearsal.py",
+      "schema_version": 1,
+      "git_sha_field": "git_sha",
+      "status_field": "status",
+      "accepted_statuses": [
+        "PASS"
+      ],
+      "environment_field": "environment_class",
+      "allowed_environment_classes": [
+        "ci_rehearsal"
+      ],
+      "timestamp_fields": [
+        "generated_at"
+      ],
+      "max_age_hours": 720
+    },
+    "reliability": {
+      "producer": "reliability_gate.py",
+      "schema_version": 1,
+      "git_sha_field": "git_sha",
+      "status_field": "status",
+      "accepted_statuses": [
+        "PASS"
+      ],
+      "environment_field": "environment_class",
+      "allowed_environment_classes": [
+        "ci_rehearsal"
+      ],
+      "timestamp_fields": [
+        "generated_at"
+      ],
+      "max_age_hours": 720,
+      "required_fields": [
+        "upstream.continuous_readiness_sha256"
+      ]
+    },
+    "resilience": {
+      "producer": "resilience_guardrail_gate.py",
+      "schema_version": 1,
+      "git_sha_field": "git_sha",
+      "status_field": "status",
+      "accepted_statuses": [
+        "PASS"
+      ],
+      "environment_field": "environment_class",
+      "allowed_environment_classes": [
+        "ci_rehearsal"
+      ],
+      "timestamp_fields": [
+        "generated_at"
+      ],
+      "max_age_hours": 720,
+      "required_fields": [
+        "upstream.reliability_sha256"
+      ]
+    },
+    "operations_control_plane": {
+      "producer": "operations_control_plane_gate.py",
+      "schema_version": 1,
+      "git_sha_field": "git_sha",
+      "status_field": "status",
+      "accepted_statuses": [
+        "PASS"
+      ],
+      "environment_field": "environment_class",
+      "allowed_environment_classes": [
+        "ci_rehearsal"
+      ],
+      "timestamp_fields": [
+        "generated_at"
+      ],
+      "max_age_hours": 720,
+      "required_fields": [
+        "upstream.resilience_sha256"
+      ]
+    }
+  },
+  "target_acceptance": {
+    "producer": "deployment operator",
+    "schema_version": 1,
+    "git_sha_field": "git_sha",
+    "status_field": "status",
+    "accepted_statuses": [
+      "ACCEPTED"
+    ],
+    "environment_field": "environment_class",
+    "allowed_environment_classes": [
+      "target_environment"
+    ],
+    "timestamp_fields": [
+      "validated_at_utc",
+      "observation_window.end_utc"
+    ],
+    "max_age_hours": 24,
+    "required_fields": [
+      "validated_at_utc",
+      "artifact_sha256",
+      "target_environment",
+      "operator",
+      "observation_window.start_utc",
+      "observation_window.end_utc"
+    ]
+  },
+  "classification": {
+    "core_ci_runtime_qualification": "release_blocking",
+    "independent_research_validation": "release_blocking",
+    "extended_runtime_qualification": "scheduled_advisory",
+    "target_environment_acceptance": "deployment_blocking"
+  },
+  "artifact_links": [
+    {
+      "upstream": "rc_package",
+      "downstream": "production_operations",
+      "downstream_field": "rc_package.sha256"
+    },
+    {
+      "upstream": "continuous_readiness",
+      "downstream": "reliability",
+      "downstream_field": "upstream.continuous_readiness_sha256"
+    },
+    {
+      "upstream": "reliability",
+      "downstream": "resilience",
+      "downstream_field": "upstream.reliability_sha256"
+    },
+    {
+      "upstream": "resilience",
+      "downstream": "operations_control_plane",
+      "downstream_field": "upstream.resilience_sha256"
+    }
+  ]
+}

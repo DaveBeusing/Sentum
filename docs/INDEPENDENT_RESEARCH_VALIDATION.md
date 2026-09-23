@@ -75,6 +75,10 @@ Core CI executes the verifier regression suite and runs a compact canonical mana
 
 ## Model promotion boundary
 
-Independent research validation is currently additional research evidence. Existing model-promotion policy is intentionally unchanged.
+The canonical Independent Research Validation report produced in Core CI is a release-blocking input to repository Release Readiness. Existing model-promotion policy is intentionally unchanged.
 
-A verifier `PASS` is not interpreted as profitability, production readiness or permission to promote a model. Any future requirement to make independent validation a model-promotion gate must be introduced explicitly as a separate policy change after the report contract is considered stable.
+A verifier `PASS` is not interpreted as profitability, target-environment production acceptance, execution readiness or permission to promote a model. Making this evidence a model-promotion gate would require a separate explicit policy change.
+
+## Readiness relationship
+
+See [Readiness Evidence Contract](READINESS_EVIDENCE.md) for how canonical research validation participates in repository release evidence without becoming execution authority.

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AP-17 defines the operator-facing control-surface contract that combines runtime safety, workspace context and operational-governance evidence without creating a second trading authority.
+operator control-surface defines the operator-facing control-surface contract that combines runtime safety, workspace context and operational-governance evidence without creating a second trading authority.
 
 The surface is presentation-only. It must never infer permission to trade, clear safety interlocks, synthesize execution truth or mutate Risk/Execution state.
 
@@ -172,17 +172,17 @@ The generated surface contains:
 8. bounded approval queue and audit timeline rows;
 9. live keyboard/focus state.
 
-The production `TerminalUi` hook combines these lines with the existing terminal frame before the AP-06 diff is calculated. It reuses the cached dashboard snapshot, active tab and current operator-navigation state and introduces no second snapshot read, polling path or output stream.
+The production `TerminalUi` hook combines these lines with the existing terminal frame before the terminal frame-pacing diff is calculated. It reuses the cached dashboard snapshot, active tab and current operator-navigation state and introduces no second snapshot read, polling path or output stream.
 
 The terminal-render regression suite requires an identical second operator frame, including workflow, approval, audit and navigation rows, to produce zero payload bytes and zero changed rows.
 
 ## Sanitizer regression integration
 
-The Core CI sanitizer jobs build an explicit legacy regression-target list. New AP-17 regression executables are attached as CMake dependencies of the already-built `sentum_operational_safety_policy_tests` target. This guarantees that ASan, UBSan and TSan build the operator action, workflow, audit/approval and navigation regressions before CTest executes them, avoiding registered-but-unbuilt test executables.
+The Core CI sanitizer jobs build an explicit legacy regression-target list. New operator control-surface regression executables are attached as CMake dependencies of the already-built `sentum_operational_safety_policy_tests` target. This guarantees that ASan, UBSan and TSan build the operator action, workflow, audit/approval and navigation regressions before CTest executes them, avoiding registered-but-unbuilt test executables.
 
 ## Performance and rendering invariant
 
-AP-17 preserves AP-06 terminal rendering behavior:
+operator control-surface preserves terminal frame-pacing terminal rendering behavior:
 
 - presentation helpers remain deterministic and side-effect free;
 - unchanged source state produces unchanged frame content;

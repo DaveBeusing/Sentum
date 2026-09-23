@@ -14,7 +14,7 @@ Runtime reliability is validated at three different cadences:
 2. Core CI runs a short Paper soak plus the deterministic fault suite on every pull request and push to `master`;
 3. the dedicated `Sentum Runtime Qualification` workflow runs a longer Paper soak and every supported fault scenario on a schedule or by manual dispatch.
 
-The longer workflow is evidence for operational qualification. It is not currently consumed by Release Readiness or the Production Operations Gate.
+The bounded Core CI `paper-soak` and `all-faults` reports are release-blocking inputs to Release Readiness. The longer scheduled/manual workflow remains advisory qualification evidence and is not silently substituted for either Core CI evidence or target-environment acceptance.
 
 ## Build
 
@@ -214,7 +214,7 @@ The Core CI scope remains bounded and does not contain long-duration soak tests.
 - runs every fault/recovery scenario separately after the soak;
 - uploads all JSON and Markdown evidence for 30 days.
 
-A scheduled qualification failure is visible as a failed dedicated workflow. It does not block unrelated pull-request feedback and is not currently an input to Release Readiness.
+A scheduled qualification failure is visible as a failed dedicated workflow. It does not block unrelated pull-request feedback and is not a direct Release Readiness input. Core CI qualification smoke is release-blocking; the extended workflow remains scheduled advisory evidence.
 
 ## Sanitizers
 
@@ -246,6 +246,10 @@ Runtime qualification does not:
 - synthesize exchange-confirmed fills;
 - change Risk or Strategy decisions;
 - reinterpret an ambiguous exchange state as healthy;
-- modify the Production Operations Gate.
+- authorize target-environment acceptance or production-money trading.
 
 The qualification harness observes and asserts the existing runtime authority model; it does not become execution authority.
+
+## Evidence hierarchy
+
+See [Readiness Evidence Contract](READINESS_EVIDENCE.md) for the authoritative classification of Core CI qualification, extended qualification, release-blocking evidence and target-environment acceptance.

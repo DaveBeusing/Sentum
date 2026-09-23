@@ -1,10 +1,10 @@
-# AP-21 Production Notification Operations Acceptance
+# Production Notification Operations Acceptance
 
-AP-21 is accepted only when the final pull-request head satisfies this contract and Core CI succeeds for that exact head.
+Notification operations are accepted only when the final pull-request head satisfies this contract and Core CI succeeds for that exact head.
 
 ## Required capabilities
 
-- Notification delivery operations are derived from AP-20 append-only delivery evidence.
+- Notification delivery operations are derived from append-only notification delivery evidence.
 - Only the latest record per generation-safe delivery dedup key contributes to current-state counts.
 - Pending, dispatched, delivered, failed, retriable-failed, terminal-failed and backlog counts are observable.
 - Channel operations are deterministically ordered and expose active, delivered and failed counts.
@@ -17,7 +17,7 @@ AP-21 is accepted only when the final pull-request head satisfies this contract 
 
 ## Authority boundaries
 
-The AP-21 operations projection is advisory and read-only.
+The notification-operations projection is advisory and read-only.
 
 It must keep:
 
@@ -28,7 +28,7 @@ It must not call notification providers, acknowledge or resolve alerts, clear ki
 
 ## Required regression evidence
 
-The final head must build and run the AP-21 notification operations regression together with the existing cross-surface/dashboard regressions. The AP-21 regression must remain attached to the sanitizer build graph so ASan, UBSan and TSan do not register an unbuilt test executable.
+The final head must build and run the notification operations regression together with the existing cross-surface/dashboard regressions. The notification operations regression must remain attached to the sanitizer build graph so ASan, UBSan and TSan do not register an unbuilt test executable.
 
 Required scenarios include:
 
@@ -44,4 +44,4 @@ Required scenarios include:
 
 ## Final-head rule
 
-Earlier successful workflow runs do not accept AP-21. Acceptance requires successful Core CI for the exact final PR head after this contract and all AP-21 functional changes are present. Until that evidence exists, the PR remains Draft and AP-21 status is `IMPLEMENTED / CI PENDING`.
+Earlier successful workflow runs do not establish notification-operations acceptance. Acceptance requires successful Core CI for the exact final PR head after this contract and all notification-operations functional changes are present. Until that evidence exists, the PR remains Draft and notification-operations status is `IMPLEMENTED / CI PENDING`.

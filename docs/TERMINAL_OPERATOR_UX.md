@@ -1,6 +1,6 @@
 # Terminal operator workspace and UX contract
 
-AP-07 defines the operator-facing information hierarchy for Sentum's terminal UI. The terminal remains a presentation and control surface; it does not own trading authority or reinterpret execution truth.
+terminal operator UX defines the operator-facing information hierarchy for Sentum's terminal UI. The terminal remains a presentation and control surface; it does not own trading authority or reinterpret execution truth.
 
 ## Operator priority
 
@@ -51,7 +51,7 @@ The recommendation is navigational guidance only and must never auto-change trad
 
 ## Presentation contract
 
-AP-07 exposes presentation-ready text from the same policy that determines severity and workspace guidance:
+terminal operator UX exposes presentation-ready text from the same policy that determines severity and workspace guidance:
 
 - `operator_banner_text()` renders one deterministic operator banner;
 - `workspace_navigation_text()` renders the stable numeric workspace map and marks the active workspace;
@@ -59,8 +59,8 @@ AP-07 exposes presentation-ready text from the same policy that determines sever
 
 This avoids duplicating severity wording and workspace labels in multiple terminal rendering paths. Regression tests verify normal/warning banner text, active-workspace marking, shortcut presence and workspace help text.
 
-The production `TerminalUi` should consume these presentation helpers in its always-visible header/navigation area. Doing so must preserve AP-06's unchanged-frame -> zero terminal output bytes contract.
+The production `TerminalUi` should consume these presentation helpers in its always-visible header/navigation area. Doing so must preserve terminal frame-pacing's unchanged-frame -> zero terminal output bytes contract.
 
 ## Non-goals
 
-AP-07 does not add order placement, model promotion, risk overrides, or execution authority to the terminal UI. All such actions remain behind their existing control and service boundaries.
+terminal operator UX does not add order placement, model promotion, risk overrides, or execution authority to the terminal UI. All such actions remain behind their existing control and service boundaries.

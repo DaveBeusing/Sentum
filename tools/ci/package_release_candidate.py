@@ -9,6 +9,7 @@ import os
 import shutil
 import tarfile
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -74,6 +75,7 @@ def main() -> int:
 		"OPERATIONAL_ACCEPTANCE.md",
 		"OPERATIONAL_SAFETY_UX.md",
 		"RELEASE_READINESS.md",
+		"READINESS_EVIDENCE.md",
 		"RUNTIME_LIFECYCLE.md",
 	]
 
@@ -143,8 +145,12 @@ def main() -> int:
 
 	report = {
 		"schema_version": 1,
+		"generated_at": datetime.now(timezone.utc).isoformat(),
+		"environment_class": "ci_artifact",
 		"status": "PASS",
 		"git_sha": args.git_sha,
+		"workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
+		"binary_sha256": sha256(binary),
 		"archive": str(archive_path),
 		"archive_sha256": archive_digest,
 		"archive_size": archive_path.stat().st_size,

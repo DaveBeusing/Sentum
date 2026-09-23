@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines the minimum operational baseline for promoting a verified Sentum release candidate into a production-like environment. It is downstream of the Release Readiness and RC Handoff contracts and does not authorize live trading by itself.
+This document defines the minimum operational baseline for promoting a verified Sentum release candidate into a production-like environment. It is downstream of the Release Readiness and RC Handoff contracts and does not authorize live trading by itself. Repository automation concludes with consolidated readiness evidence; a successful `REPOSITORY_READY` result is still distinct from target-environment `TARGET_ACCEPTED` evidence.
 
 ## Production promotion prerequisites
 
@@ -119,3 +119,7 @@ Each promotion must capture at minimum:
 - final status: `PASS`, `ROLLED_BACK`, `FAILED`, or `UNVERIFIED`.
 
 A missing required field prevents the handoff from being treated as complete.
+
+## Consolidated readiness boundary
+
+The production-operations workflow emits `consolidated_readiness.json` after the operations, continuous-readiness, reliability, resilience and control-plane rehearsal gates have completed. The repository-generated result may reach `REPOSITORY_READY`; it cannot synthesize target-environment acceptance. See [Readiness Evidence Contract](READINESS_EVIDENCE.md) and [Production Validation](PRODUCTION_VALIDATION.md).

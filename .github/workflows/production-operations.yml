@@ -102,6 +102,23 @@ jobs:
             --report log/operations_control_plane_gate.json \
             --summary log/operations_control_plane_gate.md
           cat log/operations_control_plane_gate.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Consolidate readiness evidence
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python3 tools/ci/consolidated_readiness.py \
+            --policy config/readiness_evidence_policy.json \
+            --expected-sha "${GITHUB_SHA}" \
+            --evidence rc_package=evidence/rc/log/rc_package.json \
+            --evidence production_operations=log/production_operations_gate.json \
+            --evidence operational_validation=log/operational_validation_rehearsal.json \
+            --evidence continuous_readiness=log/continuous_readiness_rehearsal.json \
+            --evidence reliability=log/reliability_gate.json \
+            --evidence resilience=log/resilience_guardrail_gate.json \
+            --evidence operations_control_plane=log/operations_control_plane_gate.json \
+            --report log/consolidated_readiness.json \
+            --summary log/consolidated_readiness.md
+          cat log/consolidated_readiness.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload production operations evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -122,3 +139,5 @@ jobs:
             log/resilience_guardrail_gate.md
             log/operations_control_plane_gate.json
             log/operations_control_plane_gate.md
+            log/consolidated_readiness.json
+            log/consolidated_readiness.md

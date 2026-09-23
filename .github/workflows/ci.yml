@@ -98,6 +98,8 @@ jobs:
         run: python3 tests/performance_gate_tests.py
       - name: Validate independent research verifier
         run: python3 tests/research_validation_tests.py
+      - name: Validate consolidated readiness evaluator
+        run: python3 tests/consolidated_readiness_tests.py
       - name: Enforce performance budgets
         shell: bash
         run: |
@@ -311,11 +313,24 @@ jobs:
         with:
           name: sentum-operational-acceptance-${{ github.sha }}
           path: evidence/operational
+      - name: Download runtime qualification smoke evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: sentum-runtime-qualification-smoke-${{ github.sha }}
+          path: evidence/qualification
+      - name: Download independent research validation evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: sentum-research-validation-${{ github.sha }}
+          path: evidence/research
       - name: Enforce release readiness
         run: |
           python3 tools/ci/release_readiness.py \
             --performance evidence/performance/performance_gate.json \
             --operational evidence/operational/operational_acceptance.json \
+            --research evidence/research/research_validation.json \
+            --qualification evidence/qualification/paper-soak.json \
+            --qualification evidence/qualification/all-faults.json \
             --report log/release_readiness.json \
             --summary log/release_readiness.md \
             --expected-sha "${GITHUB_SHA}"

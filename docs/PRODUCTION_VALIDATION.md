@@ -5,9 +5,9 @@ SPDX-License-Identifier: MIT
 
 ## Purpose
 
-AP-12 defines the evidence boundary between automated rehearsal and a real production deployment acceptance.
+This document defines the evidence boundary between automated rehearsal and a real target-environment deployment acceptance.
 
-Automated CI may prove that backup/restore mechanics, artifact rollback mechanics and the documented incident-recovery sequence are executable in a controlled rehearsal. CI must never label those results as proof that a production deployment, production restore, exchange reconciliation or incident exercise actually occurred.
+Automated CI may prove that backup/restore mechanics, artifact rollback mechanics and the documented incident-recovery sequence are executable in a controlled rehearsal. CI must never label those results as proof that a production deployment, production restore, exchange reconciliation or incident exercise actually occurred. The machine-readable distinction between `REPOSITORY_READY` and `TARGET_ACCEPTED` is defined in [Readiness Evidence Contract](READINESS_EVIDENCE.md).
 
 ## Evidence classes
 
@@ -102,7 +102,7 @@ The production acceptance record must state a concrete observation window. Durin
 - process restarts or crashes;
 - operator-visible critical/warning states.
 
-AP-12 does not prescribe a universal duration because the correct window depends on the actual target, market session and release risk. The duration used must be recorded explicitly.
+This contract does not prescribe a universal duration because the correct window depends on the actual target, market session and release risk. The duration used must be recorded explicitly.
 
 ## Fail-closed rules
 

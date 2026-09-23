@@ -1,8 +1,8 @@
-# AP-18 Acceptance — Production Operations Dashboard & Cross-Surface Consistency
+# Production Operations Dashboard & Cross-Surface Consistency Acceptance
 
 ## Purpose
 
-AP-18 is accepted only when terminal and browser operations surfaces expose the same canonical presentation semantics, the browser remains read-only, semantic drift is detected fail-closed, and the browser transport degrades visibly and recovers without unbounded polling.
+Cross-surface operations are accepted only when terminal and browser operations surfaces expose the same canonical presentation semantics, the browser remains read-only, semantic drift is detected fail-closed, and the browser transport degrades visibly and recovers without unbounded polling.
 
 Only Core CI evidence for the final pull-request head counts as final acceptance evidence. Earlier successful runs are supporting baselines only.
 
@@ -37,7 +37,7 @@ Deliberately modified browser-facing values must be detected by regression tests
 
 The operations dashboard is presentation-only.
 
-AP-18 must not introduce operational `POST`, `PUT`, `PATCH` or `DELETE` routes or browser actions that can:
+The cross-surface operations layer must not introduce operational `POST`, `PUT`, `PATCH` or `DELETE` routes or browser actions that can:
 
 - enable trading;
 - clear a kill switch;
@@ -84,7 +84,7 @@ The dashboard overlay regression must cover bounded backoff, single-shot schedul
 
 ## Acceptance state
 
-AP-18 status is one of:
+Cross-surface operations acceptance status is one of:
 
 - `IMPLEMENTED / CI PENDING` — scope is complete but final-head CI has not succeeded;
 - `ACCEPTED` — final-head Core CI including required regressions and sanitizers completed successfully;

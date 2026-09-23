@@ -1,10 +1,10 @@
-# AP-17 Acceptance — Operator Control Surface & Production Operations UX
+# Operator Control Surface & Production Operations UX Acceptance
 
 ## Purpose
 
-This document defines the final acceptance contract for AP-17. It consolidates the operator-facing safety, navigation, rendering and authority boundaries implemented across the AP-17 slices.
+This document defines the final acceptance contract for the operator control surface. It consolidates the operator-facing safety, navigation, rendering and authority boundaries implemented across the feature.
 
-AP-17 is accepted only when the final pull-request head passes the complete Core CI matrix. Earlier green runs are supporting evidence only and do not replace final-head evidence.
+The operator control surface is accepted only when the final pull-request head passes the complete Core CI matrix. Earlier green runs are supporting evidence only and do not replace final-head evidence.
 
 ## Functional acceptance
 
@@ -48,7 +48,7 @@ Operator evidence must fail closed:
 
 The terminal remains presentation-only for governed operations.
 
-AP-17 must not introduce any code path that directly:
+The operator control surface must not introduce any code path that directly:
 
 - enables live trading;
 - clears a kill switch;
@@ -64,7 +64,7 @@ An `APPROVAL_REQUIRED` action may only enter confirmation/approval-request UX. `
 
 ## Rendering and performance acceptance
 
-AP-17 must preserve the AP-06 rendering contract:
+The operator control surface must preserve the terminal frame-pacing rendering contract:
 
 - unchanged source state produces unchanged frame content;
 - an unchanged frame produces zero terminal output bytes;

@@ -1,8 +1,8 @@
-# AP-20 Acceptance — Governed Notification Delivery & Escalation Routing
+# Governed Notification Delivery & Escalation Routing Acceptance
 
 ## Purpose
 
-AP-20 is accepted only when notification routing, delivery attempts, retry/idempotency semantics, provider boundaries and delivery evidence remain governed, bounded and isolated from trading/execution authority.
+Notification delivery is accepted only when notification routing, delivery attempts, retry/idempotency semantics, provider boundaries and delivery evidence remain governed, bounded and isolated from trading/execution authority.
 
 Only Core CI evidence for the final pull-request head counts as final acceptance evidence.
 
@@ -64,9 +64,9 @@ Delivery evidence must preserve at least:
 - observation timestamp when supplied;
 - `execution_authorized = false`.
 
-The AP-20 evidence contract is append-only at the API boundary: new evidence is appended and earlier records are not rewritten. Immediate duplicate evidence is rejected.
+The notification-delivery evidence contract is append-only at the API boundary: new evidence is appended and earlier records are not rewritten. Immediate duplicate evidence is rejected.
 
-Durable storage, SLOs, metrics and incident integration are outside AP-20 and belong to the next production-notification operations package.
+Durable storage, SLOs, metrics and incident integration are outside this contract and belong to the subsequent production-notification operations layer.
 
 ## Regression acceptance
 
@@ -74,7 +74,7 @@ Final-head Core CI must execute and pass at least:
 
 - `notification_delivery_state_machine`;
 - `notification_provider_boundary`;
-- existing AP-19 operator/alert regressions;
+- existing operator-alerting regressions;
 - existing lifecycle/regression suite;
 - ASan;
 - UBSan;
@@ -82,7 +82,7 @@ Final-head Core CI must execute and pass at least:
 
 ## Acceptance state
 
-AP-20 status is one of:
+Notification delivery acceptance status is one of:
 
 - `IMPLEMENTED / CI PENDING` — functional scope complete but final-head CI has not succeeded;
 - `ACCEPTED` — final-head Core CI including required regressions and sanitizers completed successfully;

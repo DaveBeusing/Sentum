@@ -1,8 +1,8 @@
-# AP-19 Acceptance — Operator Alerting, Notification & Escalation UX
+# Operator Alerting, Notification & Escalation UX Acceptance
 
 ## Purpose
 
-AP-19 is accepted only when operator alert classification, lifecycle, acknowledgement presentation, noise control, cross-surface Alert Center rendering and escalation-aging presentation are all deterministic, read-only and regression-covered.
+Operator alerting is accepted only when operator alert classification, lifecycle, acknowledgement presentation, noise control, cross-surface Alert Center rendering and escalation-aging presentation are all deterministic, read-only and regression-covered.
 
 Only Core CI evidence for the final pull-request head counts as final acceptance evidence. Earlier successful runs are supporting baselines only.
 
@@ -43,11 +43,11 @@ Canonical timestamp evidence uses UTC ISO-8601 `...Z` values. Supported aging pr
 
 Missing or malformed timestamp evidence must fail visibly to `AGING UNAVAILABLE` rather than guessing. Terminal and `/api/operations` must expose the same bounded escalation timeline, due/overdue counts and latest escalation actor/reason evidence where supplied.
 
-AP-19 does not send notifications or advance escalation state.
+The operator-alerting presentation layer does not send notifications or advance escalation state.
 
 ## Authority acceptance
 
-AP-19 must not introduce any presentation action that can send notifications, advance escalation state, create acknowledgement requests, acknowledge or resolve alerts or incidents, clear a kill switch, resume entries, approve governed actions, mutate Risk or Execution state, synthesize fills or override exchange-confirmed execution truth.
+The operator-alerting presentation layer must not introduce any presentation action that can send notifications, advance escalation state, create acknowledgement requests, acknowledge or resolve alerts or incidents, clear a kill switch, resume entries, approve governed actions, mutate Risk or Execution state, synthesize fills or override exchange-confirmed execution truth.
 
 ## Cross-surface acceptance
 
@@ -75,7 +75,7 @@ The final head must remain mergeable and the pull request must stay Draft until 
 
 Current implementation state: `IMPLEMENTED / CI PENDING`.
 
-AP-19 status is one of:
+Operator alerting acceptance status is one of:
 
 - `IMPLEMENTED / CI PENDING` — scope is complete but final-head CI has not succeeded;
 - `ACCEPTED` — final-head Core CI including required regressions and sanitizers completed successfully;

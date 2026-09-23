@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -17,6 +18,14 @@ def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate Sentum reliability policy and error-budget state")
     parser.add_argument("--policy", default="config/reliability_policy.json")
@@ -27,7 +36,8 @@ def main() -> int:
     args = parser.parse_args()
 
     policy = load_json(Path(args.policy))
-    readiness = load_json(Path(args.continuous_readiness))
+    readiness_path = Path(args.continuous_readiness)
+    readiness = load_json(readiness_path)
     violations: list[str] = []
 
     target = float(policy.get("availability_target", 0.0))
@@ -103,6 +113,7 @@ def main() -> int:
             "continuous_readiness_status": readiness.get("status"),
             "continuous_readiness_git_sha": readiness.get("git_sha"),
             "continuous_readiness_environment_class": readiness.get("environment_class"),
+            "continuous_readiness_sha256": sha256(readiness_path),
         },
         "scenarios": scenario_results,
         "violations": violations,

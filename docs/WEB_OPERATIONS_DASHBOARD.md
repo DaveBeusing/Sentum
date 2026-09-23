@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This AP-18 slice integrates the browser dashboard with the canonical cross-surface operations contract exposed by `GET /api/operations`.
+This cross-surface operations implementation integrates the browser dashboard with the canonical cross-surface operations contract exposed by `GET /api/operations`.
 
-The browser does not derive safety, governance, incident, maintenance or recovery semantics independently. Those semantics remain defined by the shared AP-17/AP-18 presentation policies and are serialized by `CrossSurfaceOperationsView.hpp`.
+The browser does not derive safety, governance, incident, maintenance or recovery semantics independently. Those semantics remain defined by the shared operator control-surface/cross-surface operations presentation policies and are serialized by `CrossSurfaceOperationsView.hpp`.
 
 ## Integration approach
 

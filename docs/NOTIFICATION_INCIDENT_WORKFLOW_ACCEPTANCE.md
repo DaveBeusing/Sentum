@@ -1,10 +1,10 @@
-# AP-22 Notification Incident Workflow Acceptance
+# Notification Incident Workflow Acceptance
 
-AP-22 is accepted only when the exact final pull-request head satisfies this contract and Core CI succeeds for that head.
+The notification incident workflow is accepted only when the exact final pull-request head satisfies this contract and Core CI succeeds for that head.
 
 ## Required capabilities
 
-- AP-21 notification operations health can be translated into a governed notification-incident candidate.
+- notification operations health can be translated into a governed notification-incident candidate.
 - Candidate states are `NONE`, `ATTENTION`, `PROPOSAL_READY`, and `BLOCKED`.
 - Only an `INCIDENT_CANDIDATE` backed by terminal notification-delivery failure evidence can produce `PROPOSAL_READY`.
 - A proposal exposes only `OPEN_INCIDENT` with `APPROVAL_REQUIRED` classification.
@@ -12,19 +12,19 @@ AP-22 is accepted only when the exact final pull-request head satisfies this con
 - `ATTENTION` remains advisory and does not create an incident proposal.
 - Proposal state never creates, acknowledges, resolves, or mutates an incident.
 - Existing control-plane incident, approval, audit, and recovery evidence is correlated by `OPEN_INCIDENT` and request identity; evidence is never invented locally.
-- Existing recovery workflow state is presentation context only. AP-22 does not create or advance recovery state.
+- Existing recovery workflow state is presentation context only. The notification incident workflow does not create or advance recovery state.
 - `/api/operations` exposes the governed notification incident workflow together with request, approval, audit, incident, and recovery evidence.
 - The web Operations surface renders the same read-only notification incident workflow contract.
 - The web surface continues to expose no POST, PUT, PATCH, or DELETE operations routes.
 
 ## Authority boundaries
 
-The AP-22 proposal and integration layers must keep:
+The notification incident proposal and integration layers must keep:
 
 - `incident_authorized = false`;
 - `execution_authorized = false`.
 
-AP-22 must not:
+The notification incident workflow must not:
 
 - create, acknowledge, resolve, or close incidents;
 - acknowledge or resolve alerts;
@@ -39,7 +39,7 @@ Actual incident and recovery state remain upstream control-plane truth.
 
 ## Required regression evidence
 
-The final head must run the AP-22 bridge regression together with existing cross-surface and dashboard regressions. The AP-22 test target remains attached to the sanitizer build graph.
+The final head must run the notification incident bridge regression together with existing cross-surface and dashboard regressions. The notification incident test target remains attached to the sanitizer build graph.
 
 Required scenarios include:
 
@@ -57,4 +57,4 @@ Required scenarios include:
 
 ## Final-head rule
 
-Earlier successful workflow runs are supporting evidence only. AP-22 is accepted only after Core CI succeeds for the exact final head containing the bridge, evidence integration, cross-surface projection, dashboard presentation, regressions, documentation, and this acceptance contract. Until then the PR remains Draft and status is `IMPLEMENTED / CI PENDING`.
+Earlier successful workflow runs are supporting evidence only. The notification incident workflow is accepted only after Core CI succeeds for the exact final head containing the bridge, evidence integration, cross-surface projection, dashboard presentation, regressions, documentation, and this acceptance contract. Until then the PR remains Draft and status is `IMPLEMENTED / CI PENDING`.

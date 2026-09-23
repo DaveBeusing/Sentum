@@ -17,6 +17,7 @@ import csv
 import hashlib
 import json
 import math
+import os
 import sqlite3
 import statistics
 import sys
@@ -751,6 +752,7 @@ def validate_run(
     report: dict[str, Any] = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "validation_kind": "sentum.research.independent",
+        "environment_class": os.environ.get("SENTUM_EVIDENCE_ENVIRONMENT_CLASS", "research_validation"),
         "validated_at_utc": datetime.now(timezone.utc).isoformat(),
         "run_directory": str(run_dir),
         "run_id": run_dir.name,
@@ -773,6 +775,7 @@ def validate_run(
         return report
     report["run_id"] = str(manifest.get("run_id", run_dir.name))
     report["code_identity"] = {"git_commit": manifest.get("git_commit")}
+    report["git_sha"] = manifest.get("git_commit")
 
     effective_registry = registry_path if registry_path is not None else infer_registry(run_dir, experiment)
     datasets, _ = validate_manifest_and_provenance(run_dir, manifest, effective_registry, report)

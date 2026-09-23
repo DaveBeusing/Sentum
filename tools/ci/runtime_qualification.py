@@ -454,6 +454,7 @@ def main():
     status = "PASS" if evidence_complete and not failures else "FAIL"
     report = {
         "schema_version": 1,
+        "environment_class": os.environ.get("SENTUM_EVIDENCE_ENVIRONMENT_CLASS", "ci_rehearsal"),
         "git_sha": git_sha,
         "workflow_run_id": os.environ.get("GITHUB_RUN_ID", "local"),
         "scenario": args.scenario,

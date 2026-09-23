@@ -4,7 +4,7 @@ Copyright (C) 2026 Dave Beusing <david.beusing@gmail.com>
 
 ## Purpose
 
-AP-13 defines the monitoring and evidence baseline for continuous production readiness after release-candidate and operational-validation gates have succeeded.
+This document defines the monitoring and evidence baseline for continuous operational readiness after release-candidate and operational-validation gates have succeeded.
 
 This document does not authorize live trading. It defines when the runtime may be considered operationally ready, when operator attention is required, and when activity must remain blocked.
 
@@ -102,7 +102,7 @@ The rehearsal must prove at minimum that:
 
 A CI rehearsal PASS proves only that the repository monitoring policy behaves as designed for the exercised scenarios. It is not evidence that a real production observation window, incident response, exchange reconciliation or recovery action occurred.
 
-Real production readiness requires target-environment evidence and explicit operational acceptance.
+Target-environment acceptance requires separate target evidence and explicit operational acceptance. See [Readiness Evidence Contract](READINESS_EVIDENCE.md) for the consolidated evidence states.
 
 ## Fail-closed rule
 
