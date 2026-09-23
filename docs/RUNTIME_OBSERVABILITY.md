@@ -90,4 +90,4 @@ Sampling state for parser/dispatch is collector-owned and only used by the WebSo
 
 The suite runs in normal Release CI and under ASan, UBSan and TSan.
 
-Existing AP-02 performance budgets remain authoritative. A telemetry optimization is not accepted by weakening those budgets.
+Existing performance performance budgets remain authoritative. A telemetry optimization is not accepted by weakening those budgets.
