@@ -43,4 +43,6 @@ This is an operational acceptance gate, not a production latency SLA. Performanc
 
 AP-09 does not alter Strategy, Risk, Execution, Position/Trade State or fill truth. It does not synthesize exchange state and does not weaken fail-closed Testnet behavior.
 
-Longer-duration soak runs, memory/RSS trend capture and fault-injection scenarios can be layered on this evidence contract without changing the runtime architecture.
+Longer-duration soak runs, memory/RSS trend capture and deterministic fault injection are implemented by the runtime qualification layer documented in [RUNTIME_QUALIFICATION.md](RUNTIME_QUALIFICATION.md).
+
+Core CI keeps operational acceptance and runtime qualification as separate evidence artifacts. The acceptance runner remains the repeated lifecycle/observability gate; runtime qualification adds seeded Paper duration, Testnet/recovery fault scenarios and memory trend evidence without changing the runtime authority model.
