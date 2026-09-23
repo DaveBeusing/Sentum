@@ -66,7 +66,7 @@ def evidence_age_hours(
 	for field in contract.get("timestamp_fields", []):
 		stamp = parse_timestamp(nested_value(payload, str(field)))
 		if stamp is not None:
-			return max(0.0, (now - stamp).total_seconds() / 3600.0), str(field)
+			return (now - stamp).total_seconds() / 3600.0, str(field)
 	return None, None
 
 
@@ -112,11 +112,21 @@ def validate_evidence(
 		if value is None or value == "":
 			violations.append(f"required field missing: {field}")
 
+	timestamp_fields = [str(field) for field in contract.get("timestamp_fields", [])]
+	timestamps = {field: nested_value(payload, field) for field in timestamp_fields}
+	for field, value in timestamps.items():
+		if value not in (None, "") and parse_timestamp(value) is None:
+			violations.append(f"timestamp field is not valid ISO-8601: {field}")
+
 	age_hours, timestamp_field = evidence_age_hours(payload, contract, now)
 	max_age_hours = contract.get("max_age_hours")
 	if max_age_hours is not None:
 		if age_hours is None:
 			violations.append("no supported evidence timestamp is present")
+		elif age_hours < 0.0:
+			violations.append(
+				f"evidence timestamp is in the future: field={timestamp_field} age={age_hours:.2f}h"
+			)
 		elif age_hours > float(max_age_hours):
 			violations.append(
 				f"evidence is stale: age={age_hours:.2f}h limit={float(max_age_hours):.2f}h"
@@ -131,12 +141,55 @@ def validate_evidence(
 		"git_sha": actual_sha,
 		"environment_class": environment,
 		"timestamp_field": timestamp_field,
+		"timestamps": timestamps,
 		"age_hours": age_hours,
 		"workflow_run_id": payload.get("workflow_run_id"),
 		"bindings": bindings,
 		"result": "PASS" if not violations else "FAIL",
 		"violations": violations,
 	}
+
+
+def validate_artifact_links(
+	policy: dict[str, Any],
+	results: list[dict[str, Any]],
+) -> list[str]:
+	links = policy.get("artifact_links", [])
+	if links is None:
+		return []
+	if not isinstance(links, list):
+		raise EvidenceFailure("readiness evidence policy artifact_links must be an array")
+
+	indexed = {str(item.get("name")): item for item in results if item.get("name")}
+	violations: list[str] = []
+	for link in links:
+		if not isinstance(link, dict):
+			raise EvidenceFailure("readiness evidence artifact link must be an object")
+		upstream_name = link.get("upstream")
+		downstream_name = link.get("downstream")
+		downstream_field = link.get("downstream_field")
+		if not all(isinstance(value, str) and value.strip() for value in (upstream_name, downstream_name, downstream_field)):
+			raise EvidenceFailure("readiness evidence artifact link is incomplete")
+
+		upstream = indexed.get(upstream_name)
+		downstream = indexed.get(downstream_name)
+		expected_digest = upstream.get("sha256") if isinstance(upstream, dict) else None
+		actual_digest = (
+			downstream.get("bindings", {}).get(downstream_field)
+			if isinstance(downstream, dict)
+			else None
+		)
+		if expected_digest and actual_digest == expected_digest:
+			continue
+
+		detail = (
+			f"{downstream_field} does not match the exact {upstream_name} evidence SHA-256"
+		)
+		violations.append(f"{downstream_name}: {detail}")
+		if isinstance(downstream, dict):
+			downstream.setdefault("violations", []).append(detail)
+			downstream["result"] = "FAIL"
+	return violations
 
 
 def evaluate(
@@ -177,6 +230,8 @@ def evaluate(
 		results.append(result)
 		violations.extend(f"{name}: {item}" for item in result.get("violations", []))
 
+	violations.extend(validate_artifact_links(policy, results))
+
 	target_result: dict[str, Any] = {
 		"state": "NOT_PROVIDED",
 		"result": "NOT_CHECKED",
@@ -201,6 +256,25 @@ def evaluate(
 				"result": "FAIL",
 				"violations": [str(error)],
 			}
+		target_bindings = checked.get("bindings", {})
+		target_timestamps = checked.get("timestamps", {})
+		window_start = parse_timestamp(target_bindings.get("observation_window.start_utc"))
+		window_end = parse_timestamp(target_bindings.get("observation_window.end_utc"))
+		validated_at = parse_timestamp(target_timestamps.get("validated_at_utc"))
+		if window_start is None or window_end is None or validated_at is None:
+			checked.setdefault("violations", []).append(
+				"target acceptance observation timestamps must be valid ISO-8601 values"
+			)
+		elif window_start > window_end:
+			checked.setdefault("violations", []).append(
+				"target acceptance observation window start is after its end"
+			)
+		elif window_end > validated_at:
+			checked.setdefault("violations", []).append(
+				"target acceptance was validated before the observation window ended"
+			)
+		checked["result"] = "PASS" if not checked.get("violations") else "FAIL"
+
 		rc_result = next((item for item in results if item.get("name") == "rc_package"), None)
 		rc_binary_sha256 = (
 			rc_result.get("bindings", {}).get("binary_sha256")
