@@ -59,7 +59,7 @@ source Git SHA
                                                                TARGET_ACCEPTED
 ```
 
-Later gates consume earlier immutable evidence rather than recreating its authority. The RC package binds the exact release-readiness file by SHA-256 and the production-operations chain consumes the exact RC handoff from the originating Core CI workflow run.
+Later gates consume earlier immutable evidence rather than recreating its authority. The RC package binds the exact release-readiness file by SHA-256, the Production Operations Gate records the exact RC-report SHA-256 it consumed, and the reliability -> resilience -> operations-control-plane chain records the SHA-256 of each direct upstream evidence file. Consolidated Readiness verifies those links in addition to commit, schema, environment and status.
 
 ## Evidence catalog
 
@@ -74,9 +74,9 @@ Later gates consume earlier immutable evidence rather than recreating its author
 | Production Operations Gate | `tools/ci/production_operations_gate.py` | 1 | `git_sha` | RC report SHA-256 | `ci_rehearsal` | consolidated policy maximum 720 hours | Consolidated Readiness | RC identity and required operations contracts passed repository validation | real deployment execution |
 | Operational validation rehearsal | `tools/ci/operational_validation_rehearsal.py` | 1 | `git_sha` | report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Consolidated Readiness | controlled backup/rollback/incident rehearsal passed | actual target backup, rollback or incident exercise |
 | Continuous readiness rehearsal | `tools/ci/continuous_readiness_rehearsal.py` | 1 | `git_sha` | report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Reliability + Consolidated Readiness | readiness classification policy behaves as expected | live observation window |
-| Reliability gate | `tools/ci/reliability_gate.py` | 1 | `git_sha` | report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Resilience + Consolidated Readiness | repository reliability policy passed | measured production availability |
-| Resilience gate | `tools/ci/resilience_guardrail_gate.py` | 1 | `git_sha` | report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Operations control plane + Consolidated Readiness | recovery guardrail policy passed | autonomous execution authority |
-| Operations control plane | `tools/ci/operations_control_plane_gate.py` | 1 | `git_sha` | report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Consolidated Readiness | action-classification governance passed | permission to trade |
+| Reliability gate | `tools/ci/reliability_gate.py` | 1 | `git_sha` | exact Continuous Readiness SHA-256 plus report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Resilience + Consolidated Readiness | repository reliability policy passed | measured production availability |
+| Resilience gate | `tools/ci/resilience_guardrail_gate.py` | 1 | `git_sha` | exact Reliability SHA-256 plus report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Operations control plane + Consolidated Readiness | recovery guardrail policy passed | autonomous execution authority |
+| Operations control plane | `tools/ci/operations_control_plane_gate.py` | 1 | `git_sha` | exact Resilience SHA-256 plus report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Consolidated Readiness | action-classification governance passed | permission to trade |
 | Consolidated Readiness | `tools/ci/consolidated_readiness.py` | 1 | `git_sha` | SHA-256 for every underlying evidence file | repository evidence set | regenerated per operations run | operator / release review | exact-commit repository evidence is complete | target-environment acceptance unless separately supplied |
 | Target-environment acceptance | deployment operator record | 1 | `git_sha` | deployed `artifact_sha256` | `target_environment` | maximum 24 hours for a consolidated acceptance evaluation | Consolidated Readiness | the exact artifact was accepted in the named target environment for the recorded observation window | production-money trading authorization or profitability |
 
@@ -94,7 +94,7 @@ A scheduled advisory failure must be investigated for the affected commit before
 
 Evidence is valid only for the Git SHA that produced it.
 
-The consolidated policy additionally enforces a maximum age of 720 hours for repository operational evidence. This matches the current 30-day handoff retention boundary. The evaluator calculates and records the SHA-256 of every consumed JSON report.
+The consolidated policy additionally enforces a maximum age of 720 hours for repository operational evidence. This matches the current 30-day handoff retention boundary. Evidence timestamps in the future are invalid. The evaluator calculates and records the SHA-256 of every consumed JSON report and verifies configured direct-upstream artifact links.
 
 Target-environment acceptance is evaluated with a 24-hour maximum age because it represents a concrete deployment observation rather than a reusable repository CI result. Its `artifact_sha256` must equal the `binary_sha256` recorded by the RC package report, so target acceptance cannot be attached to a different deployed binary.
 
@@ -104,7 +104,9 @@ These rules are fail-closed:
 - a missing required report is invalid;
 - an unsupported schema is invalid;
 - a non-PASS required repository report is invalid;
-- a stale report is invalid;
+- a stale or future-dated report is invalid;
+- a configured upstream artifact-hash mismatch is invalid;
+- a target observation window must use valid ISO-8601 timestamps, must not be reversed and must end no later than `validated_at_utc`;
 - a `ci_rehearsal` record can never satisfy `target_environment` acceptance;
 - missing target acceptance can never be synthesized into `TARGET_ACCEPTED`.
 
