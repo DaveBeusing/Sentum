@@ -51,6 +51,7 @@ class ConsolidatedReadinessTests(unittest.TestCase):
 			"workflow_run_id": "42",
 		}
 		if name == "rc_package":
+			payload["binary_sha256"] = "d" * 64
 			payload["archive_sha256"] = "b" * 64
 			payload["manifest"] = {"release_readiness_sha256": "c" * 64}
 		return payload
@@ -126,6 +127,30 @@ class ConsolidatedReadinessTests(unittest.TestCase):
 			self.sha,
 			self.now,
 			self.write("target-invalid", target),
+		)
+		self.assertEqual("BLOCKED", report["status"])
+
+	def test_target_acceptance_must_match_rc_binary(self) -> None:
+		target = {
+			"schema_version": 1,
+			"status": "ACCEPTED",
+			"git_sha": self.sha,
+			"environment_class": "target_environment",
+			"validated_at_utc": self.now.isoformat(),
+			"artifact_sha256": "e" * 64,
+			"target_environment": "staging-like-target",
+			"operator": "operator",
+			"observation_window": {
+				"start_utc": (self.now - timedelta(minutes=30)).isoformat(),
+				"end_utc": self.now.isoformat(),
+			},
+		}
+		report = MODULE.evaluate(
+			self.policy,
+			self.complete_evidence(),
+			self.sha,
+			self.now,
+			self.write("target-mismatched-artifact", target),
 		)
 		self.assertEqual("BLOCKED", report["status"])
 
