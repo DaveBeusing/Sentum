@@ -23,11 +23,13 @@ inline nlohmann::json build_research_visualization(const ResearchConfig& config,
                                                     const ResearchSummary& summary,
                                                     RiskConfig risk) {
     nlohmann::json out = {
+        {"schema_version", 2},
         {"symbol", summary.symbol},
         {"objective", summary.objective},
         {"holdout_evaluated", summary.holdout_evaluated},
         {"equity_curve", nlohmann::json::array()},
-        {"drawdown_curve", nlohmann::json::array()}
+        {"drawdown_curve", nlohmann::json::array()},
+        {"trade_records", nlohmann::json::array()}
     };
     if (!summary.holdout_evaluated) return out;
 
@@ -64,6 +66,19 @@ inline nlohmann::json build_research_visualization(const ResearchConfig& config,
         const auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(trade.exit_time.time_since_epoch()).count();
         out["equity_curve"].push_back({{"ts", ts}, {"equity", equity}});
         out["drawdown_curve"].push_back({{"ts", ts}, {"drawdown", drawdown}});
+        out["trade_records"].push_back({
+            {"symbol", trade.symbol},
+            {"entry_time_ms", std::chrono::duration_cast<std::chrono::milliseconds>(trade.entry_time.time_since_epoch()).count()},
+            {"exit_time_ms", ts},
+            {"entry_price", trade.entry_price},
+            {"exit_price", trade.exit_price},
+            {"quantity", trade.quantity},
+            {"gross_profit", trade.gross_profit},
+            {"net_profit", trade.net_profit},
+            {"fee_entry", trade.fee_entry},
+            {"fee_exit", trade.fee_exit},
+            {"close_reason", trade.close_reason}
+        });
     }
     out["trades"] = engine.completed_trades().size();
     out["net_profit"] = equity;
