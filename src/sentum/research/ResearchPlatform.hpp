@@ -48,6 +48,16 @@ struct ConfidenceInterval { double lower = 0.0; double median = 0.0; double uppe
 struct MonteCarloSummary { std::size_t samples = 0; ConfidenceInterval net_profit; ConfidenceInterval max_drawdown; double probability_of_loss = 0.0; };
 struct RegimeMetrics { std::string regime; BacktestMetrics metrics; };
 
+struct ResearchFoldBoundary {
+    std::size_t fold_index = 0;
+    std::size_t train_begin = 0;
+    std::size_t train_end_exclusive = 0;
+    std::size_t validation_begin = 0;
+    std::size_t validation_end_exclusive = 0;
+    std::size_t purged_events = 0;
+    std::size_t embargoed_events = 0;
+};
+
 struct TrialResult {
     std::size_t trial_id = 0;
     ParameterSet parameters;
@@ -69,8 +79,13 @@ struct ResearchSummary {
     std::size_t events = 0;
     std::size_t research_events = 0;
     std::size_t holdout_events = 0;
+    std::size_t initial_train_events = 0;
+    std::size_t holdout_begin_index = 0;
+    std::size_t purge_events = 0;
+    std::size_t embargo_events = 0;
     std::size_t folds = 0;
     std::size_t trials = 0;
+    std::vector<ResearchFoldBoundary> fold_boundaries;
     std::vector<TrialResult> results;
     std::vector<TrialResult> leaderboard;
     bool holdout_evaluated = false;

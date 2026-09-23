@@ -111,11 +111,17 @@ inline nlohmann::json manifest_json(const ExperimentManifest& m) {
         {"materialized_path", d.materialized_path}, {"sha256", d.sha256},
         {"from_ms", d.from_ms}, {"to_ms", d.to_ms}
     });
+    nlohmann::json artifact_hashes = nlohmann::json::object();
+    for (const auto& artifact : m.artifacts) {
+        if (std::filesystem::exists(artifact)) artifact_hashes[artifact] = Sha256::file(artifact);
+    }
     return {
+        {"manifest_version",2},
         {"run_id",m.run_id},{"name",m.name},{"kind",m.kind},{"status",m.status},
         {"started_at_ms",m.started_at_ms},{"finished_at_ms",m.finished_at_ms},
         {"git_commit",m.git_commit},{"config_sha256",m.config_sha256},{"risk_sha256",m.risk_sha256},
-        {"output_directory",m.output_directory},{"datasets",datasets},{"artifacts",m.artifacts}
+        {"output_directory",m.output_directory},{"datasets",datasets},{"artifacts",m.artifacts},
+        {"artifact_sha256",artifact_hashes}
     };
 }
 

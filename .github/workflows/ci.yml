@@ -96,6 +96,8 @@ jobs:
           grep 'unknown command' /tmp/cli-invalid.log
       - name: Validate performance gate evaluator
         run: python3 tests/performance_gate_tests.py
+      - name: Validate independent research verifier
+        run: python3 tests/research_validation_tests.py
       - name: Enforce performance budgets
         shell: bash
         run: |
@@ -164,6 +166,90 @@ jobs:
           PY
           ./sentum --research /tmp/research.json
           cmp /tmp/research_trials_first.csv log/research_trials.csv
+      - name: Validate canonical managed research experiment
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=/tmp/sentum-research-validation
+          rm -rf "$root"
+          mkdir -p "$root/experiments"
+          python3 - <<'PY'
+          import json, math
+          from pathlib import Path
+
+          root = Path('/tmp/sentum-research-validation')
+          base_ms = 1710000000000
+          rows = 360
+          with (root / 'market.csv').open('w') as f:
+              f.write('timestamp_ms,price,volume\n')
+              for i in range(rows):
+                  trend = i * 0.015
+                  cycle = math.sin(i / 6.0) * 1.8
+                  f.write(f'{base_ms + i * 1000},{100.0 + trend + cycle:.8f},1.0\n')
+
+          (root / 'datasets.json').write_text(json.dumps({
+              'datasets': [{
+                  'id': 'canonical-ci-dataset',
+                  'symbol': 'BTCUSDT',
+                  'path': str(root / 'market.csv'),
+                  'interval': '1s',
+                  'start_ms': base_ms,
+                  'end_ms': base_ms + (rows - 1) * 1000,
+              }]
+          }, indent=2) + '\n')
+
+          (root / 'research.json').write_text(json.dumps({
+              'dataset': 'managed-by-experiment',
+              'symbol': 'BTCUSDT',
+              'objective': 'sharpe',
+              'train_fraction': 0.60,
+              'holdout_fraction': 0.20,
+              'walk_forward_folds': 2,
+              'purge_events': 2,
+              'embargo_events': 1,
+              'min_validation_trades': 0,
+              'max_trials': 4,
+              'leaderboard_size': 4,
+              'monte_carlo_samples': 64,
+              'bootstrap_samples': 64,
+              'random_seed': 42,
+              'parallelism': 1,
+              'grid': {
+                  'lookback': [5, 10],
+                  'entry_threshold': [0.0005, 0.001],
+              },
+          }, indent=2) + '\n')
+
+          (root / 'experiment.json').write_text(json.dumps({
+              'name': 'canonical-independent-validation',
+              'kind': 'research',
+              'dataset_catalog': str(root / 'datasets.json'),
+              'research_config': str(root / 'research.json'),
+              'risk_config': 'config/risk.json',
+              'output_root': str(root / 'experiments'),
+              'registry_path': str(root / 'experiments.sqlite3'),
+              'datasets': [{'id': 'canonical-ci-dataset'}],
+          }, indent=2) + '\n')
+          PY
+
+          ./build/sentum_experiment "$root/experiment.json"
+          first="$(find "$root/experiments" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+          python3 tools/verify_research.py "$first" --registry "$root/experiments.sqlite3"
+          sleep 0.05
+          ./build/sentum_experiment "$root/experiment.json"
+          second="$(find "$root/experiments" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+          test "$first" != "$second"
+          python3 tools/verify_research.py "$second" --registry "$root/experiments.sqlite3" --reference-run "$first"
+          mkdir -p log
+          cp "$second/research-validation.json" log/research_validation.json
+      - name: Upload independent research validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentum-research-validation-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: log/research_validation.json
       - name: Smoke test dashboard
         shell: bash
         run: timeout --signal=TERM --kill-after=5s 60s bash tools/ci/dashboard_smoke.sh

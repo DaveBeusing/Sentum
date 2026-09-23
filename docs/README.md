@@ -13,6 +13,7 @@ This directory contains the current functional documentation for Sentum. Documen
 
 - [Quant research](RESEARCH.md) — deterministic parameter research and output artifacts.
 - [Research validation and robustness](RESEARCH_ROBUSTNESS.md) — walk-forward validation, holdout, bootstrap, Monte Carlo and selection controls.
+- [Independent research validation](INDEPENDENT_RESEARCH_VALIDATION.md) — persisted provenance, split, metric and deterministic-reproduction evidence checks.
 - [Strategy and portfolio research](STRATEGY_PORTFOLIO_RESEARCH.md) — strategy framework, ensembles, multi-timeframe and portfolio risk.
 - [Experiment and dataset management](EXPERIMENT_DATASET_MANAGEMENT.md) — dataset catalogs, immutable slices, hashes and experiment registry.
 - [Research dashboard](ADVANCED_RESEARCH_DASHBOARD.md) — experiment comparison and research visualization in the web UI.

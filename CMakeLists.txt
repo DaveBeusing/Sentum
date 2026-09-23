@@ -95,6 +95,7 @@ add_executable(sentum_portfolio_research tools/portfolio_research_main.cpp)
 target_link_libraries(sentum_portfolio_research PRIVATE sentum_core)
 
 add_executable(sentum_experiment tools/experiment_main.cpp)
+target_compile_definitions(sentum_experiment PRIVATE SENTUM_GIT_COMMIT="${SENTUM_GIT_COMMIT}")
 target_link_libraries(sentum_experiment PRIVATE sentum_core)
 
 add_executable(sentum_model tools/model_promotion_main.cpp)
