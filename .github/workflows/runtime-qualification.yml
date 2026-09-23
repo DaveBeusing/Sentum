@@ -46,6 +46,14 @@ jobs:
           status=0
           duration="${QUALIFICATION_DURATION_SECONDS}"
           seed="${QUALIFICATION_SEED}"
+          if ! [[ "$duration" =~ ^[0-9]+$ ]] || (( duration < 60 || duration > 2400 )); then
+            echo "duration_seconds must be an integer between 60 and 2400" >&2
+            exit 2
+          fi
+          if ! [[ "$seed" =~ ^[0-9]+$ ]]; then
+            echo "seed must be a non-negative integer" >&2
+            exit 2
+          fi
           paper_timeout=$((duration + 120))
 
           python3 tools/ci/runtime_qualification.py \
