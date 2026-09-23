@@ -11,7 +11,7 @@
       "allowed_environment_classes": ["ci_artifact"],
       "timestamp_fields": ["generated_at"],
       "max_age_hours": 720,
-      "required_fields": ["archive_sha256", "manifest.release_readiness_sha256"]
+      "required_fields": ["binary_sha256", "archive_sha256", "manifest.release_readiness_sha256"]
     },
     "production_operations": {
       "producer": "Sentum Production Operations Gate",
