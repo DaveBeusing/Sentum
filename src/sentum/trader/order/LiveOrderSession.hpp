@@ -23,8 +23,8 @@ namespace sentum::order {
 class LiveOrderSession {
 public:
     using UpdateHandler = OrderManager::UpdateHandler;
-    using StreamFactory = std::function<std::unique_ptr<BinanceUserDataStream>(
-        std::string, BinanceUserDataStream::Handler)>;
+    using StreamFactory = std::function<std::unique_ptr<IUserDataStream>(
+        std::string, IUserDataStream::Handler)>;
 
     struct Timing {
         std::chrono::milliseconds supervisor_poll_interval{std::chrono::seconds(5)};
@@ -146,7 +146,7 @@ private:
           timing_(timing) {}
 
     static StreamFactory default_stream_factory() {
-        return [](std::string listen_key, BinanceUserDataStream::Handler handler) {
+        return [](std::string listen_key, IUserDataStream::Handler handler) {
             return std::make_unique<BinanceUserDataStream>(std::move(listen_key), std::move(handler));
         };
     }
@@ -213,7 +213,7 @@ private:
     sentum::execution::ExchangeMetadataCache metadata_cache_;
     StreamFactory stream_factory_;
     Timing timing_;
-    std::unique_ptr<BinanceUserDataStream> stream_;
+    std::unique_ptr<IUserDataStream> stream_;
     std::string listen_key_;
     mutable std::mutex handler_mutex_;
     std::mutex stream_mutex_;
