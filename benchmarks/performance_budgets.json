@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "measurement_policy": {
     "repetitions": 5,
     "market_gate_statistic": "median",
@@ -7,41 +7,132 @@
     "notes": "Budgets are regression guardrails for the GitHub-hosted Release CI environment, not production latency SLAs."
   },
   "baseline_evidence": {
-    "workflow_run_id": 35090140340,
-    "source_head": "ff6fe957d9c9b57ef150dc26faea216609ec3714",
-    "runner_image": "ubuntu-24.04",
-    "compiler": "GNU 13.3.0",
-    "observed_market_path_ns_per_event": {
-      "500x2000": 62.10,
-      "1000x1000": 77.74,
-      "2000x500": 63.64
+    "market_path": {
+      "workflow_run_id": 35090140340,
+      "source_head": "ff6fe957d9c9b57ef150dc26faea216609ec3714",
+      "runner_image": "ubuntu-24.04",
+      "compiler": "GNU 13.3.0",
+      "observed_ns_per_event": {
+        "500x2000": 62.10,
+        "1000x1000": 77.74,
+        "2000x500": 63.64
+      },
+      "observed_parser_allocations_per_parse": 0.0
     },
-    "observed_parser_allocations_per_parse": 0.0
-  },
-  "market_path": [
-    {
-      "name": "500x2000",
-      "symbols": 500,
-      "events_per_symbol": 2000,
-      "max_median_ns_per_event": 250.0,
-      "max_worst_ns_per_event": 400.0
-    },
-    {
-      "name": "1000x1000",
-      "symbols": 1000,
-      "events_per_symbol": 1000,
-      "max_median_ns_per_event": 250.0,
-      "max_worst_ns_per_event": 400.0
-    },
-    {
-      "name": "2000x500",
-      "symbols": 2000,
-      "events_per_symbol": 500,
-      "max_median_ns_per_event": 250.0,
-      "max_worst_ns_per_event": 400.0
+    "ui_and_scanner_qualification": {
+      "workflow_run_ids": [
+        35201427700,
+        35204003032,
+        35207600347,
+        35788383555,
+        35791460185
+      ],
+      "source_heads": [
+        "a0617a8109006c68c2c6b79fb9a4448eba2c9c43",
+        "86f4436e740c977c584d93580f00d8880886d3e2",
+        "1d8fcb060454b4f9ea3482070f63b4a18704b141",
+        "d7c8d443dd48a49e04c5546ebf4cc1196234eb9f",
+        "af3bf8db246d7cabcada80a0480d3bcf72651f32"
+      ],
+      "runner_image": "ubuntu-24.04",
+      "compiler": "GNU 13.3.0",
+      "scanner_ns_per_event": {
+        "500x200": [314.07, 301.53, 291.17, 297.98, 294.89],
+        "1000x100": [324.53, 324.00, 316.19, 318.59, 325.11],
+        "2000x50": [332.68, 318.55, 325.37, 352.43, 331.16]
+      },
+      "dashboard_snapshot_ns_per_poll": {
+        "unconditional": [25484.73, 25652.20, 25613.78, 25394.74, 32495.01],
+        "unchanged_conditional": [24.33, 24.26, 24.27, 24.30, 46.55]
+      },
+      "terminal_render_ns_per_frame": {
+        "unchanged": [851.721, 854.565, 904.793, 848.88, 884.717],
+        "changed": [1033.91, 1047.48, 1099.58, 1029.88, 1106.61]
+      }
     }
-  ],
+  },
+  "market_path": {
+    "timing_state": "ENFORCED",
+    "correctness_state": "ENFORCED",
+    "cases": [
+      {
+        "name": "500x2000",
+        "symbols": 500,
+        "events_per_symbol": 2000,
+        "max_median_ns_per_event": 250.0,
+        "max_worst_ns_per_event": 400.0
+      },
+      {
+        "name": "1000x1000",
+        "symbols": 1000,
+        "events_per_symbol": 1000,
+        "max_median_ns_per_event": 250.0,
+        "max_worst_ns_per_event": 400.0
+      },
+      {
+        "name": "2000x500",
+        "symbols": 2000,
+        "events_per_symbol": 500,
+        "max_median_ns_per_event": 250.0,
+        "max_worst_ns_per_event": 400.0
+      }
+    ]
+  },
   "parser": {
+    "allocation_state": "ENFORCED",
     "max_allocations_per_parse": 0.0
+  },
+  "scanner_hot_path": {
+    "timing_state": "ENFORCED",
+    "correctness_state": "ENFORCED",
+    "repetitions": 5,
+    "cases": [
+      {
+        "name": "500x200",
+        "symbols": 500,
+        "events_per_symbol": 200,
+        "expected_top_count": 5,
+        "max_median_ns_per_event": 375.0,
+        "max_worst_ns_per_event": 450.0
+      },
+      {
+        "name": "1000x100",
+        "symbols": 1000,
+        "events_per_symbol": 100,
+        "expected_top_count": 5,
+        "max_median_ns_per_event": 390.0,
+        "max_worst_ns_per_event": 475.0
+      },
+      {
+        "name": "2000x50",
+        "symbols": 2000,
+        "events_per_symbol": 50,
+        "expected_top_count": 5,
+        "max_median_ns_per_event": 420.0,
+        "max_worst_ns_per_event": 525.0
+      }
+    ]
+  },
+  "dashboard_snapshot": {
+    "timing_state": "OBSERVED",
+    "correctness_state": "ENFORCED",
+    "iterations": 250000,
+    "max_conditional_snapshot_copies": 0
+  },
+  "terminal_render_pipeline": {
+    "timing_state": "ENFORCED",
+    "correctness_state": "ENFORCED",
+    "repetitions": 5,
+    "iterations": 250000,
+    "max_unchanged_payload_bytes": 0,
+    "max_median_unchanged_ns_per_frame": 1050.0,
+    "max_worst_unchanged_ns_per_frame": 1300.0,
+    "max_median_changed_ns_per_frame": 1300.0,
+    "max_worst_changed_ns_per_frame": 1600.0
+  },
+  "runtime_qualification": {
+    "memory_state": "OBSERVED",
+    "sampled_latency_state": "OBSERVED",
+    "notes": "RSS trend and sampled runtime latency remain qualification evidence. Hosted-runner measurements are not production memory or latency SLAs."
   }
 }
