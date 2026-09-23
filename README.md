@@ -353,7 +353,7 @@ cmake -S . -B build-tsan \
 cmake --build build-tsan --parallel 2
 ```
 
-Long-running Paper soak tests, sanitizer builds, reconnect/reconciliation scenarios and independent research validation remain important before treating Sentum as production-grade software.
+Runtime qualification now provides bounded long-duration Paper soak evidence, sanitizer-backed fault scenarios and deterministic reconnect/reconciliation validation. Independent research validation and accumulated operational evidence remain required before treating Sentum as production-grade software.
 
 ## Documentation
 
@@ -361,6 +361,7 @@ Long-running Paper soak tests, sanitizer builds, reconnect/reconciliation scenar
 - [Web dashboard](docs/DASHBOARD.md)
 - [Research dashboard](docs/ADVANCED_RESEARCH_DASHBOARD.md)
 - [Runtime performance](docs/PERFORMANCE.md)
+- [Runtime qualification and fault injection](docs/RUNTIME_QUALIFICATION.md)
 - [Quant research](docs/RESEARCH.md)
 - [Research validation and robustness](docs/RESEARCH_ROBUSTNESS.md)
 - [Strategy and portfolio research](docs/STRATEGY_PORTFOLIO_RESEARCH.md)
