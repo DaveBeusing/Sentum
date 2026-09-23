@@ -43,6 +43,12 @@ For the selected candidate Sentum reports standard performance metrics plus dete
 
 All stochastic analysis uses a configured seed to preserve reproducibility.
 
+## Independent persisted-evidence validation
+
+Managed single-asset experiments persist the concrete walk-forward, purge, embargo and final-holdout boundary contract used by the run. `tools/verify_research.py` independently recomputes those boundaries from the immutable dataset slice and research configuration, checks the persisted trial/selection evidence for leakage inconsistencies, and recalculates final-holdout metrics from persisted trade records.
+
+The verifier operates separately from the C++ research ranking/scoring implementation. A verifier `PASS` means that the checked persisted evidence is internally consistent; it is not a profitability, live-readiness or promotion claim. See [INDEPENDENT_RESEARCH_VALIDATION.md](INDEPENDENT_RESEARCH_VALIDATION.md).
+
 ## Regime analysis
 
 Trades can be grouped into descriptive regimes such as trending up, trending down, ranging and high volatility. Classification uses only information available before entry time and is intended for analysis rather than hidden future-aware strategy input.
