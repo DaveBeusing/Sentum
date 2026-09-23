@@ -41,6 +41,7 @@ research.json
 trials.csv
 research-visualization.json
 portfolio-research.json
+research-validation.json   # added by the independent verifier after a managed research run
 ```
 
 ## Provenance
@@ -53,6 +54,7 @@ The manifest records enough information to explain why two runs differ, includin
 - dataset ID, symbol and selected time range
 - SHA-256 for each materialized dataset
 - generated artifact paths and hashes
+- manifest schema version
 - start/finish timestamps and final status
 
 A run is recorded as `started` before research begins and transitions to `completed` or `failed`. Failed experiments remain visible for audit/debugging.
@@ -70,3 +72,11 @@ The web research dashboard uses this registry for history, comparisons and artif
 ## Reproducibility
 
 A research result should be treated as identified by the combination of source revision, experiment specification, risk assumptions and exact dataset hashes. Re-running with the same inputs is expected to produce deterministic trial output where the underlying research path is deterministic.
+
+For managed single-asset research, validate persisted provenance and deterministic output independently with:
+
+```bash
+python3 tools/verify_research.py log/experiments/<run-id> --registry log/experiments.sqlite3
+```
+
+Use `--reference-run` with a separately generated run to compare deterministic outputs. The resulting `research-validation.json` is stored beside the experiment and is not part of the original result-generation path. See [INDEPENDENT_RESEARCH_VALIDATION.md](INDEPENDENT_RESEARCH_VALIDATION.md).
