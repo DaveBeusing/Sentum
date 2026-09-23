@@ -45,8 +45,14 @@ public:
 
     static std::unique_ptr<LiveOrderSession> from_dependencies(
         std::unique_ptr<BinanceSpotExecutionClient> exchange,
+        StreamFactory stream_factory) {
+        return from_dependencies(std::move(exchange), std::move(stream_factory), Timing{});
+    }
+
+    static std::unique_ptr<LiveOrderSession> from_dependencies(
+        std::unique_ptr<BinanceSpotExecutionClient> exchange,
         StreamFactory stream_factory,
-        Timing timing = {}) {
+        Timing timing) {
         if (!exchange) throw std::invalid_argument("Live order session requires an exchange client");
         if (!stream_factory) throw std::invalid_argument("Live order session requires a user stream factory");
         if (timing.supervisor_poll_interval <= std::chrono::milliseconds::zero() ||
