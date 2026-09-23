@@ -107,8 +107,23 @@ def main() -> int:
 		checks.append(check("research-schema", research.get("schema_version") == 1, str(research.get("schema_version"))))
 		checks.append(check("performance-sha", performance.get("git_sha") == expected_sha, str(performance.get("git_sha"))))
 		checks.append(check("operational-sha", operational.get("git_sha") == expected_sha, str(operational.get("git_sha"))))
+		checks.append(check(
+			"performance-environment",
+			performance.get("environment_class") == "ci_hosted_runner",
+			str(performance.get("environment_class")),
+		))
+		checks.append(check(
+			"operational-environment",
+			operational.get("environment_class") == "ci_rehearsal",
+			str(operational.get("environment_class")),
+		))
 		research_sha = research.get("git_sha") or research.get("code_identity", {}).get("git_commit")
 		checks.append(check("research-sha", research_sha == expected_sha, str(research_sha)))
+		checks.append(check(
+			"research-environment",
+			research.get("environment_class") == "research_validation",
+			str(research.get("environment_class")),
+		))
 		checks.append(check(
 			"operational-cycles",
 			operational.get("cycles_completed") == operational.get("cycles_requested")
@@ -137,6 +152,11 @@ def main() -> int:
 				f"qualification-{label}-sha",
 				qualification.get("git_sha") == expected_sha,
 				str(qualification.get("git_sha")),
+			))
+			checks.append(check(
+				f"qualification-{label}-environment",
+				qualification.get("environment_class") == "ci_rehearsal",
+				str(qualification.get("environment_class")),
 			))
 
 		status = "PASS" if all(item["status"] == "PASS" for item in checks) else "FAIL"
