@@ -41,6 +41,8 @@ Each transition checks configured minimum/maximum criteria such as:
 
 Promotion also requires explicit operator confirmation. Rejected attempts are written to the audit history.
 
+Independent research validation can be generated for a managed source experiment with `tools/verify_research.py`, but it is currently additional evidence rather than a promotion gate. A verifier `PASS` does not automatically promote a model or change the existing stage policy. Making independent validation mandatory for promotion requires an explicit future policy change after the validation-report contract is considered stable.
+
 ## Paper integration
 
 A model that has reached the `paper` stage can be loaded by the interactive Paper runtime through `paper.modelDefinition` in `config/config.json`. The runtime inherits the registered model's strategy, symbol and risk-config path and fails closed if registry state is inconsistent.
