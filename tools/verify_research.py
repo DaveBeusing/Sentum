@@ -504,6 +504,36 @@ def validate_selection_and_leakage(
         add_violation(report, "LEADERBOARD_INVALID", "research leaderboard is missing")
         leaderboard = []
 
+    if research.get("trials") != len(rows):
+        add_violation(report, "TRIAL_COUNT_MISMATCH", "research trial count does not match trials.csv")
+
+    try:
+        ranked_rows = sorted(
+            rows.values(),
+            key=lambda row: (
+                0 if row.get("eligible") == "1" else 1,
+                -float(row["validation_score"]),
+                -float(row["deflated_sharpe"]),
+                -float(row["parameter_stability_score"]),
+                abs(float(row["overfit_gap"])),
+                int(row["trial_id"]),
+            ),
+        )
+        expected_ids = [int(row["trial_id"]) for row in ranked_rows[: len(leaderboard)]]
+        reported_ids = [
+            int(item["trial_id"])
+            for item in leaderboard
+            if isinstance(item, dict) and isinstance(item.get("trial_id"), int)
+        ]
+        if reported_ids != expected_ids:
+            add_violation(
+                report,
+                "LEADERBOARD_ORDER_MISMATCH",
+                "leaderboard order does not follow persisted validation-only ranking fields",
+            )
+    except (KeyError, TypeError, ValueError):
+        add_violation(report, "TRIALS_INVALID", "trials.csv is missing ranking fields required for independent selection verification")
+
     for item in leaderboard:
         if not isinstance(item, dict):
             add_violation(report, "LEADERBOARD_INVALID", "leaderboard entry is not an object")
