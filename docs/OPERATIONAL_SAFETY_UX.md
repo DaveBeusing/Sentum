@@ -1,6 +1,6 @@
 # Operational safety, error UX and shutdown contract
 
-AP-08 defines how Sentum presents operational safety, degraded conditions and shutdown progress to an operator. Presentation never replaces Risk, Execution, RuntimeControl or lifecycle authority.
+operational safety UX defines how Sentum presents operational safety, degraded conditions and shutdown progress to an operator. Presentation never replaces Risk, Execution, RuntimeControl or lifecycle authority.
 
 ## Operational states
 
@@ -31,7 +31,7 @@ This prevents a lower-severity connectivity or persistence warning from masking 
 
 ## Shutdown presentation
 
-The runtime already publishes `health=stopping/stopped`, `shutdown_step`, `shutdown_total_steps` and `shutdown_detail`. AP-08 consumes those existing fields and does not introduce a second lifecycle state machine.
+The runtime already publishes `health=stopping/stopped`, `shutdown_step`, `shutdown_total_steps` and `shutdown_detail`. operational safety UX consumes those existing fields and does not introduce a second lifecycle state machine.
 
 When shutdown is active, operator presentation should include:
 
@@ -69,6 +69,6 @@ The policy can be extended only when a new condition has an authoritative runtim
 
 The test is part of Release and sanitizer regression coverage.
 
-## Next AP-08 integration
+## Next operational safety integration
 
-The next slice should surface the operational state and shutdown progress in the terminal's always-visible safety area and align the existing web dashboard with the same state vocabulary. That presentation wiring must remain downstream of runtime truth and preserve AP-06's zero-write behavior for unchanged terminal frames.
+The next slice should surface the operational state and shutdown progress in the terminal's always-visible safety area and align the existing web dashboard with the same state vocabulary. That presentation wiring must remain downstream of runtime truth and preserve terminal frame-pacing's zero-write behavior for unchanged terminal frames.
