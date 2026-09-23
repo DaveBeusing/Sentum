@@ -48,16 +48,21 @@ def resolve_git_sha():
         return "unknown"
 
 
-def read_rss_kib(pid):
+def read_process_status(pid):
+    rss_kib = None
+    threads = None
     try:
         with open(f"/proc/{pid}/status", "r", encoding="utf-8") as handle:
             for line in handle:
                 if line.startswith("VmRSS:"):
                     parts = line.split()
-                    return int(parts[1])
+                    rss_kib = int(parts[1])
+                elif line.startswith("Threads:"):
+                    parts = line.split()
+                    threads = int(parts[1])
     except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError):
-        return None
-    return None
+        return None, None
+    return rss_kib, threads
 
 
 def terminate_process(process):
@@ -79,9 +84,14 @@ def monitor_command(command, timeout_seconds, sample_interval_seconds):
 
     while process.poll() is None:
         elapsed = time.monotonic() - started
-        rss = read_rss_kib(process.pid)
-        if rss is not None:
-            samples.append({"elapsed_seconds": elapsed, "rss_kib": rss})
+        rss, threads = read_process_status(process.pid)
+        if rss is not None or threads is not None:
+            sample = {"elapsed_seconds": elapsed}
+            if rss is not None:
+                sample["rss_kib"] = rss
+            if threads is not None:
+                sample["threads"] = threads
+            samples.append(sample)
         if elapsed >= timeout_seconds:
             timed_out = True
             terminate_process(process)
@@ -89,9 +99,14 @@ def monitor_command(command, timeout_seconds, sample_interval_seconds):
         time.sleep(sample_interval_seconds)
 
     if not timed_out:
-        rss = read_rss_kib(process.pid)
-        if rss is not None:
-            samples.append({"elapsed_seconds": time.monotonic() - started, "rss_kib": rss})
+        rss, threads = read_process_status(process.pid)
+        if rss is not None or threads is not None:
+            sample = {"elapsed_seconds": time.monotonic() - started}
+            if rss is not None:
+                sample["rss_kib"] = rss
+            if threads is not None:
+                sample["threads"] = threads
+            samples.append(sample)
 
     stdout, stderr = process.communicate()
     return {
@@ -144,7 +159,8 @@ def flatten_text_values(value, key):
 
 
 def summarize_rss(samples, max_growth_kib):
-    values = [sample["rss_kib"] for sample in samples]
+    rss_samples = [sample for sample in samples if "rss_kib" in sample]
+    values = [sample["rss_kib"] for sample in rss_samples]
     if not values:
         return {
             "available": False,
@@ -161,7 +177,7 @@ def summarize_rss(samples, max_growth_kib):
     starting = values[0]
     peak = max(values)
     ending = values[-1]
-    trend_samples = samples[max(0, len(samples) // 4):]
+    trend_samples = rss_samples[max(0, len(rss_samples) // 4):]
     slope = 0.0
     if len(trend_samples) >= 2:
         xs = [sample["elapsed_seconds"] for sample in trend_samples]
@@ -184,21 +200,47 @@ def summarize_rss(samples, max_growth_kib):
         "trend_slope_kib_per_minute": slope,
         "unbounded_growth_detected": unbounded,
         "guardrail_kib": max_growth_kib,
-        "samples": len(samples),
+        "samples": len(rss_samples),
     }
 
 
-def merge_rss(command_results, max_growth_kib):
+def summarize_threads(samples):
+    values = [sample["threads"] for sample in samples if "threads" in sample]
+    if not values:
+        return {
+            "available": False,
+            "starting": None,
+            "peak": None,
+            "ending": None,
+            "leak_indicator": False,
+            "samples": 0,
+        }
+    starting = values[0]
+    ending = values[-1]
+    return {
+        "available": True,
+        "starting": starting,
+        "peak": max(values),
+        "ending": ending,
+        "leak_indicator": ending > starting,
+        "samples": len(values),
+    }
+
+
+def merge_process_samples(command_results):
     samples = []
     elapsed_offset = 0.0
     for result in command_results:
         for sample in result["rss_samples"]:
-            samples.append({
-                "elapsed_seconds": elapsed_offset + sample["elapsed_seconds"],
-                "rss_kib": sample["rss_kib"],
-            })
+            merged = dict(sample)
+            merged["elapsed_seconds"] = elapsed_offset + sample["elapsed_seconds"]
+            samples.append(merged)
         elapsed_offset += result["elapsed_seconds"]
-    return summarize_rss(samples, max_growth_kib)
+    return samples
+
+
+def merge_rss(command_results, max_growth_kib):
+    return summarize_rss(merge_process_samples(command_results), max_growth_kib)
 
 
 def executable(build_dir, name):
@@ -352,7 +394,9 @@ def main():
         failures.append(str(error))
 
     actual_duration = time.monotonic() - overall_started
-    rss = merge_rss(command_results, args.max_rss_growth_kib) if command_results else summarize_rss([], args.max_rss_growth_kib)
+    process_samples = merge_process_samples(command_results) if command_results else []
+    rss = summarize_rss(process_samples, args.max_rss_growth_kib)
+    threads = summarize_threads(process_samples)
     if rss["unbounded_growth_detected"]:
         failures.append(
             f"RSS growth guardrail exceeded: growth={rss['growth_kib']} KiB "
@@ -397,6 +441,7 @@ def main():
         "pass": status == "PASS",
         "evidence_complete": evidence_complete,
         "memory": rss,
+        "threads": threads,
         "metrics": metrics,
         "timeout": {
             "limit_seconds": args.timeout_seconds,
