@@ -397,7 +397,10 @@ nlohmann::json scenario_user_stream_interruption() {
         const auto expected_creations = streams.creations() + 1;
         stream->running.store(false, std::memory_order_release);
         require_eventually([&] {
-            return session->killed() && !session->ready() && streams.creations() >= expected_creations;
+            const auto replacement = streams.latest();
+            return session->killed() && !session->ready() &&
+                   streams.creations() >= expected_creations &&
+                   replacement && replacement->running.load(std::memory_order_acquire);
         }, 500ms, "User Data Stream interruption did not fail closed and reconnect");
     }
 
