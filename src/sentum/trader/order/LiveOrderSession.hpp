@@ -184,26 +184,25 @@ private:
             std::this_thread::sleep_for(timing_.supervisor_poll_interval);
             if (!supervisor_running_.load()) break;
 
-            bool stream_running = false;
+            bool recovery_required = false;
             {
                 std::lock_guard<std::mutex> lock(stream_mutex_);
-                stream_running = stream_ && stream_->running();
-            }
-            if (!stream_running) {
-                fail_closed_and_recover();
-                continue;
+                if (!stream_ || !stream_->running()) {
+                    recovery_required = true;
+                } else {
+                    const auto now = std::chrono::steady_clock::now();
+                    if (now - last_keepalive_ >= timing_.keepalive_interval) {
+                        try {
+                            exchange_->keepalive_listen_key(listen_key_);
+                            last_keepalive_ = now;
+                        } catch (...) {
+                            recovery_required = true;
+                        }
+                    }
+                }
             }
 
-            const auto now = std::chrono::steady_clock::now();
-            if (now - last_keepalive_ < timing_.keepalive_interval) continue;
-
-            try {
-                std::lock_guard<std::mutex> lock(stream_mutex_);
-                exchange_->keepalive_listen_key(listen_key_);
-                last_keepalive_ = now;
-            } catch (...) {
-                fail_closed_and_recover();
-            }
+            if (recovery_required) fail_closed_and_recover();
         }
     }
 
