@@ -103,6 +103,7 @@ def main() -> int:
     report = {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "environment_class": "ci_rehearsal",
         "git_sha": args.expected_sha,
         "workflow_run_id": os.environ.get("SOURCE_WORKFLOW_RUN_ID", os.environ.get("GITHUB_RUN_ID", "unknown")),
         "status": "PASS" if not violations else "FAIL",
