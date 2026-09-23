@@ -40,13 +40,12 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 		const auto incident_request_id = incident.value("request_id", std::string{});
 		const auto incident_correlation = incident.value("source_correlation_id", std::string{});
 		const auto incident_state = incident.value("state", std::string{});
-		const bool correlation_conflicts =
-			!view.source_correlation_id.empty() &&
-			!incident_correlation.empty() &&
-			incident_correlation != view.source_correlation_id;
+		const bool correlation_matches =
+			view.source_correlation_id.empty() ||
+			(!incident_correlation.empty() && incident_correlation == view.source_correlation_id);
 		const bool has_lifecycle_identity =
 			!incident_request_id.empty() || !incident_correlation.empty();
-		if (!correlation_conflicts && has_lifecycle_identity && !incident_state.empty()) {
+		if (correlation_matches && has_lifecycle_identity && !incident_state.empty()) {
 			view.incident_state = incident_state;
 			view.request_id = incident_request_id;
 			if (view.source_correlation_id.empty()) view.source_correlation_id = incident_correlation;
