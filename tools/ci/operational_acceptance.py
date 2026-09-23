@@ -73,6 +73,7 @@ def main():
 	payload = {
 		"schema_version": 1,
 		"generated_at": datetime.now(timezone.utc).isoformat(),
+		"environment_class": "ci_rehearsal",
 		"status": "PASS" if passed else "FAIL",
 		"git_sha": os.environ.get("GITHUB_SHA", "unknown"),
 		"workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
