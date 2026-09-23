@@ -4,19 +4,19 @@
 
 This document defines the handoff contract for a Sentum release candidate after the repository release-readiness gate has passed.
 
-The RC package is an immutable operational handoff artifact. It is not permission to enable live trading. Exchange credentials, environment-specific configuration and operational approval remain outside the package.
+The RC package is an immutable operational handoff artifact. It is not permission to enable live trading. Exchange credentials, environment-specific configuration and operational approval remain outside the package. The evidence hierarchy is defined in `READINESS_EVIDENCE.md` and is included in the RC bundle.
 
 ## Required RC evidence
 
 An RC is eligible for handoff only when all of the following belong to the exact same Git commit:
 
 - Release build and regression tests passed;
-- AP-02 performance gate passed;
-- AP-09 operational acceptance passed with all requested cycles completed;
+- Performance Gate passed;
+- Operational Acceptance passed with all requested cycles completed;
 - ASan passed;
 - UBSan passed;
 - TSan passed;
-- AP-10 release-readiness gate passed;
+- Release Readiness passed, including Core CI Runtime Qualification and Independent Research Validation evidence;
 - RC package manifest records the same commit SHA;
 - archive SHA-256 is published beside the archive.
 
@@ -66,7 +66,7 @@ Before using an RC in an environment:
 2. Extract into a new versioned directory; never overwrite the currently active binary in place.
 3. Verify `SHA256SUMS` inside the bundle.
 4. Confirm `MANIFEST.json.git_sha` matches the intended commit.
-5. Confirm `evidence/release_readiness.json.status` is `PASS` and its `git_sha` matches the manifest.
+5. Confirm `evidence/release_readiness.json` uses schema version 2, reports `PASS`, matches the manifest Git SHA and identifies the required underlying evidence inputs.
 6. Copy or generate environment configuration separately. Do not reuse unknown local configuration blindly.
 7. Validate filesystem permissions and ensure secrets remain outside the RC directory.
 8. Start in the lowest-risk supported mode appropriate for the environment; do not infer live-trading approval from RC status.
