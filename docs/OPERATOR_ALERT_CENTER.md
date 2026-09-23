@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AP-19 integrates the alert classification and lifecycle presentation into both operator surfaces without creating a new alert authority or notification channel.
+operator alerting integrates the alert classification and lifecycle presentation into both operator surfaces without creating a new alert authority or notification channel.
 
 Terminal and web consume the same `OperatorAlertCenterView` projection.
 
@@ -77,4 +77,4 @@ The Alert Center cannot:
 - synthesize fills;
 - override exchange-confirmed execution truth.
 
-AP-19 notification delivery and routing remain separate later slices.
+operator alerting notification delivery and routing remain separate later slices.
