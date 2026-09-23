@@ -353,7 +353,7 @@ cmake -S . -B build-tsan \
 cmake --build build-tsan --parallel 2
 ```
 
-Runtime qualification now provides bounded long-duration Paper soak evidence, sanitizer-backed fault scenarios and deterministic reconnect/reconciliation validation. Independent research validation and accumulated operational evidence remain required before treating Sentum as production-grade software.
+Core CI now binds Release build/regression results, sanitizers, Operational Acceptance, enforced performance budgets, bounded Runtime Qualification smoke and canonical Independent Research Validation into the same-commit Release Readiness contract. The longer scheduled Runtime Qualification workflow remains advisory evidence. Repository readiness is explicitly distinct from target-environment acceptance, and neither changes Sentum's Binance Spot Testnet-only execution boundary.
 
 ## Documentation
 
@@ -362,6 +362,9 @@ Runtime qualification now provides bounded long-duration Paper soak evidence, sa
 - [Research dashboard](docs/ADVANCED_RESEARCH_DASHBOARD.md)
 - [Runtime performance](docs/PERFORMANCE.md)
 - [Runtime qualification and fault injection](docs/RUNTIME_QUALIFICATION.md)
+- [Readiness evidence contract](docs/READINESS_EVIDENCE.md)
+- [Release readiness](docs/RELEASE_READINESS.md)
+- [Production validation](docs/PRODUCTION_VALIDATION.md)
 - [Quant research](docs/RESEARCH.md)
 - [Research validation and robustness](docs/RESEARCH_ROBUSTNESS.md)
 - [Strategy and portfolio research](docs/STRATEGY_PORTFOLIO_RESEARCH.md)
