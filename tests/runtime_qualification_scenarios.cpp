@@ -199,13 +199,13 @@ private:
 
 struct MockStreamState {
     std::atomic<bool> running{false};
-    BinanceUserDataStream::Handler handler;
+    IUserDataStream::Handler handler;
 };
 
-class MockUserDataStream final : public BinanceUserDataStream {
+class MockUserDataStream final : public IUserDataStream {
 public:
-    MockUserDataStream(std::shared_ptr<MockStreamState> state, BinanceUserDataStream::Handler handler)
-        : BinanceUserDataStream("qualification", {}), state_(std::move(state)) {
+    MockUserDataStream(std::shared_ptr<MockStreamState> state, IUserDataStream::Handler handler)
+        : state_(std::move(state)) {
         state_->handler = std::move(handler);
     }
 
@@ -222,7 +222,7 @@ private:
 class MockStreamRegistry {
 public:
     sentum::order::LiveOrderSession::StreamFactory factory() {
-        return [this](std::string, BinanceUserDataStream::Handler handler) {
+        return [this](std::string, IUserDataStream::Handler handler) {
             auto state = std::make_shared<MockStreamState>();
             {
                 std::lock_guard<std::mutex> lock(mutex_);
