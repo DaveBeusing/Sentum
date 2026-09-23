@@ -360,6 +360,20 @@ def validate_manifest_and_provenance(
 
     artifacts = manifest.get("artifacts")
     artifact_paths: list[str] = artifacts if isinstance(artifacts, list) else []
+    required_artifacts = {
+        "experiment.json",
+        "dataset-catalog.json",
+        "risk.json",
+        "research-config.json",
+        "research.json",
+        "trials.csv",
+        "research-visualization.json",
+    }
+    recorded_basenames = {Path(item).name for item in artifact_paths if isinstance(item, str)}
+    for required in sorted(required_artifacts - recorded_basenames):
+        add_violation(report, "MANIFEST_ARTIFACT_MISSING", f"manifest does not declare required artifact {required}")
+    if snapshot is not None and set(snapshot["artifacts"]) != set(artifact_paths):
+        add_violation(report, "ARTIFACT_REGISTRY_MISMATCH", "manifest and registry declare different artifact sets")
     artifact_hashes = manifest.get("artifact_sha256")
     if not isinstance(artifact_hashes, dict):
         add_violation(report, "PROVENANCE_MISSING", "manifest artifact_sha256 map is missing")
