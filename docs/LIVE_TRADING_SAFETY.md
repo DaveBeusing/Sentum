@@ -36,4 +36,6 @@ The web dashboard remains read-only. The terminal Paper controls can select stra
 
 Before relying on Sentum even in Testnet, validate long-running Paper behavior, queue/drop limits, sanitizer builds, User Data Stream interruption, partial fills, restart reconciliation, balance mismatches and kill-switch recovery.
 
+The reproducible qualification procedure, CI cadence, failure criteria and evidence schema are defined in [RUNTIME_QUALIFICATION.md](RUNTIME_QUALIFICATION.md). Qualification never clears safety interlocks merely because a transport reconnect succeeded.
+
 Sentum remains experimental trading-system software. Historical or simulated performance must not be interpreted as a guarantee of future results.
