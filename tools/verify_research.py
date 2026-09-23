@@ -411,8 +411,36 @@ def validate_splits(
     reported_contract = research.get("validation_contract")
     if not isinstance(reported_contract, dict):
         add_violation(report, "SPLIT_METADATA_MISSING", "research artifact has no validation_contract")
-    elif reported_contract != expected:
-        add_violation(report, "SPLIT_METADATA_MISMATCH", "persisted validation contract does not match independently recomputed boundaries")
+    else:
+        for required_key in ("purge_events", "embargo_events", "holdout_begin_index", "holdout_end_index", "fold_boundaries"):
+            if required_key not in reported_contract:
+                add_violation(report, "SPLIT_METADATA_MISSING", f"validation_contract is missing {required_key}")
+        reported_folds = reported_contract.get("fold_boundaries")
+        if isinstance(reported_folds, list):
+            for fold in reported_folds:
+                if not isinstance(fold, dict):
+                    add_violation(report, "FOLD_BOUNDARY_INVALID", "reported fold boundary is not an object")
+                    continue
+                try:
+                    train_begin = int(fold["train_begin"])
+                    train_end = int(fold["train_end_exclusive"])
+                    validation_begin = int(fold["validation_begin"])
+                    validation_end = int(fold["validation_end_exclusive"])
+                except (KeyError, TypeError, ValueError):
+                    add_violation(report, "FOLD_BOUNDARY_INVALID", "reported fold boundary is incomplete")
+                    continue
+                if not (0 <= train_begin <= train_end <= validation_begin <= validation_end):
+                    add_violation(report, "FOLD_OVERLAP", f"reported fold {fold.get('fold_index')} overlaps or reverses train/validation boundaries")
+        try:
+            reported_holdout_begin = int(reported_contract["holdout_begin_index"])
+            reported_holdout_end = int(reported_contract["holdout_end_index"])
+            reported_research_end = int(reported_contract["research_end_index"])
+            if reported_holdout_begin != reported_research_end or reported_holdout_begin >= reported_holdout_end:
+                add_violation(report, "HOLDOUT_BOUNDARY", "reported final holdout boundary is invalid or overlaps the research region")
+        except (KeyError, TypeError, ValueError):
+            add_violation(report, "HOLDOUT_BOUNDARY", "reported final holdout boundary metadata is incomplete")
+        if reported_contract != expected:
+            add_violation(report, "SPLIT_METADATA_MISMATCH", "persisted validation contract does not match independently recomputed boundaries")
 
     expected_scalars = {
         "events": len(events),
