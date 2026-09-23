@@ -57,10 +57,24 @@ class ConsolidatedReadinessTests(unittest.TestCase):
 		return payload
 
 	def complete_evidence(self) -> dict[str, Path]:
-		return {
-			name: self.write(name, self.base_payload(name))
-			for name in self.policy["required_repository_evidence"]
-		}
+		evidence: dict[str, Path] = {}
+		links = self.policy.get("artifact_links", [])
+		for name in self.policy["required_repository_evidence"]:
+			payload = self.base_payload(name)
+			for link in links:
+				if link.get("downstream") != name:
+					continue
+				upstream = str(link["upstream"])
+				field = str(link["downstream_field"])
+				self.assertIn(upstream, evidence)
+				value = MODULE.sha256(evidence[upstream])
+				target = payload
+				parts = field.split(".")
+				for part in parts[:-1]:
+					target = target.setdefault(part, {})
+				target[parts[-1]] = value
+			evidence[name] = self.write(name, payload)
+		return evidence
 
 	def test_complete_same_commit_is_repository_ready(self) -> None:
 		report = MODULE.evaluate(self.policy, self.complete_evidence(), self.sha, self.now)
@@ -103,6 +117,22 @@ class ConsolidatedReadinessTests(unittest.TestCase):
 		payload = self.base_payload("resilience")
 		payload["status"] = "FAIL"
 		evidence["resilience"] = self.write("failed", payload)
+		report = MODULE.evaluate(self.policy, evidence, self.sha, self.now)
+		self.assertEqual("BLOCKED", report["status"])
+
+	def test_future_evidence_timestamp_is_blocked(self) -> None:
+		evidence = self.complete_evidence()
+		payload = json.loads(evidence["production_operations"].read_text(encoding="utf-8"))
+		payload["generated_at"] = (self.now + timedelta(minutes=1)).isoformat()
+		evidence["production_operations"] = self.write("future", payload)
+		report = MODULE.evaluate(self.policy, evidence, self.sha, self.now)
+		self.assertEqual("BLOCKED", report["status"])
+
+	def test_artifact_link_mismatch_is_blocked(self) -> None:
+		evidence = self.complete_evidence()
+		payload = json.loads(evidence["production_operations"].read_text(encoding="utf-8"))
+		payload["rc_package"]["sha256"] = "0" * 64
+		evidence["production_operations"] = self.write("link-mismatch", payload)
 		report = MODULE.evaluate(self.policy, evidence, self.sha, self.now)
 		self.assertEqual("BLOCKED", report["status"])
 
@@ -151,6 +181,30 @@ class ConsolidatedReadinessTests(unittest.TestCase):
 			self.sha,
 			self.now,
 			self.write("target-mismatched-artifact", target),
+		)
+		self.assertEqual("BLOCKED", report["status"])
+
+	def test_reversed_target_observation_window_is_blocked(self) -> None:
+		target = {
+			"schema_version": 1,
+			"status": "ACCEPTED",
+			"git_sha": self.sha,
+			"environment_class": "target_environment",
+			"validated_at_utc": self.now.isoformat(),
+			"artifact_sha256": "d" * 64,
+			"target_environment": "staging-like-target",
+			"operator": "operator",
+			"observation_window": {
+				"start_utc": self.now.isoformat(),
+				"end_utc": (self.now - timedelta(minutes=30)).isoformat(),
+			},
+		}
+		report = MODULE.evaluate(
+			self.policy,
+			self.complete_evidence(),
+			self.sha,
+			self.now,
+			self.write("target-reversed-window", target),
 		)
 		self.assertEqual("BLOCKED", report["status"])
 
