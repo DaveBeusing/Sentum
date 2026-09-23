@@ -845,6 +845,11 @@ def main() -> int:
             args.qualification_report,
             budgets["runtime_qualification"],
         )
+        for item in runtime_evidence:
+            if item["status"] != "PASS" or not item["evidence_complete"]:
+                violations.append(
+                    f"runtime qualification evidence is incomplete or failing for {item['scenario']}"
+                )
 
         report: dict[str, Any] = {
             "schema_version": 2,
