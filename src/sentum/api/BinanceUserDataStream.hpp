@@ -89,8 +89,9 @@ private:
             if (ec) throw std::runtime_error("User data stream connection failed: " + ec.message());
             impl_->client.connect(connection);
             impl_->client.run();
+            running_.store(false, std::memory_order_release);
         } catch (...) {
-            running_.store(false);
+            running_.store(false, std::memory_order_release);
         }
     }
 
