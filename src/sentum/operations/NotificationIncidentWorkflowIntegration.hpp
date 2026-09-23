@@ -36,15 +36,18 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 	if (!control_plane.is_object()) return view;
 
 	const auto incident = control_plane.value("incident_workflow", nlohmann::json::object());
-	if (incident.is_object() && incident.value("action", std::string{}) == "OPEN_INCIDENT") {
+	if (incident.is_object() && !incident.empty()) {
 		const auto incident_request_id = incident.value("request_id", std::string{});
 		const auto incident_correlation = incident.value("source_correlation_id", std::string{});
+		const auto incident_state = incident.value("state", std::string{});
 		const bool correlation_conflicts =
 			!view.source_correlation_id.empty() &&
 			!incident_correlation.empty() &&
 			incident_correlation != view.source_correlation_id;
-		if (!correlation_conflicts) {
-			view.incident_state = incident.value("state", std::string("IDLE"));
+		const bool has_lifecycle_identity =
+			!incident_request_id.empty() || !incident_correlation.empty();
+		if (!correlation_conflicts && has_lifecycle_identity && !incident_state.empty()) {
+			view.incident_state = incident_state;
 			view.request_id = incident_request_id;
 			if (view.source_correlation_id.empty()) view.source_correlation_id = incident_correlation;
 		}
