@@ -1,6 +1,6 @@
 # Operational acceptance and soak evidence
 
-AP-09 adds a repeatable operational acceptance layer on top of Sentum's existing lifecycle and observability regression tests.
+Sentum uses a repeatable operational acceptance layer on top of the existing lifecycle and observability regression tests.
 
 ## Purpose
 
@@ -37,11 +37,11 @@ The JSON report records each command, return code, elapsed time, stdout and stde
 
 `FAIL` means at least one cycle timed out or returned a non-zero status. The runner stops after the first failing cycle so the evidence remains focused and CI time is bounded.
 
-This is an operational acceptance gate, not a production latency SLA. Performance budgets remain owned by AP-02 and their dedicated benchmark gate.
+This is an operational acceptance gate, not a production latency SLA. Performance budgets remain owned by the dedicated benchmark gate.
 
 ## Scope boundaries
 
-AP-09 does not alter Strategy, Risk, Execution, Position/Trade State or fill truth. It does not synthesize exchange state and does not weaken fail-closed Testnet behavior.
+Operational acceptance does not alter Strategy, Risk, Execution, Position/Trade State or fill truth. It does not synthesize exchange state and does not weaken fail-closed Testnet behavior.
 
 Longer-duration soak runs, memory/RSS trend capture and deterministic fault injection are implemented by the runtime qualification layer documented in [RUNTIME_QUALIFICATION.md](RUNTIME_QUALIFICATION.md).
 
