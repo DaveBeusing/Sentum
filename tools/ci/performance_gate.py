@@ -854,6 +854,7 @@ def main() -> int:
         report: dict[str, Any] = {
             "schema_version": 2,
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "environment_class": "ci_hosted_runner",
             "status": "PASS" if not violations else "FAIL",
             "git_sha": os.environ.get("GITHUB_SHA", "unknown"),
             "workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
