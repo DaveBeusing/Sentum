@@ -57,6 +57,8 @@ log/research_trials.csv
 
 Managed experiments additionally persist immutable run directories and provenance through the experiment registry. See [EXPERIMENT_DATASET_MANAGEMENT.md](EXPERIMENT_DATASET_MANAGEMENT.md).
 
+Completed managed single-asset experiments can be checked through the separate persisted-evidence verifier. It validates provenance and research boundaries and independently recalculates final-holdout metrics from persisted trade evidence. See [INDEPENDENT_RESEARCH_VALIDATION.md](INDEPENDENT_RESEARCH_VALIDATION.md).
+
 ## Safety
 
 Research mode does not create a Binance execution venue and does not submit exchange orders. Results remain dependent on dataset quality, execution assumptions, search-space design and validation methodology; a strong historical score is not evidence that a strategy will be profitable in future trading.
