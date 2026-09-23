@@ -36,14 +36,16 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 	if (!control_plane.is_object()) return view;
 
 	const auto incident = control_plane.value("incident_workflow", nlohmann::json::object());
-	if (incident.is_object()) {
+	if (incident.is_object() && incident.value("action", std::string{}) == "OPEN_INCIDENT") {
+		const auto incident_request_id = incident.value("request_id", std::string{});
 		const auto incident_correlation = incident.value("source_correlation_id", std::string{});
-		const bool correlation_matches = view.source_correlation_id.empty()
-			? true
-			: incident_correlation == view.source_correlation_id;
-		if (correlation_matches) {
+		const bool correlation_conflicts =
+			!view.source_correlation_id.empty() &&
+			!incident_correlation.empty() &&
+			incident_correlation != view.source_correlation_id;
+		if (!correlation_conflicts) {
 			view.incident_state = incident.value("state", std::string("IDLE"));
-			view.request_id = incident.value("request_id", std::string{});
+			view.request_id = incident_request_id;
 			if (view.source_correlation_id.empty()) view.source_correlation_id = incident_correlation;
 		}
 	}
@@ -54,9 +56,13 @@ inline NotificationIncidentWorkflowIntegration derive_notification_incident_work
 	if (recovery.is_object() && !recovery.empty()) {
 		const auto recovery_request_id = recovery.value("request_id", std::string{});
 		const auto recovery_correlation = recovery.value("source_correlation_id", std::string{});
-		const bool request_matches = !view.request_id.empty() && recovery_request_id == view.request_id;
+		const bool request_matches =
+			!view.request_id.empty() &&
+			(recovery_request_id.empty() || recovery_request_id == view.request_id);
 		const bool correlation_matches =
-			view.request_id.empty() && !view.source_correlation_id.empty() &&
+			view.request_id.empty() &&
+			!view.source_correlation_id.empty() &&
+			!recovery_correlation.empty() &&
 			recovery_correlation == view.source_correlation_id;
 		if (request_matches || correlation_matches ||
 			(view.request_id.empty() && view.source_correlation_id.empty())) {

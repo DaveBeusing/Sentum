@@ -15,21 +15,30 @@
 
 #include <sentum/api/BinanceSpotExecutionClient.hpp>
 
-class BinanceUserDataStream {
+class IUserDataStream {
 public:
     using Handler = std::function<void(const nlohmann::json&)>;
+    virtual ~IUserDataStream() = default;
+    virtual void start() = 0;
+    virtual void stop() = 0;
+    virtual bool running() const noexcept = 0;
+};
+
+class BinanceUserDataStream final : public IUserDataStream {
+public:
+    using Handler = IUserDataStream::Handler;
 
     BinanceUserDataStream(std::string listen_key, Handler handler)
         : impl_(std::make_unique<Impl>()), listen_key_(std::move(listen_key)), handler_(std::move(handler)) {}
 
-    ~BinanceUserDataStream() { stop(); }
+    ~BinanceUserDataStream() override { stop(); }
 
-    void start() {
+    void start() override {
         if (running_.exchange(true)) return;
         thread_ = std::thread([this] { run(); });
     }
 
-    void stop() {
+    void stop() override {
         running_.store(false);
         {
             std::lock_guard<std::mutex> lock(impl_->mutex);
@@ -42,6 +51,8 @@ public:
         impl_->client.stop();
         if (thread_.joinable() && thread_.get_id() != std::this_thread::get_id()) thread_.join();
     }
+
+    bool running() const noexcept override { return running_.load(std::memory_order_acquire); }
 
 private:
     using Client = websocketpp::client<websocketpp::config::asio_tls_client>;
@@ -87,8 +98,9 @@ private:
             if (ec) throw std::runtime_error("User data stream connection failed: " + ec.message());
             impl_->client.connect(connection);
             impl_->client.run();
+            running_.store(false, std::memory_order_release);
         } catch (...) {
-            running_.store(false);
+            running_.store(false, std::memory_order_release);
         }
     }
 

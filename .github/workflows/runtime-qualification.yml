@@ -1,0 +1,105 @@
+name: Sentum Runtime Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: Paper soak duration in seconds
+        required: true
+        default: "900"
+      seed:
+        description: Deterministic qualification seed
+        required: true
+        default: "1"
+  schedule:
+    - cron: "17 2 * * 0"
+
+concurrency:
+  group: sentum-runtime-qualification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      QUALIFICATION_DURATION_SECONDS: ${{ inputs.duration_seconds || '900' }}
+      QUALIFICATION_SEED: ${{ inputs.seed || '1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake curl libcurl4-openssl-dev libssl-dev libboost-system-dev libasio-dev libwebsocketpp-dev libsqlite3-dev nlohmann-json3-dev
+      - name: Configure Release qualification build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build qualification targets
+        run: |
+          cmake --build build --parallel --target \
+            sentum_runtime_qualification_scenarios \
+            sentum_notification_delivery_evidence_repository_tests \
+            sentum_governed_incident_lifecycle_runtime_tests
+      - name: Run extended qualification
+        shell: bash
+        run: |
+          mkdir -p log/runtime-qualification
+          status=0
+          duration="${QUALIFICATION_DURATION_SECONDS}"
+          seed="${QUALIFICATION_SEED}"
+          if ! [[ "$duration" =~ ^[0-9]+$ ]] || (( duration < 60 || duration > 2400 )); then
+            echo "duration_seconds must be an integer between 60 and 2400" >&2
+            exit 2
+          fi
+          if ! [[ "$seed" =~ ^[0-9]+$ ]]; then
+            echo "seed must be a non-negative integer" >&2
+            exit 2
+          fi
+          paper_timeout=$((duration + 120))
+
+          python3 tools/ci/runtime_qualification.py \
+            --build-dir build \
+            --scenario paper-soak \
+            --duration-seconds "$duration" \
+            --seed "$seed" \
+            --timeout-seconds "$paper_timeout" \
+            --max-rss-growth-kib 131072 \
+            --output log/runtime-qualification/paper-soak.json \
+            --summary log/runtime-qualification/paper-soak.md || status=$?
+
+          for scenario in \
+            market-data-reconnect \
+            user-stream-interruption \
+            listen-key-keepalive \
+            partial-fill \
+            unresolved-order-restart \
+            balance-mismatch \
+            persistence-pressure \
+            persistence-write-failure \
+            dashboard-recovery \
+            runtime-restart \
+            kill-switch-recovery
+          do
+            python3 tools/ci/runtime_qualification.py \
+              --build-dir build \
+              --scenario "$scenario" \
+              --duration-seconds 1 \
+              --seed "$seed" \
+              --timeout-seconds 120 \
+              --max-rss-growth-kib 65536 \
+              --output "log/runtime-qualification/${scenario}.json" \
+              --summary "log/runtime-qualification/${scenario}.md" || status=$?
+          done
+
+          for summary in log/runtime-qualification/*.md; do
+            cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          exit "$status"
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentum-runtime-qualification-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: log/runtime-qualification/

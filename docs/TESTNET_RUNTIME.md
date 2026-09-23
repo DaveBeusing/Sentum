@@ -33,7 +33,7 @@ A strategy signal or REST placement acknowledgement does not create an executed 
 
 The runtime reconciles open orders and balances before enabling submissions, then starts the Binance User Data Stream. Stream interruption or listen-key keepalive failure disables new submissions, activates recovery controls, rebuilds the stream and requires reconciliation again.
 
-Ambiguous recovery remains blocked rather than guessing local state.
+Ambiguous recovery remains blocked rather than guessing local state. A rebuilt User Data Stream does not clear a kill switch automatically; explicit reconciled resume is required, and unresolved open orders continue to block that transition.
 
 See [ACCOUNT_RECONCILIATION.md](ACCOUNT_RECONCILIATION.md) for the complete recovery model.
 
@@ -53,4 +53,4 @@ Replay writes deterministic trade history and metrics that can be checked with t
 python3 tools/verify_metrics.py log/replay.sqlite3 log/replay_metrics.json
 ```
 
-Testnet behavior should be validated under partial fills, reconnects, process restart, balance mismatches and unresolved-order scenarios before it is treated as operationally reliable.
+Testnet behavior is qualified without live credentials through the deterministic scenarios in [RUNTIME_QUALIFICATION.md](RUNTIME_QUALIFICATION.md). Those scenarios cover User Data Stream interruption, listen-key failure, partial fills, restart reconciliation, balance mismatch, unresolved orders and kill-switch recovery while preserving the production order/reconciliation state machines.
