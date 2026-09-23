@@ -52,7 +52,7 @@ def main() -> int:
 
 		checks.append(check("performance-status", performance.get("status") == "PASS", str(performance.get("status"))))
 		checks.append(check("operational-status", operational.get("status") == "PASS", str(operational.get("status"))))
-		checks.append(check("performance-schema", performance.get("schema_version") == 1, str(performance.get("schema_version"))))
+		checks.append(check("performance-schema", performance.get("schema_version") == 2, str(performance.get("schema_version"))))
 		checks.append(check("operational-schema", operational.get("schema_version") == 1, str(operational.get("schema_version"))))
 		checks.append(check("performance-sha", performance.get("git_sha") == expected_sha, str(performance.get("git_sha"))))
 		checks.append(check("operational-sha", operational.get("git_sha") == expected_sha, str(operational.get("git_sha"))))

@@ -120,7 +120,7 @@ The scanner benchmark exercises the production `MarketDataStore -> MarketEventBu
 ./build-perf/sentum_scanner_hot_path_benchmark 2000 50
 ```
 
-These scanner measurements are initially **OBSERVED** evidence. CI records all three universe sizes so scaling can be evaluated before a stable scanner-specific budget is promoted to **ENFORCED**.
+Scanner timing is now **ENFORCED** as a hosted-runner regression budget. The promotion is based on five successful GitHub-hosted Release runs on `ubuntu-24.04` with GNU 13.3.0. The measured run-to-run variation was low enough to establish separate median and worst-sample guardrails for all three universe sizes. These limits are CI regression controls, not production latency SLAs.
 
 ## Enforced CI performance gate
 
@@ -136,20 +136,38 @@ python3 tools/ci/performance_gate.py \
   --summary log/performance_gate.md
 ```
 
-The current market-path gate executes five repetitions for each synthetic universe and evaluates both the median and the worst sample:
+The gate evaluates the following repository-controlled budgets:
 
-| Workload | Events | Median budget | Worst-sample guardrail | Evidence state |
-| --- | ---: | ---: | ---: | --- |
-| 500 symbols x 2,000 events | 1,000,000 | <= 250 ns/event | <= 400 ns/event | ENFORCED |
-| 1,000 symbols x 1,000 events | 1,000,000 | <= 250 ns/event | <= 400 ns/event | ENFORCED |
-| 2,000 symbols x 500 events | 1,000,000 | <= 250 ns/event | <= 400 ns/event | ENFORCED |
-| parser allocations | 1,000,000 parses | 0 allocations/parse | 0 allocations/parse | ENFORCED |
+| Metric / workload | Median budget | Worst-sample guardrail | Correctness requirement | Evidence state |
+| --- | ---: | ---: | --- | --- |
+| market path: 500 x 2,000 | <= 250 ns/event | <= 400 ns/event | exact generated/delivered event count | ENFORCED |
+| market path: 1,000 x 1,000 | <= 250 ns/event | <= 400 ns/event | exact generated/delivered event count | ENFORCED |
+| market path: 2,000 x 500 | <= 250 ns/event | <= 400 ns/event | exact generated/delivered event count | ENFORCED |
+| parser allocations | n/a | n/a | 0 allocations/parse | ENFORCED |
+| scanner: 500 x 200 | <= 375 ns/event | <= 450 ns/event | exact event count and top-count contract | ENFORCED |
+| scanner: 1,000 x 100 | <= 390 ns/event | <= 475 ns/event | exact event count and top-count contract | ENFORCED |
+| scanner: 2,000 x 50 | <= 420 ns/event | <= 525 ns/event | exact event count and top-count contract | ENFORCED |
+| dashboard unchanged snapshot polling | OBSERVED | OBSERVED | 0 conditional snapshot copies | timing OBSERVED / correctness ENFORCED |
+| terminal unchanged frame | <= 1,050 ns/frame | <= 1,300 ns/frame | 0 payload bytes | ENFORCED |
+| terminal changed frame | <= 1,300 ns/frame | <= 1,600 ns/frame | changed frame emits payload | ENFORCED |
 
-Every market run must also deliver exactly the number of events it generated. Correctness failure is a performance-gate failure even when timing remains within budget.
+Market, scanner and terminal timing gates execute repeated measurements and evaluate both median and worst-sample behavior. Correctness failure remains a gate failure even when timing is within budget.
 
-The initial gate values were derived from successful GitHub-hosted Release evidence on workflow run `35090140340` (`ubuntu-24.04`, GNU 13.3.0), where the three market-path cases measured approximately 62.10, 77.74 and 63.64 ns/event and the parser reported zero allocations per parse. The enforced limits deliberately preserve substantial hosted-runner headroom; their purpose is to detect material regressions, not normal machine variance.
+The original market/parser budgets were derived from successful GitHub-hosted Release evidence on workflow run `35090140340` (`ubuntu-24.04`, GNU 13.3.0), where the three market-path cases measured approximately 62.10, 77.74 and 63.64 ns/event and the parser reported zero allocations per parse.
 
-CI stores `performance_gate.json` and `performance_gate.md` as short-lived workflow evidence and publishes the Markdown result in the job summary. Scanner hot-path observations are stored beside this evidence without changing the AP-02 gate thresholds.
+Scanner, dashboard and terminal qualification used five additional successful Core CI runs: `35201427700`, `35204003032`, `35207600347`, `35788383555` and `35791460185`, all on `ubuntu-24.04` with GNU 13.3.0. Scanner measurements stayed within approximately 291-314 ns/event (500 symbols), 316-325 ns/event (1,000 symbols) and 319-352 ns/event (2,000 symbols). Terminal frame-diff measurements stayed within approximately 849-905 ns/frame unchanged and 1,030-1,107 ns/frame changed. The enforced guardrails retain deliberate hosted-runner headroom above those observed ranges.
+
+Dashboard timing was not promoted: unchanged conditional polling ranged from roughly 24 to 47 ns/poll across the same runs, and unconditional snapshot cost also showed materially greater runner variance. Its stronger invariant is therefore enforced as a correctness budget: unchanged conditional polling must produce zero snapshot copies.
+
+CI stores `performance_gate.json` and `performance_gate.md` as the consolidated short-lived performance evidence and publishes the Markdown result in the job summary. The summary labels ENFORCED and OBSERVED dimensions explicitly.
+
+## Runtime qualification and lifecycle evidence
+
+The runtime qualification harness contributes commit-bound RSS, thread-count, queue and sampled-latency evidence to the performance report when its JSON artifacts are available.
+
+RSS growth/trend and sampled parser/dispatch/strategy latency remain **OBSERVED** in the performance budget model. The qualification harness still applies its separate bounded RSS-growth guardrail and fails incomplete evidence, but that guardrail is not reinterpreted as a production memory SLA.
+
+A whole-runtime startup timing budget is not currently promoted because normal Paper startup includes configuration, exchange metadata and network-facing initialization that is not a deterministic hosted-runner benchmark boundary. Shutdown has deterministic component-level lifecycle assertions, including bounded queue draining and dashboard stop behavior, but the repository does not convert those functional lifecycle limits into a whole-system production shutdown SLA. A dedicated startup/shutdown timing budget should be added only after an isolated deterministic workload is available and repeatable evidence supports it.
 
 ## Budget change policy
 

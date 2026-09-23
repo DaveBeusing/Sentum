@@ -10,7 +10,7 @@ Release readiness is evidence-based and fail-closed. A successful build alone is
 
 The final gate requires both machine-readable reports to exist for the same commit:
 
-- `performance_gate.json` with schema version 1 and `status = PASS`;
+- `performance_gate.json` with schema version 2 and `status = PASS`;
 - `operational_acceptance.json` with schema version 1, `status = PASS`, and all requested acceptance cycles completed.
 
 Both reports must contain a `git_sha` equal to the commit under evaluation. Evidence from another commit is rejected.
@@ -19,7 +19,7 @@ Both reports must contain a `git_sha` equal to the commit under evaluation. Evid
 
 `release_readiness` declares explicit dependencies on:
 
-- the Release build job, including regression tests, operational acceptance, CLI smoke, AP-02 performance budgets, research smoke and dashboard smoke;
+- the Release build job, including regression tests, operational acceptance, CLI smoke, qualified performance regression budgets, research smoke and dashboard smoke;
 - the sanitizer matrix covering ASan, UBSan and TSan.
 
 If any upstream job fails or does not complete successfully, the final readiness job cannot produce a PASS result.
@@ -43,7 +43,7 @@ A commit is not release-ready when any of the following is true:
 
 - Release build or regression tests fail;
 - operational acceptance fails, times out, or completes fewer cycles than requested;
-- AP-02 performance budgets fail;
+- qualified performance regression budgets fail;
 - ASan, UBSan or TSan fails;
 - required evidence is missing, malformed, has an unsupported schema, or belongs to another commit;
 - the final release-readiness gate does not report PASS.

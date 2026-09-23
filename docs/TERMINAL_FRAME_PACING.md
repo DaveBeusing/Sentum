@@ -31,7 +31,7 @@ This keeps presentation cadence bounded without making UI timing part of trading
 
 `sentum_terminal_ui_policy_tests` verifies the production `TerminalUi::render_frame()` integration, including the hard unchanged-frame zero-write contract.
 
-`sentum_terminal_render_pipeline_benchmark` records unchanged-frame and changed-frame diff cost. CI treats timing as **OBSERVED** evidence, while `unchanged_payload_bytes=0` is a correctness requirement.
+`sentum_terminal_render_pipeline_benchmark` records unchanged-frame and changed-frame diff cost. After five successful hosted-runner qualification runs demonstrated stable timing, Core CI now treats both timing paths as **ENFORCED** regression budgets: unchanged frames use a 1,050 ns/frame median budget with a 1,300 ns/frame worst-sample guardrail, and changed frames use 1,300 ns/frame median with a 1,600 ns/frame worst-sample guardrail. `unchanged_payload_bytes=0` remains an independently **ENFORCED** correctness requirement. These values are GitHub-hosted CI regression controls, not production rendering SLAs.
 
 ## Operational boundary
 

@@ -94,6 +94,8 @@ jobs:
           ./sentum --version | grep 'Sentum '
           if ./sentum unknown-command >/tmp/cli-invalid.log 2>&1; then exit 1; fi
           grep 'unknown command' /tmp/cli-invalid.log
+      - name: Validate performance gate evaluator
+        run: python3 tests/performance_gate_tests.py
       - name: Enforce performance budgets
         shell: bash
         run: |
@@ -101,6 +103,8 @@ jobs:
           python3 tools/ci/performance_gate.py \
             --build-dir build \
             --budget-file benchmarks/performance_budgets.json \
+            --qualification-report log/runtime-qualification/paper-soak.json \
+            --qualification-report log/runtime-qualification/all-faults.json \
             --report log/performance_gate.json \
             --summary log/performance_gate.md
           status=$?
@@ -108,54 +112,6 @@ jobs:
             cat log/performance_gate.md >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$status"
-      - name: Observe scanner hot path
-        shell: bash
-        run: |
-          mkdir -p log
-          ./build/sentum_scanner_hot_path_benchmark 500 200 | tee log/scanner_hot_path_500.txt
-          ./build/sentum_scanner_hot_path_benchmark 1000 100 | tee log/scanner_hot_path_1000.txt
-          ./build/sentum_scanner_hot_path_benchmark 2000 50 | tee log/scanner_hot_path_2000.txt
-          {
-            echo '## Scanner hot path observation'
-            echo ''
-            echo 'These measurements are OBSERVED evidence only; AP-03 does not turn them into a production SLA.'
-            echo ''
-            echo '```text'
-            cat log/scanner_hot_path_500.txt
-            echo
-            cat log/scanner_hot_path_1000.txt
-            echo
-            cat log/scanner_hot_path_2000.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Observe dashboard snapshot polling
-        shell: bash
-        run: |
-          mkdir -p log
-          ./build/sentum_dashboard_snapshot_benchmark 250000 | tee log/dashboard_snapshot.txt
-          {
-            echo '## Dashboard snapshot observation'
-            echo ''
-            echo 'This is OBSERVED evidence for the AP-05 snapshot architecture; it is not a production SLA.'
-            echo ''
-            echo '```text'
-            cat log/dashboard_snapshot.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Observe terminal render pipeline
-        shell: bash
-        run: |
-          mkdir -p log
-          ./build/sentum_terminal_render_pipeline_benchmark 250000 | tee log/terminal_render_pipeline.txt
-          {
-            echo '## Terminal render pipeline observation'
-            echo ''
-            echo 'This is OBSERVED evidence for AP-06; unchanged frames must emit zero terminal payload bytes.'
-            echo ''
-            echo '```text'
-            cat log/terminal_render_pipeline.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload performance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -166,11 +122,6 @@ jobs:
           path: |
             log/performance_gate.json
             log/performance_gate.md
-            log/scanner_hot_path_500.txt
-            log/scanner_hot_path_1000.txt
-            log/scanner_hot_path_2000.txt
-            log/dashboard_snapshot.txt
-            log/terminal_render_pipeline.txt
       - name: Smoke test quant research
         shell: bash
         run: |
