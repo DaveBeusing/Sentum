@@ -386,13 +386,27 @@ nlohmann::json scenario_user_stream_interruption() {
     session->start();
     require(session->ready(), "session was not initially ready");
 
-    auto stream = streams.latest();
-    require(static_cast<bool>(stream), "mock user stream was not created");
-    stream->running.store(false, std::memory_order_release);
+    constexpr std::size_t disconnect_cycles = 3;
+    for (std::size_t cycle = 0; cycle < disconnect_cycles; ++cycle) {
+        auto stream = streams.latest();
+        require(static_cast<bool>(stream), "mock user stream was not created");
+        const auto expected_creations = streams.creations() + 1;
+        stream->running.store(false, std::memory_order_release);
+        require_eventually([&] {
+            return session->killed() && !session->ready() && streams.creations() >= expected_creations;
+        }, 500ms, "User Data Stream interruption did not fail closed and reconnect");
+    }
 
-    require_eventually([&] { return session->killed() && !session->ready() && streams.creations() >= 2; },
-                       500ms, "User Data Stream interruption did not fail closed and reconnect");
+    bool submission_blocked = false;
+    try {
+        session->submit({"BTCUSDT", sentum::order::Side::Buy, 1.0, "blocked-after-reconnect"});
+    } catch (const std::logic_error&) {
+        submission_blocked = true;
+    }
+    require(submission_blocked, "automatic stream recovery allowed a new submission");
+
     const auto reconnects = streams.creations() - 1;
+    require(reconnects >= disconnect_cycles, "repeated stream recovery lost a reconnect cycle");
     session->stop();
 
     return {
@@ -400,7 +414,7 @@ nlohmann::json scenario_user_stream_interruption() {
         {"listen_key_creations", client_ptr->listen_key_creations.load()},
         {"reconciliation_outcome", "recovered_but_operator_resume_required"},
         {"kill_switch_transitions", 1},
-        {"submission_blocked", true}
+        {"submission_blocked", submission_blocked}
     };
 }
 
