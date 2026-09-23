@@ -10,6 +10,7 @@
 #include <sentum/trader/strategy/MomentumStrategy.hpp>
 #include <sentum/utils/Database.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
