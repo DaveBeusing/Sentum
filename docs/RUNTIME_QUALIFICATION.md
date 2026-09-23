@@ -111,6 +111,8 @@ On Linux, the runner samples the child process `VmRSS` from `/proc/<pid>/status`
 - the configured qualification growth guardrail;
 - whether an unbounded-growth condition was detected.
 
+The same process-status sampling records starting, peak and ending worker-thread counts. A higher ending count is surfaced as a thread-leak indicator for diagnosis; scenario lifecycle assertions remain responsible for proving that owned workers are joined and shutdown completes.
+
 The RSS growth values used by CI are qualification guardrails, not production memory SLAs. They exist to make large or continuously positive memory regressions fail reproducibly while longer evidence is accumulated.
 
 Core CI currently uses a 65,536 KiB growth guardrail. Extended qualification uses 131,072 KiB for the longer Paper soak.
@@ -131,6 +133,7 @@ Every runner report contains:
 - PASS/FAIL status;
 - evidence-completeness state;
 - starting/peak/ending RSS and trend evidence;
+- starting/peak/ending thread-count evidence and a leak indicator;
 - queue depth/high-water/saturation/drop evidence;
 - reconnect and restart counts;
 - lifecycle failure count;
