@@ -116,6 +116,14 @@ if(BUILD_TESTING)
 	add_test(NAME runtime_observability COMMAND sentum_runtime_observability_tests)
 	set_tests_properties(runtime_observability PROPERTIES TIMEOUT 60)
 
+	add_executable(sentum_runtime_qualification_scenarios tests/runtime_qualification_scenarios.cpp)
+	target_link_libraries(sentum_runtime_qualification_scenarios PRIVATE sentum_core)
+	add_test(
+		NAME runtime_qualification_faults
+		COMMAND sentum_runtime_qualification_scenarios --scenario all-faults --duration-seconds 1 --seed 1
+	)
+	set_tests_properties(runtime_qualification_faults PROPERTIES TIMEOUT 60)
+
 	add_executable(sentum_dashboard_snapshot_tests tests/dashboard_snapshot_tests.cpp)
 	target_link_libraries(sentum_dashboard_snapshot_tests PRIVATE sentum_core)
 	add_test(NAME dashboard_snapshot COMMAND sentum_dashboard_snapshot_tests)
@@ -278,6 +286,7 @@ if(BUILD_TESTING)
 		sentum_governed_incident_lifecycle_tests
 		sentum_governed_incident_lifecycle_runtime_tests
 		sentum_governed_incident_cli_tests
+		sentum_runtime_qualification_scenarios
 	)
 endif()
 
