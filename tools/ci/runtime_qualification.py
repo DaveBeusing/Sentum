@@ -158,6 +158,19 @@ def flatten_text_values(value, key):
     return found
 
 
+def flatten_object_values(value, key):
+    found = []
+    if isinstance(value, dict):
+        for candidate_key, candidate_value in value.items():
+            if candidate_key == key and isinstance(candidate_value, dict):
+                found.append(candidate_value)
+            found.extend(flatten_object_values(candidate_value, key))
+    elif isinstance(value, list):
+        for item in value:
+            found.extend(flatten_object_values(item, key))
+    return found
+
+
 def summarize_rss(samples, max_growth_kib):
     rss_samples = [sample for sample in samples if "rss_kib" in sample]
     values = [sample["rss_kib"] for sample in rss_samples]
@@ -278,6 +291,7 @@ def aggregate_scenario_metrics(parsed_results):
     kill_switch = flatten_metric_values(parsed_results, "kill_switch_transitions")
     throughputs = flatten_metric_values(parsed_results, "event_throughput_per_second")
     outcomes = flatten_text_values(parsed_results, "reconciliation_outcome")
+    latency = flatten_object_values(parsed_results, "latency")
 
     return {
         "queue": {
@@ -291,6 +305,7 @@ def aggregate_scenario_metrics(parsed_results):
         "lifecycle_failures": sum(lifecycle_failures) if lifecycle_failures else 0,
         "kill_switch_transitions": sum(kill_switch) if kill_switch else 0,
         "event_throughput_per_second": max(throughputs) if throughputs else None,
+        "latency": latency[-1] if len(latency) == 1 else latency,
         "reconciliation_outcome": outcomes[-1] if len(set(outcomes)) == 1 and outcomes else (
             outcomes if outcomes else "not_reported"
         ),
@@ -299,6 +314,7 @@ def aggregate_scenario_metrics(parsed_results):
 
 def write_summary(path, report):
     rss = report["memory"]
+    threads = report["threads"]
     queue = report["metrics"]["queue"]
     lines = [
         "# Runtime qualification",
@@ -314,6 +330,10 @@ def write_summary(path, report):
         f"| RSS start | {rss['starting_rss_kib'] if rss['starting_rss_kib'] is not None else 'unavailable'} KiB |",
         f"| RSS peak | {rss['peak_rss_kib'] if rss['peak_rss_kib'] is not None else 'unavailable'} KiB |",
         f"| RSS end | {rss['ending_rss_kib'] if rss['ending_rss_kib'] is not None else 'unavailable'} KiB |",
+        f"| Threads start | {threads['starting'] if threads['starting'] is not None else 'unavailable'} |",
+        f"| Threads peak | {threads['peak'] if threads['peak'] is not None else 'unavailable'} |",
+        f"| Threads end | {threads['ending'] if threads['ending'] is not None else 'unavailable'} |",
+        f"| Thread leak indicator | {str(threads['leak_indicator']).lower()} |",
         f"| Queue high-water | {queue['high_water']} |",
         f"| Queue saturation events | {queue['saturation_events']} |",
         f"| Queue drops | {queue['drop_count']} |",
@@ -407,22 +427,27 @@ def main():
     timed_out = any(command.get("timed_out", False) for command in command_results)
     command_failures = any(command.get("returncode", 1) != 0 for command in command_results)
     git_sha = resolve_git_sha()
-    scenario_evidence_present = bool(command_results) and all(
+    all_commands_executed = len(command_results) == len(command_specs) and len(command_specs) > 0
+    scenario_evidence_present = all_commands_executed and all(
         command.get("parsed_result") is not None
         for command in command_results
         if args.scenario not in ("runtime-restart", "persistence-write-failure")
     )
     if args.scenario in ("runtime-restart", "persistence-write-failure"):
-        scenario_evidence_present = bool(command_results) and not command_failures
+        scenario_evidence_present = all_commands_executed and not command_failures
 
     evidence_complete = (
         git_sha != "unknown"
-        and bool(command_results)
+        and all_commands_executed
         and scenario_evidence_present
         and not timed_out
         and not command_failures
     )
 
+    if not all_commands_executed:
+        failures.append(
+            f"qualification command set incomplete: executed={len(command_results)} expected={len(command_specs)}"
+        )
     if not evidence_complete and not failures:
         failures.append("qualification evidence is incomplete")
 
