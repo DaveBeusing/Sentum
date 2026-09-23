@@ -22,14 +22,14 @@ public:
     BinanceUserDataStream(std::string listen_key, Handler handler)
         : impl_(std::make_unique<Impl>()), listen_key_(std::move(listen_key)), handler_(std::move(handler)) {}
 
-    ~BinanceUserDataStream() { stop(); }
+    virtual ~BinanceUserDataStream() { stop(); }
 
-    void start() {
+    virtual void start() {
         if (running_.exchange(true)) return;
         thread_ = std::thread([this] { run(); });
     }
 
-    void stop() {
+    virtual void stop() {
         running_.store(false);
         {
             std::lock_guard<std::mutex> lock(impl_->mutex);
@@ -42,6 +42,8 @@ public:
         impl_->client.stop();
         if (thread_.joinable() && thread_.get_id() != std::this_thread::get_id()) thread_.join();
     }
+
+    virtual bool running() const noexcept { return running_.load(std::memory_order_acquire); }
 
 private:
     using Client = websocketpp::client<websocketpp::config::asio_tls_client>;
