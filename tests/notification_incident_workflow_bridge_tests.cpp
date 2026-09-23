@@ -145,6 +145,20 @@ void test_unrelated_evidence_is_not_attached() {
 }
 
 
+void test_uncorrelated_decided_incident_fails_closed() {
+	auto snapshot = incident_candidate_snapshot();
+	auto& cp = snapshot["operations_control_plane"];
+	cp["incident_workflow"] = {
+		{"state", "OPEN"}, {"action", ""}, {"request_id", "req-uncorrelated"},
+		{"source_correlation_id", ""}
+	};
+
+	const auto view = sentum::operations::derive_notification_incident_workflow_integration(snapshot);
+	require(view.request_id.empty(), "uncorrelated decided incident was attached");
+	require(view.incident_state == "IDLE", "uncorrelated decided incident state was attached");
+	require(!view.incident_authorized && !view.execution_authorized, "uncorrelated incident gained authority");
+}
+
 void test_mismatched_open_incident_evidence_fails_closed() {
 	auto snapshot = incident_candidate_snapshot();
 	auto& cp = snapshot["operations_control_plane"];
@@ -196,6 +210,7 @@ int main() {
 		test_decided_incident_state_remains_correlated_without_pending_action();
 		test_existing_control_plane_evidence_is_correlated();
 		test_unrelated_evidence_is_not_attached();
+		test_uncorrelated_decided_incident_fails_closed();
 		test_mismatched_open_incident_evidence_fails_closed();
 		test_json_contract_is_read_only();
 		std::cout << "notification incident workflow bridge tests passed\n";
