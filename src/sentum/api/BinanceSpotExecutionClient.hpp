@@ -21,20 +21,22 @@ public:
         if (api_key_.empty() || api_secret_.empty()) throw std::invalid_argument("Binance testnet credentials are required");
     }
 
-    nlohmann::json place_market_order(const sentum::order::Request& request) const {
+    virtual ~BinanceSpotExecutionClient() = default;
+
+    virtual nlohmann::json place_market_order(const sentum::order::Request& request) const {
         const std::string side = request.side == sentum::order::Side::Buy ? "BUY" : "SELL";
         std::ostringstream quantity; quantity << std::setprecision(16) << request.quantity;
         return signed_request("POST", "/api/v3/order", "symbol="+request.symbol+"&side="+side+"&type=MARKET&quantity="+quantity.str()+"&newClientOrderId="+request.client_order_id+"&newOrderRespType=ACK");
     }
-    nlohmann::json cancel_order(const std::string& symbol,const std::string& client_order_id) const { return signed_request("DELETE","/api/v3/order","symbol="+symbol+"&origClientOrderId="+client_order_id); }
-    nlohmann::json query_order(const std::string& symbol,const std::string& client_order_id) const { return signed_request("GET","/api/v3/order","symbol="+symbol+"&origClientOrderId="+client_order_id); }
-    nlohmann::json open_orders() const { return signed_request("GET","/api/v3/openOrders",""); }
-    nlohmann::json account() const { return signed_request("GET","/api/v3/account","omitZeroBalances=false"); }
-    nlohmann::json exchange_info(const std::string& symbol) const { return request("GET","/api/v3/exchangeInfo","symbol="+symbol,false); }
+    virtual nlohmann::json cancel_order(const std::string& symbol,const std::string& client_order_id) const { return signed_request("DELETE","/api/v3/order","symbol="+symbol+"&origClientOrderId="+client_order_id); }
+    virtual nlohmann::json query_order(const std::string& symbol,const std::string& client_order_id) const { return signed_request("GET","/api/v3/order","symbol="+symbol+"&origClientOrderId="+client_order_id); }
+    virtual nlohmann::json open_orders() const { return signed_request("GET","/api/v3/openOrders",""); }
+    virtual nlohmann::json account() const { return signed_request("GET","/api/v3/account","omitZeroBalances=false"); }
+    virtual nlohmann::json exchange_info(const std::string& symbol) const { return request("GET","/api/v3/exchangeInfo","symbol="+symbol,false); }
 
-    std::string create_listen_key() const { const auto r=api_key_request("POST","/api/v3/userDataStream",""); if(!r.contains("listenKey")) throw std::runtime_error("Testnet did not return a listen key"); return r.at("listenKey").get<std::string>(); }
-    void keepalive_listen_key(const std::string& key) const { api_key_request("PUT","/api/v3/userDataStream","listenKey="+key); }
-    void close_listen_key(const std::string& key) const { api_key_request("DELETE","/api/v3/userDataStream","listenKey="+key); }
+    virtual std::string create_listen_key() const { const auto r=api_key_request("POST","/api/v3/userDataStream",""); if(!r.contains("listenKey")) throw std::runtime_error("Testnet did not return a listen key"); return r.at("listenKey").get<std::string>(); }
+    virtual void keepalive_listen_key(const std::string& key) const { api_key_request("PUT","/api/v3/userDataStream","listenKey="+key); }
+    virtual void close_listen_key(const std::string& key) const { api_key_request("DELETE","/api/v3/userDataStream","listenKey="+key); }
 
     static constexpr const char* rest_base_url() noexcept { return "https://testnet.binance.vision"; }
     static constexpr const char* websocket_base_url() noexcept { return "wss://stream.testnet.binance.vision/ws/"; }
