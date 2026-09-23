@@ -51,6 +51,41 @@ jobs:
           path: |
             log/operational_acceptance.json
             log/operational_acceptance.md
+      - name: Run bounded runtime qualification smoke
+        shell: bash
+        run: |
+          mkdir -p log/runtime-qualification
+          status=0
+          python3 tools/ci/runtime_qualification.py \
+            --build-dir build \
+            --scenario paper-soak \
+            --duration-seconds 2 \
+            --seed 1 \
+            --timeout-seconds 30 \
+            --max-rss-growth-kib 65536 \
+            --output log/runtime-qualification/paper-soak.json \
+            --summary log/runtime-qualification/paper-soak.md || status=$?
+          python3 tools/ci/runtime_qualification.py \
+            --build-dir build \
+            --scenario all-faults \
+            --duration-seconds 1 \
+            --seed 1 \
+            --timeout-seconds 60 \
+            --max-rss-growth-kib 65536 \
+            --output log/runtime-qualification/all-faults.json \
+            --summary log/runtime-qualification/all-faults.md || status=$?
+          for summary in log/runtime-qualification/*.md; do
+            cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit "$status"
+      - name: Upload runtime qualification smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentum-runtime-qualification-smoke-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: log/runtime-qualification/
       - name: Smoke test unified CLI
         run: |
           ./sentum help | grep 'Sentum unified CLI'
@@ -212,7 +247,7 @@ jobs:
       - name: Configure ${{ matrix.name }}
         run: cmake -S . -B build-sanitizer -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -D${{ matrix.option }}=ON
       - name: Build ${{ matrix.name }}
-        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests sentum_market_hot_path_tests sentum_runtime_observability_tests sentum_dashboard_snapshot_tests sentum_terminal_ui_policy_tests sentum_terminal_render_pipeline_tests sentum_terminal_workspace_policy_tests sentum_operational_safety_policy_tests
+        run: cmake --build build-sanitizer --parallel 2 --target sentum sentum_runtime_lifecycle_tests sentum_market_hot_path_tests sentum_runtime_observability_tests sentum_dashboard_snapshot_tests sentum_terminal_ui_policy_tests sentum_terminal_render_pipeline_tests sentum_terminal_workspace_policy_tests sentum_operational_safety_policy_tests sentum_runtime_qualification_scenarios
       - name: Run regression tests under ${{ matrix.name }}
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
