@@ -96,7 +96,7 @@ Evidence is valid only for the Git SHA that produced it.
 
 The consolidated policy additionally enforces a maximum age of 720 hours for repository operational evidence. This matches the current 30-day handoff retention boundary. The evaluator calculates and records the SHA-256 of every consumed JSON report.
 
-Target-environment acceptance is evaluated with a 24-hour maximum age because it represents a concrete deployment observation rather than a reusable repository CI result.
+Target-environment acceptance is evaluated with a 24-hour maximum age because it represents a concrete deployment observation rather than a reusable repository CI result. Its `artifact_sha256` must equal the `binary_sha256` recorded by the RC package report, so target acceptance cannot be attached to a different deployed binary.
 
 These rules are fail-closed:
 
@@ -149,7 +149,7 @@ Minimum shape:
 }
 ```
 
-Additional fields required by `PRODUCTION_VALIDATION.md` remain part of the operational handoff record even when the compact machine-readable acceptance record above is used for consolidation.
+The compact record is accepted only when `artifact_sha256` matches the RC package's `binary_sha256`. Additional fields required by `PRODUCTION_VALIDATION.md` remain part of the operational handoff record even when this compact machine-readable acceptance record is used for consolidation.
 
 ## Automated versus manual release checks
 
