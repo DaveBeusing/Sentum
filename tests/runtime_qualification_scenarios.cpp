@@ -340,26 +340,30 @@ nlohmann::json scenario_balance_mismatch() {
     const auto path = temporary_database_path("_balance.sqlite3");
     remove_database_files(path);
     try {
-        MockSpotExecutionClient client;
-        client.set_account({
-            {"balances", nlohmann::json::array({
-                {{"asset", "BTC"}, {"free", "0.25"}, {"locked", "0.10"}},
-                {{"asset", "USDT"}, {"free", "10000"}, {"locked", "0"}}
-            })}
-        });
-        sentum::operations::OperationalEventRepository events(path.string());
-        sentum::execution::AccountReconciler reconciler(client, events);
-        const auto report = reconciler.run("BTCUSDT", 1.0, "BTC");
-        require(!report.success, "balance mismatch unexpectedly reconciled");
-        require(report.inconsistencies > 0, "balance mismatch produced no inconsistency evidence");
+        nlohmann::json result;
+        {
+            MockSpotExecutionClient client;
+            client.set_account({
+                {"balances", nlohmann::json::array({
+                    {{"asset", "BTC"}, {"free", "0.25"}, {"locked", "0.10"}},
+                    {{"asset", "USDT"}, {"free", "10000"}, {"locked", "0"}}
+                })}
+            });
+            sentum::operations::OperationalEventRepository events(path.string());
+            sentum::execution::AccountReconciler reconciler(client, events);
+            const auto report = reconciler.run("BTCUSDT", 1.0, "BTC");
+            require(!report.success, "balance mismatch unexpectedly reconciled");
+            require(report.inconsistencies > 0, "balance mismatch produced no inconsistency evidence");
+            result = {
+                {"reconciliation_outcome", "balance_mismatch"},
+                {"inconsistencies", report.inconsistencies},
+                {"balances_checked", report.balances_checked},
+                {"details", report.details},
+                {"kill_switch_transitions", 0}
+            };
+        }
         remove_database_files(path);
-        return {
-            {"reconciliation_outcome", "balance_mismatch"},
-            {"inconsistencies", report.inconsistencies},
-            {"balances_checked", report.balances_checked},
-            {"details", report.details},
-            {"kill_switch_transitions", 0}
-        };
+        return result;
     } catch (...) {
         remove_database_files(path);
         throw;
@@ -477,42 +481,46 @@ nlohmann::json scenario_market_data_reconnect() {
     const auto path = temporary_database_path("_market.sqlite3");
     remove_database_files(path);
     try {
-        Database db(path.string());
+        nlohmann::json result;
         {
-            Collector collector(db, test_markets());
-            CollectorTestAccess::prepare_persistence(collector);
-            CollectorTestAccess::start_writer(collector);
-            for (std::int64_t i = 0; i < 128; ++i) {
-                require(CollectorTestAccess::enqueue(collector, make_kline(i + 1)),
-                        "market producer enqueue failed before disconnect");
+            Database db(path.string());
+            {
+                Collector collector(db, test_markets());
+                CollectorTestAccess::prepare_persistence(collector);
+                CollectorTestAccess::start_writer(collector);
+                for (std::int64_t i = 0; i < 128; ++i) {
+                    require(CollectorTestAccess::enqueue(collector, make_kline(i + 1)),
+                            "market producer enqueue failed before disconnect");
+                }
+                CollectorTestAccess::request_stop(collector);
+                CollectorTestAccess::join_writer(collector);
+                require(collector.queue_depth() == 0, "disconnect left market persistence backlog");
             }
-            CollectorTestAccess::request_stop(collector);
-            CollectorTestAccess::join_writer(collector);
-            require(collector.queue_depth() == 0, "disconnect left market persistence backlog");
-        }
-        {
-            Collector collector(db, test_markets());
-            CollectorTestAccess::prepare_persistence(collector);
-            CollectorTestAccess::start_writer(collector);
-            for (std::int64_t i = 0; i < 64; ++i) {
-                require(CollectorTestAccess::enqueue(collector, make_kline(1000 + i)),
-                        "market producer enqueue failed after reconnect");
+            {
+                Collector collector(db, test_markets());
+                CollectorTestAccess::prepare_persistence(collector);
+                CollectorTestAccess::start_writer(collector);
+                for (std::int64_t i = 0; i < 64; ++i) {
+                    require(CollectorTestAccess::enqueue(collector, make_kline(1000 + i)),
+                            "market producer enqueue failed after reconnect");
+                }
+                CollectorTestAccess::request_stop(collector);
+                CollectorTestAccess::join_writer(collector);
+                require(collector.queue_depth() == 0, "reconnect left market persistence backlog");
             }
-            CollectorTestAccess::request_stop(collector);
-            CollectorTestAccess::join_writer(collector);
-            require(collector.queue_depth() == 0, "reconnect left market persistence backlog");
-        }
 
-        const auto rows = db.load_klines("btcusdt", 512);
-        require(rows.size() == 192, "market reconnect did not preserve deterministic persistence continuity");
+            const auto rows = db.load_klines("btcusdt", 512);
+            require(rows.size() == 192, "market reconnect did not preserve deterministic persistence continuity");
+            result = {
+                {"reconnect_count", 1},
+                {"events_persisted", rows.size()},
+                {"queue_depth", 0},
+                {"reconciliation_outcome", "not_applicable"},
+                {"kill_switch_transitions", 0}
+            };
+        }
         remove_database_files(path);
-        return {
-            {"reconnect_count", 1},
-            {"events_persisted", rows.size()},
-            {"queue_depth", 0},
-            {"reconciliation_outcome", "not_applicable"},
-            {"kill_switch_transitions", 0}
-        };
+        return result;
     } catch (...) {
         remove_database_files(path);
         throw;
@@ -523,38 +531,42 @@ nlohmann::json scenario_persistence_pressure() {
     const auto path = temporary_database_path("_pressure.sqlite3");
     remove_database_files(path);
     try {
-        Database db(path.string());
-        Collector collector(db, test_markets());
-        CollectorTestAccess::prepare_persistence(collector);
+        nlohmann::json result;
+        {
+            Database db(path.string());
+            Collector collector(db, test_markets());
+            CollectorTestAccess::prepare_persistence(collector);
 
-        const auto capacity = CollectorTestAccess::capacity();
-        for (std::size_t i = 0; i < capacity; ++i) {
-            require(CollectorTestAccess::enqueue(collector, make_kline(static_cast<std::int64_t>(i + 1))),
-                    "persistence queue saturated before configured capacity");
+            const auto capacity = CollectorTestAccess::capacity();
+            for (std::size_t i = 0; i < capacity; ++i) {
+                require(CollectorTestAccess::enqueue(collector, make_kline(static_cast<std::int64_t>(i + 1))),
+                        "persistence queue saturated before configured capacity");
+            }
+            require(!CollectorTestAccess::enqueue(collector, make_kline(static_cast<std::int64_t>(capacity + 1))),
+                    "persistence queue accepted data beyond bounded capacity");
+
+            const auto saturated = sentum::market::RuntimePerformanceMetrics::global().snapshot();
+            require(saturated.value("queue_pressure", std::string{}) == "saturated",
+                    "queue saturation was not visible in runtime metrics");
+            require(collector.dropped_count() == 1, "queue saturation drop accounting mismatch");
+
+            CollectorTestAccess::request_stop(collector);
+            CollectorTestAccess::start_writer(collector);
+            CollectorTestAccess::join_writer(collector);
+            require(collector.queue_depth() == 0, "persistence queue did not drain after pressure recovery");
+
+            const auto final_metrics = sentum::market::RuntimePerformanceMetrics::global().snapshot();
+            result = {
+                {"queue_depth", final_metrics.value("queue_depth", 0ULL)},
+                {"queue_high_water", final_metrics.value("queue_high_water", 0ULL)},
+                {"queue_saturation_events", final_metrics.value("queue_saturation_events", 0ULL)},
+                {"queue_drop_count", collector.dropped_count()},
+                {"reconciliation_outcome", "not_applicable"},
+                {"kill_switch_transitions", 0}
+            };
         }
-        require(!CollectorTestAccess::enqueue(collector, make_kline(static_cast<std::int64_t>(capacity + 1))),
-                "persistence queue accepted data beyond bounded capacity");
-
-        const auto saturated = sentum::market::RuntimePerformanceMetrics::global().snapshot();
-        require(saturated.value("queue_pressure", std::string{}) == "saturated",
-                "queue saturation was not visible in runtime metrics");
-        require(collector.dropped_count() == 1, "queue saturation drop accounting mismatch");
-
-        CollectorTestAccess::request_stop(collector);
-        CollectorTestAccess::start_writer(collector);
-        CollectorTestAccess::join_writer(collector);
-        require(collector.queue_depth() == 0, "persistence queue did not drain after pressure recovery");
-
-        const auto final_metrics = sentum::market::RuntimePerformanceMetrics::global().snapshot();
         remove_database_files(path);
-        return {
-            {"queue_depth", final_metrics.value("queue_depth", 0ULL)},
-            {"queue_high_water", final_metrics.value("queue_high_water", 0ULL)},
-            {"queue_saturation_events", final_metrics.value("queue_saturation_events", 0ULL)},
-            {"queue_drop_count", collector.dropped_count()},
-            {"reconciliation_outcome", "not_applicable"},
-            {"kill_switch_transitions", 0}
-        };
+        return result;
     } catch (...) {
         remove_database_files(path);
         throw;
@@ -603,7 +615,9 @@ nlohmann::json scenario_paper_soak(double duration_seconds, std::uint64_t seed) 
     remove_database_files(path);
 
     try {
-        RiskConfig risk;
+        nlohmann::json result;
+        {
+            RiskConfig risk;
         risk.max_total_capital = 10000.0;
         risk.risk_per_trade = 0.001;
         risk.stop_loss_percent = 0.01;
@@ -645,25 +659,27 @@ nlohmann::json scenario_paper_soak(double duration_seconds, std::uint64_t seed) 
 
         const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         const auto metrics = sentum::market::RuntimePerformanceMetrics::global().snapshot();
-        const auto trades = engine.get_total_trades();
+            const auto trades = engine.get_total_trades();
+            result = {
+                {"event_count", events},
+                {"event_throughput_per_second", elapsed > 0.0 ? static_cast<double>(events) / elapsed : 0.0},
+                {"buy_actions", buy_actions},
+                {"sell_actions", sell_actions},
+                {"completed_trades", trades},
+                {"queue_depth", metrics.value("queue_depth", 0ULL)},
+                {"queue_high_water", metrics.value("queue_high_water", 0ULL)},
+                {"queue_saturation_events", metrics.value("queue_saturation_events", 0ULL)},
+                {"queue_drop_count", 0},
+                {"latency", metrics},
+                {"reconnect_count", 0},
+                {"restart_count", 0},
+                {"lifecycle_failures", 0},
+                {"reconciliation_outcome", "not_applicable"},
+                {"kill_switch_transitions", 0}
+            };
+        }
         remove_database_files(path);
-        return {
-            {"event_count", events},
-            {"event_throughput_per_second", elapsed > 0.0 ? static_cast<double>(events) / elapsed : 0.0},
-            {"buy_actions", buy_actions},
-            {"sell_actions", sell_actions},
-            {"completed_trades", trades},
-            {"queue_depth", metrics.value("queue_depth", 0ULL)},
-            {"queue_high_water", metrics.value("queue_high_water", 0ULL)},
-            {"queue_saturation_events", metrics.value("queue_saturation_events", 0ULL)},
-            {"queue_drop_count", 0},
-            {"latency", metrics},
-            {"reconnect_count", 0},
-            {"restart_count", 0},
-            {"lifecycle_failures", 0},
-            {"reconciliation_outcome", "not_applicable"},
-            {"kill_switch_transitions", 0}
-        };
+        return result;
     } catch (...) {
         remove_database_files(path);
         throw;
