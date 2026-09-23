@@ -83,6 +83,26 @@ void test_candidate_does_not_invent_control_plane_evidence() {
 		"proposal invented control-plane evidence");
 }
 
+void test_decided_incident_state_remains_correlated_without_pending_action() {
+	auto snapshot = incident_candidate_snapshot();
+	auto& cp = snapshot["operations_control_plane"];
+	cp["incident_workflow"] = {
+		{"state", "OPEN"}, {"action", ""}, {"request_id", "req-42"},
+		{"source_correlation_id", "NOTIFICATION_OPERATIONS:alert-1:1"},
+		{"classification", "FORBIDDEN"}
+	};
+	cp["audit_timeline"] = nlohmann::json::array({{
+		{"request_id", "req-42"}, {"source_correlation_id", "NOTIFICATION_OPERATIONS:alert-1:1"},
+		{"action", "OPEN_INCIDENT"}, {"event_type", "APPROVAL_DECIDED"}, {"outcome", "APPROVED"}
+	}});
+
+	const auto view = sentum::operations::derive_notification_incident_workflow_integration(snapshot);
+	require(view.request_id == "req-42", "decided incident request correlation failed");
+	require(view.incident_state == "OPEN", "decided incident state was dropped after approval");
+	require(view.approval_status == "APPROVED", "decided approval evidence was not correlated");
+	require(!view.incident_authorized && !view.execution_authorized, "decided incident projection gained authority");
+}
+
 void test_existing_control_plane_evidence_is_correlated() {
 	auto snapshot = incident_candidate_snapshot();
 	auto& cp = snapshot["operations_control_plane"];
@@ -173,6 +193,7 @@ int main() {
 		test_incident_health_without_terminal_failure_does_not_open_proposal();
 		test_unavailable_evidence_blocks_fail_closed();
 		test_candidate_does_not_invent_control_plane_evidence();
+		test_decided_incident_state_remains_correlated_without_pending_action();
 		test_existing_control_plane_evidence_is_correlated();
 		test_unrelated_evidence_is_not_attached();
 		test_mismatched_open_incident_evidence_fails_closed();
