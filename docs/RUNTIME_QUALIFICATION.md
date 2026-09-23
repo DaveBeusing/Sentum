@@ -117,6 +117,8 @@ The RSS growth values used by CI are qualification guardrails, not production me
 
 Core CI currently uses a 65,536 KiB growth guardrail. Extended qualification uses 131,072 KiB for the longer Paper soak.
 
+Core CI also imports the short qualification JSON reports into the consolidated performance evidence report. RSS/trend and sampled runtime latency are labeled **OBSERVED** there; report integrity remains fail-closed, so an explicitly supplied qualification report must still be complete and passing. This preserves the distinction between qualification evidence and an evidence-backed performance threshold.
+
 When RSS is unavailable on the host, the report retains the memory fields with explicit unavailable values rather than inventing measurements.
 
 ## Machine-readable evidence
