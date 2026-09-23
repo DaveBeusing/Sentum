@@ -107,6 +107,10 @@ class PerformanceGateConfigurationTests(unittest.TestCase):
         with self.assertRaises(performance_gate.GateFailure):
             performance_gate.validate_budgets(budgets)
 
+    def test_missing_benchmark_output_metric_fails_closed(self):
+        with self.assertRaises(performance_gate.GateFailure):
+            performance_gate.require_float({}, "nanoseconds_per_event")
+
     def test_round_trip_valid_budget_file(self):
         budgets = valid_budgets()
         with tempfile.TemporaryDirectory() as directory:
