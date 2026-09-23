@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AP-18 establishes one presentation contract for production operations state across the terminal and the read-only web dashboard.
+cross-surface operations establishes one presentation contract for production operations state across the terminal and the read-only web dashboard.
 
 The contract is derived from the same dashboard snapshot already used by the runtime surfaces. It does not create a second source of operational truth and does not add browser-side execution authority.
 
@@ -31,7 +31,7 @@ Terminal and web surfaces must preserve identical semantics for:
 - missing-governance visibility;
 - approval and audit totals.
 
-The presentation contract reuses the AP-17 operator policies rather than reimplementing them in browser JavaScript.
+The presentation contract reuses the operator control-surface operator policies rather than reimplementing them in browser JavaScript.
 
 ## Web API
 
@@ -65,7 +65,7 @@ Every approval item emitted by the view keeps `execution_authorized = false`.
 
 Missing operations-control-plane state remains `UNAVAILABLE / MISSING`.
 
-Stale evidence remains `STALE`; approval rows are projected as `FORBIDDEN / BLOCKED - STALE EVIDENCE`, matching the terminal behavior from AP-17.
+Stale evidence remains `STALE`; approval rows are projected as `FORBIDDEN / BLOCKED - STALE EVIDENCE`, matching the terminal behavior from operator control-surface.
 
 Unknown or missing action classifications remain fail-closed through the existing operator-action presentation policy.
 
@@ -83,4 +83,4 @@ The test target is attached to the existing sanitizer dependency graph so ASan, 
 
 ## Next integration slice
 
-The next AP-18 slice will make the browser Runtime view consume `/api/operations` directly and render the same severity, governance, evidence, workflow and approval semantics used by the terminal.
+The next cross-surface integration step will make the browser Runtime view consume `/api/operations` directly and render the same severity, governance, evidence, workflow and approval semantics used by the terminal.
