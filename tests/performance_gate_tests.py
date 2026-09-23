@@ -9,6 +9,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 
@@ -18,6 +19,7 @@ SPEC = importlib.util.spec_from_file_location("sentum_performance_gate", MODULE_
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("cannot load performance_gate.py")
 performance_gate = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = performance_gate
 SPEC.loader.exec_module(performance_gate)
 
 
