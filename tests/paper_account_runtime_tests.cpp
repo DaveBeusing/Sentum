@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -95,6 +96,12 @@ struct ExecutionEngineTestAccess {
     }
 
     static double equity(const ExecutionEngine& engine) { return engine.paper_account->equity(); }
+
+    static std::mutex& wait_mutex(ExecutionEngine& engine, bool scanner) {
+        return scanner ? engine.scanner_signal_mutex : engine.shutdown_wait_mutex;
+    }
+
+    static void mark_running(ExecutionEngine& engine) { engine.running.store(true); }
 };
 
 namespace {
@@ -113,6 +120,41 @@ void test_successful_shutdown_persists_final_profit() {
     engine.stop();
     sentum::paper::PaperAccount reopened_after_stop(path.string(), "USDT", 1000.0);
     require(reopened_after_stop.equity() == 1050.0, "repeated stop changed account state");
+}
+
+void test_stop_cannot_overtake_wait_registration() {
+    for (bool scanner : {false, true}) {
+        ExecutionEngine engine;
+        ExecutionEngineTestAccess::mark_running(engine);
+        // A waiter has checked the running predicate and still owns its mutex,
+        // immediately before condition_variable::wait registers and unlocks it.
+        std::unique_lock<std::mutex> registration(ExecutionEngineTestAccess::wait_mutex(engine, scanner));
+        std::promise<void> attempted;
+        auto attempted_future = attempted.get_future();
+        auto stopped = std::async(std::launch::async, [&] {
+            attempted.set_value();
+            engine.stop();
+        });
+        attempted_future.wait();
+        const bool overtook_registration = stopped.wait_for(std::chrono::milliseconds(50)) == std::future_status::ready;
+        const bool running_before_registration = engine.is_running();
+        registration.unlock();
+        stopped.get();
+        require(!overtook_registration && running_before_registration,
+                "stop notification overtook a waiter's predicate-to-wait transition");
+        require(!engine.is_running(), "stop did not complete after the waiter released its mutex");
+    }
+}
+
+void test_idle_logger_shutdown_completes() {
+    TemporaryDirectory directory;
+    const auto path = (directory.path / "idle.log").string();
+    for (int cycle = 0; cycle < 128; ++cycle) {
+        AsyncLogger logger(path);
+        logger.start();
+        std::this_thread::yield();
+        logger.stop();
+    }
 }
 
 void test_failed_persistence_still_stops_all_workers() {
@@ -229,6 +271,8 @@ void test_control_change_account_limit_survives_shutdown() {
 
 int main() {
     try {
+        test_stop_cannot_overtake_wait_registration();
+        test_idle_logger_shutdown_completes();
         test_successful_shutdown_persists_final_profit();
         test_failed_persistence_still_stops_all_workers();
         test_control_change_failure_survives_shutdown();

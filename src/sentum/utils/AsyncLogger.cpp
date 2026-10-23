@@ -55,7 +55,10 @@ void AsyncLogger::start() {
 }
 
 void AsyncLogger::stop() {
-	running.store(false, std::memory_order_release);
+	{
+		std::lock_guard<std::mutex> lock(mtx);
+		running.store(false, std::memory_order_release);
+	}
 	cv.notify_all();
 	if (worker.joinable() && worker.get_id() != std::this_thread::get_id()) worker.join();
 }

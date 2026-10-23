@@ -59,7 +59,10 @@ void TradeEngine::enqueue_price(double price) {
 }
 
 void TradeEngine::stop() {
-    if (!running.exchange(false)) return;
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        if (!running.exchange(false)) return;
+    }
     if (price_stream) price_stream->stop();
     if (execution_venue) execution_venue->stop();
     queue_cv.notify_all();

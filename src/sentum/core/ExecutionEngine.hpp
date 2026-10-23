@@ -75,6 +75,7 @@ private:
     void init();
     void init_config();
     void init_components();
+    bool request_stop();
     void run_main_loop();
     void monitor_scanner();
     void start_trader_for(const std::string& symbol);

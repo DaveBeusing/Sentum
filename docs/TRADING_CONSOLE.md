@@ -60,6 +60,8 @@ Paper shutdown proceeds through the trader, market stream/database writer, runti
 
 The runtime coordinator wait is interruptible, so shutdown no longer waits for the normal one-second refresh sleep to expire. In non-interactive/headless execution the same stages are emitted as plain log-style lines instead of ANSI redraws.
 
+Normal shutdown and worker-error cleanup use the same stop signalling. Idle scanner, trader and logger workers receive the stop request even when they are entering a wait; cleanup does not depend on another market event or log message arriving.
+
 ## Strategy runtime
 
 Paper trading uses the same `sentum::strategy::StrategyFactory` used by research and model workflows. Supported strategy types are:

@@ -35,6 +35,19 @@ ExecutionEngine::~ExecutionEngine() {
 }
 bool ExecutionEngine::is_running() const { return running.load(); }
 
+bool ExecutionEngine::request_stop() {
+    bool was_running;
+    {
+        // The predicate transition must use the waiters' mutexes: an atomic
+        // flag alone cannot prevent notification before a waiter is registered.
+        std::scoped_lock lock(scanner_signal_mutex, shutdown_wait_mutex);
+        was_running = running.exchange(false);
+    }
+    scanner_signal_cv.notify_all();
+    shutdown_wait_cv.notify_all();
+    return was_running;
+}
+
 void ExecutionEngine::start() {
     if (running.load()) return;
     paper_account_error_ = nullptr;
@@ -55,9 +68,7 @@ void ExecutionEngine::stop(ShutdownProgressCallback progress) {
         if (progress) progress(step, total_steps, detail);
     };
 
-    const bool was_running = running.exchange(false);
-    scanner_signal_cv.notify_all();
-    shutdown_wait_cv.notify_all();
+    const bool was_running = request_stop();
     if (!was_running && !main_thread.joinable() && !scanner_thread.joinable() && !trader_thread.joinable()) return;
 
     report(1, "Stopping strategy and paper trader");
@@ -274,7 +285,7 @@ void ExecutionEngine::run_main_loop() {
         }
         logger.log("[ERROR] ExecutionEngine::run_main_loop: " + std::string(e.what()));
         sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", e.what()}});
-        running.store(false); scanner_signal_cv.notify_all(); shutdown_wait_cv.notify_all();
+        request_stop();
     }
 }
 
@@ -297,7 +308,7 @@ void ExecutionEngine::monitor_scanner() {
             { std::lock_guard<std::mutex> lock(symbol_mutex); current_symbol = symbol; }
             start_trader_for(symbol);
         }
-    } catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::monitor_scanner: " + std::string(e.what())); running.store(false); shutdown_wait_cv.notify_all(); }
+    } catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::monitor_scanner: " + std::string(e.what())); request_stop(); }
 }
 
 void ExecutionEngine::start_trader_for(const std::string& symbol) {
