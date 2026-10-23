@@ -4,7 +4,10 @@
  */
 #pragma once
 
+#include <sentum/api/ReconnectingMarketStream.hpp>
+
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <memory>
@@ -14,31 +17,44 @@
 
 class BinanceWebsocketClient {
 public:
-	explicit BinanceWebsocketClient(const std::string& symbol);
+	using TradeCallback = std::function<void(double, std::chrono::system_clock::time_point)>;
+    using HealthCallback = std::function<void(const sentum::api::MarketStreamHealth&)>;
+    explicit BinanceWebsocketClient(const std::string& symbol,
+        std::chrono::milliseconds maximum_event_age = std::chrono::milliseconds(2000));
 	~BinanceWebsocketClient();
 
 	void start();
 	void stop();
 	void set_on_price(const std::function<void(double)>& callback);
+    void set_on_trade(const TradeCallback& callback);
+    void set_on_health(const HealthCallback& callback);
+    sentum::api::MarketStreamHealth stream_health() const;
 
 private:
 	friend struct WebsocketLifecycleTestAccess;
+    friend struct MarketStreamTestAccess;
 	struct Impl;
 	std::unique_ptr<Impl> impl;
 	std::string symbol;
 	std::atomic<bool> running;
 	std::thread ws_thread;
 	std::thread::id worker_id;
-	std::mutex lifecycle_mutex;
+	mutable std::mutex lifecycle_mutex;
 	std::condition_variable lifecycle_cv;
 	bool joining = false;
 	std::mutex callback_mutex;
 	std::function<void(double)> on_price;
+    TradeCallback on_trade;
+    HealthCallback on_health;
+    sentum::api::MarketStreamSettings stream_settings;
+    sentum::api::MarketStreamHealth stopped_health;
+    std::string test_url;
+    std::string test_hostname;
 	// Lifecycle qualification can pause preparation before any connection work.
 	std::function<void()> before_connect;
 
 	void run();
 	void request_stop();
 	void join_worker(std::unique_lock<std::mutex>& lock);
-	void handle_message(const std::string& payload);
+	void handle_message(const std::string& payload, bool network_message = true);
 };

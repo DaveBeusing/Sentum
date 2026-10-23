@@ -49,12 +49,16 @@ public:
     int get_total_trades() const;
     double get_average_profit() const;
     std::string strategy_name() const;
+    sentum::api::MarketStreamHealth price_stream_health() const;
+    void set_entry_readiness(std::function<bool()> ready);
 
 private:
     friend struct TradeEngineTestAccess;
 
     void initialize_components();
     void enqueue_price(double price);
+    void enqueue_price(double price, std::chrono::system_clock::time_point timestamp);
+    bool live_price_ready() const;
     void run_event_loop();
     TradeAction evaluate_at(double price, std::chrono::system_clock::time_point now, const std::string& source,
                             const MarketEvent* event = nullptr);
@@ -88,7 +92,8 @@ private:
     std::chrono::system_clock::time_point last_exit{};
     std::unique_ptr<BinanceWebsocketClient> price_stream;
     std::atomic<double> latest_price{0.0};
-    std::mutex queue_mutex;
+    mutable std::mutex queue_mutex;
+    std::function<bool()> entry_readiness_;
     std::condition_variable queue_cv;
     std::deque<MarketEvent> price_queue;
     static constexpr std::size_t max_queue_size = 4096;

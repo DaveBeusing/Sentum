@@ -4,6 +4,8 @@ This directory contains the current functional documentation for Sentum. Documen
 
 ## Runtime and operation
 
+- [Public market stream recovery](MARKET_STREAM_RECOVERY.md)
+
 - [Trading console](TRADING_CONSOLE.md) — interactive Paper/Testnet terminal views and Paper controls.
 - [Web dashboard](DASHBOARD.md) — local read-only browser dashboard, bind configuration and API.
 - [Runtime performance](PERFORMANCE.md) — market-data hot path, persistence architecture, telemetry and benchmarks.

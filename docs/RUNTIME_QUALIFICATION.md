@@ -253,3 +253,7 @@ The qualification harness observes and asserts the existing runtime authority mo
 ## Evidence hierarchy
 
 See [Readiness Evidence Contract](READINESS_EVIDENCE.md) for the authoritative classification of Core CI qualification, extended qualification, release-blocking evidence and target-environment acceptance.
+
+## Public market reconnect evidence
+
+The `market-data-reconnect` scenario uses a locally generated trusted TLS identity and the actual collector WebSocket path. It drops an established connection, observes down/not-fresh health, reconnects the same collector, and drains 192 received candles to SQLite. This proves local transport recovery and persistence continuity for received data; it does not claim recovery of unseen exchange events or a hard timeout for the operating-system DNS resolver. See [Public market stream recovery](MARKET_STREAM_RECOVERY.md).

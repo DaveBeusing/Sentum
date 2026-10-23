@@ -113,6 +113,12 @@ if(BUILD_TESTING)
 	set_tests_properties(websocket_lifecycle PROPERTIES TIMEOUT 60)
 	add_dependencies(sentum_runtime_lifecycle_tests sentum_websocket_lifecycle_tests)
 
+    add_executable(sentum_market_stream_recovery_tests tests/market_stream_recovery_tests.cpp)
+    target_link_libraries(sentum_market_stream_recovery_tests PRIVATE sentum_core)
+    add_test(NAME market_stream_recovery COMMAND sentum_market_stream_recovery_tests)
+    set_tests_properties(market_stream_recovery PROPERTIES TIMEOUT 60)
+    add_dependencies(sentum_runtime_lifecycle_tests sentum_market_stream_recovery_tests)
+
 	add_executable(sentum_trader_lifecycle_tests tests/trader_lifecycle_tests.cpp)
 	target_link_libraries(sentum_trader_lifecycle_tests PRIVATE sentum_core)
 	add_test(NAME trader_lifecycle COMMAND sentum_trader_lifecycle_tests)

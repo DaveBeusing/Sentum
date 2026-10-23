@@ -124,7 +124,15 @@ inline std::vector<OperatorAlert> derive_operator_alerts(const nlohmann::json& s
 			true));
 	}
 
-	if (pressure == "saturated" || pressure == "critical") {
+	if (market_connected && snapshot.contains("market_data_fresh") && !json_bool(snapshot, "market_data_fresh")) {
+        alerts.push_back(make_operator_alert(
+            "market.stale", "MARKET_DATA", OperatorAlertSeverity::Warning,
+            "Market data stale", "The socket is connected but valid prices are unavailable or too old",
+            "New entries remain blocked; position management resumes when a fresh valid price arrives.",
+            "SYSTEM", true, 2, true));
+    }
+
+    if (pressure == "saturated" || pressure == "critical") {
 		alerts.push_back(make_operator_alert(
 			"persistence.pressure",
 			"PERSISTENCE",

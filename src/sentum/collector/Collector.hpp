@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include <sentum/api/ReconnectingMarketStream.hpp>
 #include <sentum/utils/Database.hpp>
 #include <sentum/utils/AsyncLogger.hpp>
 #include <sentum/api/model/MarketInfo.hpp>
@@ -26,10 +27,12 @@ struct CollectorTestAccess;
 class Collector {
 public:
     Collector(Database& db, const std::vector<MarketInfo>& markets);
-    Collector(Database& db, MarketDataStore& store, const std::vector<MarketInfo>& markets);
+    Collector(Database& db, MarketDataStore& store, const std::vector<MarketInfo>& markets,
+              std::chrono::milliseconds maximum_event_age = std::chrono::milliseconds(2000));
     ~Collector();
     void start();
     void stop();
+    sentum::api::MarketStreamHealth stream_health() const;
 
     std::uint64_t enqueued_count() const { return enqueued.load(std::memory_order_relaxed); }
     std::uint64_t dropped_count() const { return dropped.load(std::memory_order_relaxed); }
@@ -42,6 +45,7 @@ public:
 
 private:
     friend struct CollectorTestAccess;
+    friend struct MarketStreamTestAccess;
 
     struct Impl;
     struct SymbolRef {
@@ -50,9 +54,11 @@ private:
     };
 
     void run();
+    void handle_message(const std::string& payload);
+    void request_transport_stop();
+    void join_workers(std::unique_lock<std::mutex>& lock);
     void writer_loop();
     void writer_loop_impl();
-    void request_transport_stop();
     void fail_persistence(int sqlite_code, int rollback_code, const char* reason) noexcept;
     bool try_enqueue(const std::string* symbol, Kline kline);
     SymbolRef resolve_symbol(std::string_view symbol) const noexcept;
@@ -78,6 +84,14 @@ private:
     std::unordered_map<std::uint64_t, std::size_t> symbol_by_hash;
     std::thread ws_thread;
     std::thread writer_thread;
+    std::thread::id ws_worker_id;
+    std::mutex lifecycle_mutex;
+    std::condition_variable lifecycle_cv;
+    bool joining = false;
+    sentum::api::MarketStreamSettings stream_settings;
+    std::string test_url;
+    std::string test_hostname;
+    std::function<void()> before_connect;
     std::atomic<bool> running{false};
     std::atomic<bool> producer_stopped{true};
     std::atomic<std::uint64_t> enqueued{0};

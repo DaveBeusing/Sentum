@@ -43,12 +43,30 @@ void TradeEngine::initialize_components() {
     execution_venue->start([](const sentum::order::Snapshot&) {});
 }
 
-void TradeEngine::enqueue_price(double price) {
+void TradeEngine::set_entry_readiness(std::function<bool()> ready) {
+    std::lock_guard<std::mutex> lock(state_mutex);
+    entry_readiness_ = std::move(ready);
+}
+
+sentum::api::MarketStreamHealth TradeEngine::price_stream_health() const {
+    std::lock_guard<std::mutex> lock(queue_mutex);
+    return price_stream ? price_stream->stream_health() : sentum::api::MarketStreamHealth{};
+}
+
+bool TradeEngine::live_price_ready() const {
+    if (!api) return true;
+    std::lock_guard<std::mutex> lock(queue_mutex);
+    return !run_started_ || (price_stream && price_stream->stream_health().fresh);
+}
+
+void TradeEngine::enqueue_price(double price) { enqueue_price(price, clock->now()); }
+
+void TradeEngine::enqueue_price(double price, std::chrono::system_clock::time_point timestamp) {
     latest_price.store(price, std::memory_order_relaxed);
     MarketEvent event;
     event.type = MarketEvent::Type::Trade;
     event.symbol = symbol;
-    event.timestamp = clock->now();
+    event.timestamp = timestamp;
     event.price = price;
     event.close = price;
     {
@@ -102,8 +120,10 @@ void TradeEngine::run() {
             // no other thread can access partially initialized runtime objects.
             std::lock_guard<std::mutex> lock(queue_mutex);
             if (!stop_requested_.load(std::memory_order_acquire)) {
-                price_stream = std::make_unique<BinanceWebsocketClient>(symbol);
-                price_stream->set_on_price([this](double price) { enqueue_price(price); });
+                price_stream = std::make_unique<BinanceWebsocketClient>(symbol, std::chrono::milliseconds(risk.max_data_age_ms));
+                price_stream->set_on_trade([this](double price, std::chrono::system_clock::time_point timestamp) {
+                    enqueue_price(price, timestamp);
+                });
                 price_stream->start();
             }
         }
@@ -177,7 +197,7 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
                                      const std::string& source, const MarketEvent* event) {
     std::lock_guard<std::mutex> lock(state_mutex);
     if (finalization_error_) std::rethrow_exception(finalization_error_);
-    if (stop_requested_.load(std::memory_order_acquire)) return TradeAction::NONE;
+    if (stop_requested_.load(std::memory_order_acquire) || !live_price_ready()) return TradeAction::NONE;
     auto& dashboard = sentum::dashboard::DashboardState::global();
     auto& control = sentum::runtime::RuntimeControl::global();
 
@@ -186,6 +206,10 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
     if (!position.open) {
         // A close request issued while flat must never leak into the next position.
         (void)control.consume_manual_close();
+        if (entry_readiness_ && !entry_readiness_()) {
+            dashboard.merge({{"last_signal", "blocked"}, {"last_risk_decision", "market_data_unavailable"}});
+            return TradeAction::NONE;
+        }
         if (control.entries_paused()) {
             dashboard.merge({{"entries_paused", true}, {"last_signal", "paused"}, {"last_risk_decision", "entry_paused"}});
             return TradeAction::NONE;

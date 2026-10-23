@@ -1,3 +1,6 @@
+#include "support/LocalTlsMarketServer.hpp"
+#include "support/MarketStreamFixtures.hpp"
+
 #include <sentum/collector/Collector.hpp>
 #include <sentum/dashboard/DashboardServer.hpp>
 #include <sentum/market/RuntimePerformanceMetrics.hpp>
@@ -481,53 +484,32 @@ nlohmann::json scenario_kill_switch_recovery() {
 }
 
 nlohmann::json scenario_market_data_reconnect() {
-    const auto path = temporary_database_path("_market.sqlite3");
-    remove_database_files(path);
-    try {
-        nlohmann::json result;
-        {
-            Database db(path.string());
-            {
-                Collector collector(db, test_markets());
-                CollectorTestAccess::prepare_persistence(collector);
-                CollectorTestAccess::start_writer(collector);
-                for (std::int64_t i = 0; i < 128; ++i) {
-                    require(CollectorTestAccess::enqueue(collector, make_kline(i + 1)),
-                            "market producer enqueue failed before disconnect");
-                }
-                CollectorTestAccess::request_stop(collector);
-                CollectorTestAccess::join_writer(collector);
-                require(collector.queue_depth() == 0, "disconnect left market persistence backlog");
-            }
-            {
-                Collector collector(db, test_markets());
-                CollectorTestAccess::prepare_persistence(collector);
-                CollectorTestAccess::start_writer(collector);
-                for (std::int64_t i = 0; i < 64; ++i) {
-                    require(CollectorTestAccess::enqueue(collector, make_kline(1000 + i)),
-                            "market producer enqueue failed after reconnect");
-                }
-                CollectorTestAccess::request_stop(collector);
-                CollectorTestAccess::join_writer(collector);
-                require(collector.queue_depth() == 0, "reconnect left market persistence backlog");
-            }
-
-            const auto rows = db.load_klines("btcusdt", 512);
-            require(rows.size() == 192, "market reconnect did not preserve deterministic persistence continuity");
-            result = {
-                {"reconnect_count", 1},
-                {"events_persisted", rows.size()},
-                {"queue_depth", 0},
-                {"reconciliation_outcome", "not_applicable"},
-                {"kill_switch_transitions", 0}
-            };
-        }
-        remove_database_files(path);
-        return result;
-    } catch (...) {
-        remove_database_files(path);
-        throw;
-    }
+    sentum::test::LocalTlsIdentity identity;
+    sentum::test::LocalTlsMarketServer server(identity);
+    Database db(":memory:");
+    MarketDataStore store(600);
+    Collector collector(db, store, test_markets());
+    MarketStreamTestAccess::configure(collector, server.url());
+    collector.start();
+    sentum::test::eventually([&] { return collector.stream_health().connected; }, "collector TLS connection did not open");
+    const auto first_time = sentum::test::unix_milliseconds();
+    for (std::int64_t i = 0; i < 128; ++i) server.send(sentum::test::kline_message(first_time - 127 + i));
+    sentum::test::eventually([&] { return collector.enqueued_count() == 128; }, "collector did not receive pre-disconnect candles");
+    server.drop_connections();
+    sentum::test::eventually([&] { return !collector.stream_health().connected; }, "socket loss did not clear collector connection health");
+    require(!collector.stream_health().fresh, "socket loss retained market freshness");
+    sentum::test::eventually([&] { return collector.stream_health().reconnects >= 1; }, "same collector did not recover its TLS transport");
+    require(!collector.stream_health().fresh, "new socket inherited old market freshness");
+    const auto second_time = sentum::test::unix_milliseconds();
+    for (std::int64_t i = 0; i < 64; ++i) server.send(sentum::test::kline_message(second_time - 63 + i));
+    sentum::test::eventually([&] { return collector.enqueued_count() == 192; }, "collector did not receive post-reconnect candles");
+    const auto health = collector.stream_health();
+    collector.stop();
+    const auto rows = db.load_klines("btcusdt", 512);
+    require(rows.size() == 192 && collector.queue_depth() == 0, "recovered transport did not drain every accepted candle");
+    return {{"reconnect_count", health.reconnects}, {"events_persisted", rows.size()}, {"queue_depth", 0},
+            {"transport", "local_verified_tls_websocket"}, {"same_collector_instance", true},
+            {"disconnect_health_observed", true}, {"reconciliation_outcome", "not_applicable"}, {"kill_switch_transitions", 0}};
 }
 
 nlohmann::json scenario_persistence_pressure() {

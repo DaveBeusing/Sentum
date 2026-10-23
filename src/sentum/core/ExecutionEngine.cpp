@@ -100,7 +100,7 @@ void ExecutionEngine::stop(ShutdownProgressCallback progress) {
     report(5, "Finalizing runtime state");
     sentum::dashboard::DashboardState::global().merge({
         {"collector_active", false}, {"scanner_active", false}, {"trader_active", false},
-        {"market_data_connected", false}
+        {"market_data_connected", false}, {"market_data_fresh", false}
     });
 
     std::string finalization_diagnostic;
@@ -145,7 +145,9 @@ void ExecutionEngine::init_components() {
     quote_balance = paper_account->equity();
     db = std::make_unique<Database>(db_path);
     market_store = std::make_unique<MarketDataStore>(600);
-    collector = std::make_unique<Collector>(*db, *market_store, markets);
+    const auto collection_risk = load_risk_config(config.paperRiskConfigPath);
+    collector = std::make_unique<Collector>(*db, *market_store, markets,
+        std::chrono::milliseconds(collection_risk.max_data_age_ms));
     scanner = std::make_unique<SymbolScanner>(*market_store, config.minCumulativeReturn);
     scanner->set_top_changed_handler([this](const SymbolPerformance& top) {
         if (!sentum::runtime::RuntimeControl::global().auto_symbol() || trader_active.load()) return;
@@ -173,7 +175,7 @@ void ExecutionEngine::init() {
     sentum::dashboard::DashboardState::global().merge({
         {"mode", "paper"}, {"quote_asset", config.quoteAsset}, {"balance", quote_balance}, {"paper_account", paper_account->snapshot()},
         {"markets", markets.size()}, {"collector_active", true}, {"scanner_active", true}, {"trader_active", false},
-        {"market_data_connected", true}, {"user_stream_connected", false}, {"reconciliation_complete", true}, {"kill_switch_active", false},
+        {"market_data_connected", collector->stream_health().connected}, {"market_data_fresh", collector->stream_health().fresh}, {"user_stream_connected", false}, {"reconciliation_complete", true}, {"kill_switch_active", false},
         {"db_path", db_path}, {"strategy_config", strategy_json}, {"strategy_name", strategy_json.value("type", std::string("momentum"))},
         {"symbol_mode", config.paperAutoSymbol ? "auto" : "manual"}, {"manual_symbol", config.paperSymbol}, {"entries_paused", false},
         {"paper_model_id", config.paperModelId}, {"paper_risk_config_path", config.paperRiskConfigPath},
@@ -245,9 +247,14 @@ void ExecutionEngine::run_main_loop() {
             const double events_per_second = sample_seconds > 0.0 ? static_cast<double>(current_events - previous_events) / sample_seconds : 0.0;
             previous_events = current_events; last_event_sample = now;
 
+            const auto collector_health = collector ? collector->stream_health() : sentum::api::MarketStreamHealth{};
             nlohmann::json runtime = {
                 {"scanner", scanner_json}, {"top_asset", top_asset}, {"top_return_percent", top_ret}, {"current_symbol", symbol_snapshot},
-                {"db_size_bytes", db_size}, {"collector_active", collector_active.load()}, {"scanner_active", scanner_active.load()},
+                {"db_size_bytes", db_size}, {"collector_active", collector_health.worker_running}, {"scanner_active", scanner_active.load()},
+                {"collector_market_stream", collector_health.json()},
+                {"market_data_connected", collector_health.connected}, {"market_data_fresh", collector_health.fresh},
+                {"last_market_event_age_ms", collector_health.last_event_age_ms},
+                {"entries_blocked_by_market_data", !collector_health.fresh},
                 {"trader_active", trader_active.load()}, {"drop_rate", collector ? collector->drop_rate() : 0.0},
                 {"queue_depth", collector ? collector->queue_depth() : 0}, {"events_per_second", events_per_second},
                 {"entries_paused", sentum::runtime::RuntimeControl::global().entries_paused()}, {"performance", perf.snapshot()}
@@ -256,6 +263,13 @@ void ExecutionEngine::run_main_loop() {
             {
                 std::lock_guard<std::mutex> lock(trader_mutex);
                 if (trader) {
+                    const auto price_health = trader->price_stream_health();
+                    runtime["price_market_stream"] = price_health.json();
+                    runtime["market_data_connected"] = collector_health.connected && price_health.connected;
+                    runtime["market_data_fresh"] = collector_health.fresh && price_health.fresh;
+                    runtime["entries_blocked_by_market_data"] = !collector_health.fresh || !price_health.fresh;
+                    runtime["last_market_event_age_ms"] = collector_health.last_event_age_ms < 0 || price_health.last_event_age_ms < 0
+                        ? -1 : std::max(collector_health.last_event_age_ms, price_health.last_event_age_ms);
                     const auto position = trader->get_current_position();
                     const double total_profit = trader->get_total_profit();
                     const double delta = total_profit - accounted_profit_;
@@ -278,6 +292,7 @@ void ExecutionEngine::run_main_loop() {
                             {"strategy",position.strategy},{"signal_reason",position.signal_reason},{"risk_reason",position.risk_reason}};
                     } else runtime["active_position"] = nullptr;
                 } else {
+                    runtime["price_market_stream"] = nullptr;
                     runtime["balance"] = paper_account ? paper_account->equity() : config.paperInitialBalance;
                     runtime["paper_account"] = paper_account ? paper_account->snapshot() : nlohmann::json::object();
                     runtime["total_profit"] = 0.0; runtime["total_trades"] = 0; runtime["win_rate"] = 0.0;
@@ -336,6 +351,7 @@ void ExecutionEngine::start_trader_for_locked(const std::string& symbol) {
     if (paper_account) risk.max_total_capital = paper_account->equity();
     auto strategy = sentum::strategy::StrategyFactory::create(sentum::runtime::RuntimeControl::global().strategy());
     trader = std::make_unique<TradeEngine>(symbol, *binance, risk, std::move(strategy), db_path);
+    trader->set_entry_readiness([this] { return collector && collector->stream_health().fresh; });
     auto* const trader_instance = trader.get();
     accounted_profit_ = 0.0;
     trader_active.store(true, std::memory_order_release);

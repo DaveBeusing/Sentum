@@ -39,10 +39,17 @@ public:
         set_status("reconciliation_complete", false);
         venue_->start([this](const order::Snapshot& update) { on_order_update(update); });
         set_status("reconciliation_complete", venue_->ready());
-        price_stream_ = std::make_unique<BinanceWebsocketClient>(symbol_);
+        price_stream_ = std::make_unique<BinanceWebsocketClient>(symbol_, std::chrono::milliseconds(risk_.max_data_age_ms));
+        price_stream_->set_on_health([this](const sentum::api::MarketStreamHealth& health) {
+            set_status("market_data_connected", health.connected);
+            set_status("market_data_fresh", health.fresh);
+            set_status("last_market_event_age_ms", health.last_event_age_ms);
+            set_status("price_market_stream", health.json());
+        });
         price_stream_->set_on_price([this](double price) { on_price(price); });
         price_stream_->start();
-        set_status("market_data_connected", true);
+        set_status("market_data_connected", price_stream_->stream_health().connected);
+        set_status("market_data_fresh", price_stream_->stream_health().fresh);
         set_status("user_stream_connected", true);
         sentum::dashboard::DashboardState::global().set("health", "healthy");
     }
@@ -52,6 +59,7 @@ public:
         if (price_stream_) price_stream_->stop();
         if (venue_) venue_->stop();
         set_status("market_data_connected", false);
+        set_status("market_data_fresh", false);
         set_status("user_stream_connected", false);
         set_status("kill_switch_active", true);
         sentum::dashboard::DashboardState::global().set("health", "stopped");

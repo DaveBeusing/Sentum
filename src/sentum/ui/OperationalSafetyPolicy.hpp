@@ -97,7 +97,12 @@ inline OperationalStatus derive_operational_status(const nlohmann::json& snapsho
 		return {OperationalState::Degraded, "DEGRADED", "Market data disconnected", "Inspect SYSTEM connectivity before relying on market state"};
 	}
 
-	if (pressure == "saturated" || pressure == "critical") {
+	if (snapshot.contains("market_data_fresh") && !safety_bool(snapshot, "market_data_fresh")) {
+        return {OperationalState::Degraded, "DEGRADED", "Market data stale or awaiting valid prices",
+                "New entries are blocked; existing positions await fresh prices for risk management"};
+    }
+
+    if (pressure == "saturated" || pressure == "critical") {
 		return {OperationalState::Degraded, "DEGRADED", "Persistence pressure: " + pressure, "Inspect SYSTEM persistence diagnostics"};
 	}
 
