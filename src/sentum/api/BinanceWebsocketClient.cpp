@@ -9,12 +9,12 @@
 #include <mutex>
 #include <stdexcept>
 
-#include <boost/asio/ssl/context.hpp>
 #include <nlohmann/json.hpp>
 #include <websocketpp/client.hpp>
 #include <websocketpp/config/asio_client.hpp>
 
 #include <sentum/api/BinanceWebsocketClient.hpp>
+#include <sentum/api/TlsClientContext.hpp>
 
 using json = nlohmann::json;
 using tls_client = websocketpp::client<websocketpp::config::asio_tls_client>;
@@ -60,12 +60,9 @@ void BinanceWebsocketClient::run() {
 	try {
 		impl->client.init_asio();
 		impl->client.start_perpetual();
-		impl->client.set_tls_init_handler([](websocketpp::connection_hdl) {
-			auto ctx = websocketpp::lib::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::tls_client);
-			ctx->set_options(boost::asio::ssl::context::default_workarounds |
-				boost::asio::ssl::context::no_sslv2 |
-				boost::asio::ssl::context::no_sslv3);
-			return ctx;
+		const std::string hostname = "stream.binance.com";
+		impl->client.set_tls_init_handler([hostname](websocketpp::connection_hdl) {
+			return sentum::api::make_tls_client_context(hostname);
 		});
 		impl->client.clear_access_channels(websocketpp::log::alevel::all);
 		impl->client.clear_error_channels(websocketpp::log::elevel::all);
@@ -73,7 +70,7 @@ void BinanceWebsocketClient::run() {
 		std::string lower = symbol;
 		std::transform(lower.begin(), lower.end(), lower.begin(),
 			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		const std::string url = "wss://stream.binance.com:9443/ws/" + lower + "@trade";
+		const std::string url = "wss://" + hostname + ":9443/ws/" + lower + "@trade";
 
 		impl->client.set_open_handler([this](websocketpp::connection_hdl hdl) {
 			std::lock_guard<std::mutex> lock(impl->mutex);

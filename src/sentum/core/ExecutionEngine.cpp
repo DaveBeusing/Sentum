@@ -4,6 +4,7 @@
  */
 
 #include <chrono>
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -22,11 +23,34 @@ ExecutionEngine::ExecutionEngine()
     logger.start();
 }
 
-ExecutionEngine::~ExecutionEngine() { stop(); logger.stop(); }
+ExecutionEngine::~ExecutionEngine() {
+    try {
+        stop();
+    } catch (const std::exception& error) {
+        logger.log("[ERROR] ExecutionEngine shutdown: " + std::string(error.what()));
+    } catch (...) {
+        logger.log("[ERROR] ExecutionEngine shutdown failed");
+    }
+    logger.stop();
+}
 bool ExecutionEngine::is_running() const { return running.load(); }
+
+bool ExecutionEngine::request_stop() {
+    bool was_running;
+    {
+        // The predicate transition must use the waiters' mutexes: an atomic
+        // flag alone cannot prevent notification before a waiter is registered.
+        std::scoped_lock lock(scanner_signal_mutex, shutdown_wait_mutex);
+        was_running = running.exchange(false);
+    }
+    scanner_signal_cv.notify_all();
+    shutdown_wait_cv.notify_all();
+    return was_running;
+}
 
 void ExecutionEngine::start() {
     if (running.load()) return;
+    paper_account_error_ = nullptr;
     init();
     running.store(true);
     sentum::dashboard::DashboardState::global().set("health", "healthy");
@@ -35,27 +59,37 @@ void ExecutionEngine::start() {
 
 void ExecutionEngine::stop(ShutdownProgressCallback progress) {
     constexpr std::size_t total_steps = 6;
+    std::exception_ptr finalization_error;
     const auto report = [&](std::size_t step, const std::string& detail) {
         sentum::dashboard::DashboardState::global().merge({
-            {"health", step == total_steps ? "stopped" : "stopping"},
+            {"health", finalization_error ? "error" : (step == total_steps ? "stopped" : "stopping")},
             {"shutdown_step", step}, {"shutdown_total_steps", total_steps}, {"shutdown_detail", detail}
         });
         if (progress) progress(step, total_steps, detail);
     };
 
-    const bool was_running = running.exchange(false);
-    scanner_signal_cv.notify_all();
-    shutdown_wait_cv.notify_all();
+    const bool was_running = request_stop();
     if (!was_running && !main_thread.joinable() && !scanner_thread.joinable() && !trader_thread.joinable()) return;
 
     report(1, "Stopping strategy and paper trader");
-    stop_trader();
+    try {
+        stop_trader();
+    } catch (const std::exception& error) {
+        finalization_error = std::current_exception();
+        logger.log("[ERROR] Final paper account persistence: " + std::string(error.what()));
+        sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", error.what()}});
+    } catch (...) {
+        finalization_error = std::current_exception();
+        logger.log("[ERROR] Final paper account persistence failed");
+        sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", "Final paper account persistence failed"}});
+    }
 
     report(2, "Disconnecting market stream and flushing database writer");
     if (collector) { collector->stop(); collector_active.store(false); }
 
     report(3, "Joining runtime coordinator");
     if (main_thread.joinable() && main_thread.get_id() != std::this_thread::get_id()) main_thread.join();
+    if (paper_account_error_) finalization_error = paper_account_error_;
 
     report(4, "Joining scanner worker");
     if (scanner_thread.joinable() && scanner_thread.get_id() != std::this_thread::get_id()) scanner_thread.join();
@@ -67,7 +101,14 @@ void ExecutionEngine::stop(ShutdownProgressCallback progress) {
         {"market_data_connected", false}
     });
 
-    report(6, "Shutdown complete");
+    if (finalization_error) {
+        try { std::rethrow_exception(finalization_error); }
+        catch (const std::exception& error) {
+            sentum::dashboard::DashboardState::global().set("last_error", error.what());
+        } catch (...) {}
+    }
+    report(6, finalization_error ? "Shutdown complete; paper account persistence failed" : "Shutdown complete");
+    if (finalization_error) std::rethrow_exception(finalization_error);
 }
 
 void ExecutionEngine::init_config() {
@@ -238,9 +279,13 @@ void ExecutionEngine::run_main_loop() {
             shutdown_wait_cv.wait_for(wait_lock, 1s, [this] { return !running.load(); });
         }
     } catch (const std::exception& e) {
+        if (dynamic_cast<const sentum::paper::PaperAccount::PersistenceError*>(&e)) {
+            std::lock_guard<std::mutex> lock(trader_mutex);
+            if (!paper_account_error_) paper_account_error_ = std::current_exception();
+        }
         logger.log("[ERROR] ExecutionEngine::run_main_loop: " + std::string(e.what()));
         sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", e.what()}});
-        running.store(false); scanner_signal_cv.notify_all(); shutdown_wait_cv.notify_all();
+        request_stop();
     }
 }
 
@@ -263,7 +308,7 @@ void ExecutionEngine::monitor_scanner() {
             { std::lock_guard<std::mutex> lock(symbol_mutex); current_symbol = symbol; }
             start_trader_for(symbol);
         }
-    } catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::monitor_scanner: " + std::string(e.what())); running.store(false); shutdown_wait_cv.notify_all(); }
+    } catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::monitor_scanner: " + std::string(e.what())); request_stop(); }
 }
 
 void ExecutionEngine::start_trader_for(const std::string& symbol) {
@@ -298,14 +343,22 @@ void ExecutionEngine::start_trader_for(const std::string& symbol) {
 
 void ExecutionEngine::stop_trader() {
     std::lock_guard<std::mutex> lock(trader_mutex);
+    if (trader) trader->stop();
+    if (trader_thread.joinable() && trader_thread.get_id() != std::this_thread::get_id()) trader_thread.join();
+
+    std::exception_ptr persistence_error;
     if (trader) {
         const double final_profit = trader->get_total_profit();
         const double delta = final_profit - accounted_profit_;
-        if (delta != 0.0 && paper_account) paper_account->apply_realized_profit(delta);
-        accounted_profit_ = 0.0;
-        trader->stop();
+        try {
+            if (delta != 0.0 && paper_account) paper_account->apply_realized_profit(delta);
+            accounted_profit_ = 0.0;
+        } catch (...) {
+            persistence_error = std::current_exception();
+            if (!paper_account_error_) paper_account_error_ = persistence_error;
+        }
     }
-    if (trader_thread.joinable() && trader_thread.get_id() != std::this_thread::get_id()) trader_thread.join();
     trader.reset();
     trader_active.store(false, std::memory_order_release);
+    if (persistence_error) std::rethrow_exception(persistence_error);
 }

@@ -28,6 +28,14 @@ Each transition requires evidence that passes configured policy gates plus expli
 
 Do not commit API credentials. Testnet keys should have only the permissions required for Spot Testnet trading and should not have withdrawal rights.
 
+## TLS peer verification
+
+Public market streams and the Testnet User Data Stream use the same TLS client configuration. Each connection requires a certificate chain trusted by the system's OpenSSL trust store and a certificate valid for the hostname in its configured endpoint. Untrusted, expired and wrong-hostname certificates are rejected during the TLS handshake, before WebSocket messages can be delivered.
+
+Keep the deployment's CA certificates and system clock current. A missing or unusable trust store never disables verification; there is no option to disable peer or hostname verification. Certificate rejection must be investigated rather than worked around by weakening verification.
+
+The TLS regression tests perform local client/server handshakes with temporary certificate authorities and a fixed verification time. They cover successful verification, untrusted issuers, hostname mismatches and expired certificates without contacting an exchange or using account credentials.
+
 ## Dashboard and terminal UI
 
 The web dashboard remains read-only. The terminal Paper controls can select strategy/symbol, pause new entries and request a simulated close, but they do not enable production exchange execution.

@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -36,6 +37,8 @@ public:
     bool is_running() const;
 
 private:
+    friend struct ExecutionEngineTestAccess;
+
     std::thread main_thread, scanner_thread, trader_thread;
     std::atomic<bool> running, collector_active, scanner_active, trader_active;
     std::mutex symbol_mutex;
@@ -45,6 +48,8 @@ private:
     std::mutex shutdown_wait_mutex;
     std::condition_variable shutdown_wait_cv;
     std::string pending_scanner_symbol;
+    // Updates hold trader_mutex; shutdown inspects this after joining the coordinator.
+    std::exception_ptr paper_account_error_;
 
     std::unique_ptr<Database> db;
     std::unique_ptr<MarketDataStore> market_store;
@@ -70,6 +75,7 @@ private:
     void init();
     void init_config();
     void init_components();
+    bool request_stop();
     void run_main_loop();
     void monitor_scanner();
     void start_trader_for(const std::string& symbol);
