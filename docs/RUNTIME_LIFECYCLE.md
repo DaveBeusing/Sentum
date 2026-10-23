@@ -44,6 +44,20 @@ The CI dashboard smoke adds a second containment layer: every HTTP request has a
 
 ## Queue shutdown policy
 
+### Paper trader ownership and replacement
+
+The coordinator and scanner share a single trader ownership mutex. Runtime-control changes hold that mutex across the flat-position check, cancellation, worker join, final account settlement and replacement launch. Scanner requests recheck the active trader while holding the same mutex; a rejected request cannot change the current symbol. A completed worker is stopped and joined, and its final realized profit is settled, before its instance is replaced.
+
+Flat-only cancellation is serialized with strategy decisions. If an entry completes while a strategy or symbol change is pending, replacement remains deferred until that position exits. If cancellation wins while the trader is flat, subsequent queued decisions cannot create a new position on that instance.
+
+Each `TradeEngine` has one worker lifetime. Its stop request remains latched even when cancellation happens before `run()` begins, and another `run()` call cannot restart that instance. `stop()` signals the queue predicate under its mutex and wakes the worker. The worker owns creation and teardown of its price stream, execution venue and logger; cancellation never races a second thread against partially initialized resources. Pending price decisions are discarded after cancellation, and the owner joins the worker before reading final totals or destroying it.
+
+A trader worker exception marks runtime health as `error`, stops the coordinator and scanner, and prevents automatic replacement. Shutdown still joins the failed worker and completes account settlement and the remaining subsystem cleanup. It then reports the retained worker exception instead of publishing successful completion. This behavior does not provide restart reconciliation for an open position; recovery and durable trade-finalization rules are separate contracts.
+
+If account settlement also fails, the original trader exception remains the propagated failure. The final runtime diagnostic, shutdown progress and core log include both failures, preserving any account uncertainty warning and retained recovery-file path.
+
+`trader_lifecycle_tests` exercises early cancellation before the real worker entry point, cancellation concurrent with an entry decision, idle queue wake-up, scanner contention during active ownership and replacement, requested strategy/symbol identity, partial-start failure propagation, and shutdown during replacement. Gated local workers control the relevant ordering; no exchange connection is required.
+
 ### Collector persistence
 
 The collector rejects new external intake by clearing `running`, then stops and joins the WebSocket producer. The persistence writer has a separate producer-completion state and is not allowed to exit merely because `running` became false. It remains alive until the producer has published completion and the queue is empty. This prevents a final WebSocket callback from enqueueing a kline after the persistence writer has already exited.
@@ -53,6 +67,16 @@ The writer wake predicate follows the same contract: during shutdown it sleeps w
 ### Notification dispatch\n\nNotification dispatch stops accepting new work before the trading runtime is stopped. Provider cancellation is signalled and all notification workers are explicitly awakened. Active HTTP calls are bounded by configured connect/request timeouts and cancellation. Queued work is not forced through provider I/O during shutdown; its already-persisted `PENDING` or retriable `FAILED` state is intentionally left for restart recovery.\n\n### Async logger
 
 The logger queue is always inspected and swapped while holding its mutex. On stop the worker is explicitly awakened and exits only when the queue is empty. Concurrent producers cannot race an unlocked `std::queue::empty()` check.
+
+## Concrete WebSocket ownership
+
+`BinanceWebsocketClient` and `BinanceUserDataStream` initialize a fresh Asio endpoint synchronously before publishing each worker. Calling `stop()` or destroying either client before `start()` is safe. A stop request remains effective while worker preparation is pending, so delayed preparation cannot create a connection after cancellation.
+
+Start and stop serialize thread ownership. The owner joins a previous worker before replacing its endpoint; repeated and competing stop calls converge on the same joined state. Joining releases the lifecycle mutex so a message callback can call `stop()` while another thread is waiting for that callback to finish. Callback-driven stop requests cancellation; the owning thread subsequently joins and destroys the client. Destroying the client from its own callback is outside this ownership contract.
+
+A failed startup can be stopped safely and followed by an explicit restart using a new endpoint. Worker liveness is separate from authenticated subscription readiness and connection recovery; this lifecycle contract does not establish either of those properties.
+
+`websocket_lifecycle_tests` exercises both concrete clients with controlled preparation and callback gates, including failed startup, early cancellation, immediate destruction, callback-stop during an owner join, and repeated/concurrent start-stop. These tests use real local Asio initialization and cancellation without contacting an exchange.
 
 ## CI lifecycle evidence
 

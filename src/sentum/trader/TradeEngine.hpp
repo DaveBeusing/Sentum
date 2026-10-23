@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -35,6 +36,7 @@ public:
 
     void run();
     void stop();
+    bool try_stop_when_flat();
     TradeAction process_event(const MarketEvent& event);
     TradeAction evaluate(double price);
     const std::vector<TradePosition>& completed_trades() const { return completed_; }
@@ -49,8 +51,11 @@ public:
     std::string strategy_name() const;
 
 private:
+    friend struct TradeEngineTestAccess;
+
     void initialize_components();
     void enqueue_price(double price);
+    void run_event_loop();
     TradeAction evaluate_at(double price, std::chrono::system_clock::time_point now, const std::string& source,
                             const MarketEvent* event = nullptr);
     TradeAction close_position(double market_price, const std::string& reason, std::chrono::system_clock::time_point now);
@@ -60,6 +65,8 @@ private:
     std::string symbol;
     BinanceRestClient* api = nullptr;
     std::atomic<bool> running{false};
+    std::atomic<bool> stop_requested_{false};
+    bool run_started_ = false; // Protected by queue_mutex; a worker is never restarted.
     bool isPaperTrading = true;
     bool runtime_configured_ = false;
     RiskConfig risk;
@@ -77,6 +84,7 @@ private:
     std::shared_ptr<IClock> clock;
     std::string history_path = "log/klines.sqlite3";
     std::vector<TradePosition> completed_;
+    std::exception_ptr finalization_error_;
     std::chrono::system_clock::time_point last_exit{};
     std::unique_ptr<BinanceWebsocketClient> price_stream;
     std::atomic<double> latest_price{0.0};

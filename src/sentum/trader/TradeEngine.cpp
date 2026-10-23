@@ -52,6 +52,7 @@ void TradeEngine::enqueue_price(double price) {
     event.close = price;
     {
         std::lock_guard<std::mutex> lock(queue_mutex);
+        if (stop_requested_.load(std::memory_order_acquire)) return;
         if (price_queue.size() >= max_queue_size) price_queue.pop_front();
         price_queue.push_back(std::move(event));
     }
@@ -61,46 +62,78 @@ void TradeEngine::enqueue_price(double price) {
 void TradeEngine::stop() {
     {
         std::lock_guard<std::mutex> lock(queue_mutex);
-        if (!running.exchange(false)) return;
+        stop_requested_.store(true, std::memory_order_release);
+        running.store(false, std::memory_order_release);
     }
-    if (price_stream) price_stream->stop();
-    if (execution_venue) execution_venue->stop();
     queue_cv.notify_all();
 }
 
+bool TradeEngine::try_stop_when_flat() {
+    // Serializing the stop request with decisions prevents an entry between
+    // observing a flat position and cancelling a worker for reconfiguration.
+    std::lock_guard<std::mutex> lock(state_mutex);
+    if (position.open) return false;
+    stop();
+    return true;
+}
+
 void TradeEngine::run() {
-    if (!isPaperTrading) throw std::runtime_error("Live trading is disabled until order execution is production-ready");
-    if (!api) throw std::runtime_error("Network run requires BinanceRestClient");
-    if (running.exchange(true)) return;
-    engine_logger.start();
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        if (run_started_ || stop_requested_.load(std::memory_order_acquire)) return;
+        run_started_ = true;
+        running.store(true, std::memory_order_release);
+    }
     try {
-        if (!runtime_configured_) risk = load_risk_config("config/risk.json");
-        initialize_components();
-        sentum::dashboard::DashboardState::global().merge({
-            {"strategy_name", strategy->name()}, {"entries_paused", sentum::runtime::RuntimeControl::global().entries_paused()}
-        });
-        price_stream = std::make_unique<BinanceWebsocketClient>(symbol);
-        price_stream->set_on_price([this](double price) { enqueue_price(price); });
-        price_stream->start();
-        while (running.load()) {
-            MarketEvent event;
-            {
-                std::unique_lock<std::mutex> lock(queue_mutex);
-                queue_cv.wait(lock, [this] { return !running.load() || !price_queue.empty(); });
-                if (!running.load() && price_queue.empty()) break;
-                event = std::move(price_queue.front());
-                price_queue.pop_front();
-            }
-            process_event(event);
+        if (!isPaperTrading) throw std::runtime_error("Live trading is disabled until order execution is production-ready");
+        if (!api) throw std::runtime_error("Network run requires BinanceRestClient");
+        engine_logger.start();
+        {
+            std::lock_guard<std::mutex> lock(state_mutex);
+            if (!runtime_configured_) risk = load_risk_config("config/risk.json");
+            initialize_components();
+            sentum::dashboard::DashboardState::global().merge({
+                {"strategy_name", strategy->name()}, {"entries_paused", sentum::runtime::RuntimeControl::global().entries_paused()}
+            });
         }
+        {
+            // The stream is owned by this worker. Cancellation only signals it;
+            // no other thread can access partially initialized runtime objects.
+            std::lock_guard<std::mutex> lock(queue_mutex);
+            if (!stop_requested_.load(std::memory_order_acquire)) {
+                price_stream = std::make_unique<BinanceWebsocketClient>(symbol);
+                price_stream->set_on_price([this](double price) { enqueue_price(price); });
+                price_stream->start();
+            }
+        }
+        run_event_loop();
     } catch (...) {
         stop();
+        if (price_stream) price_stream->stop();
+        if (execution_venue) execution_venue->stop();
         engine_logger.stop();
         throw;
     }
+    stop();
     if (price_stream) price_stream->stop();
     if (execution_venue) execution_venue->stop();
     engine_logger.stop();
+}
+
+void TradeEngine::run_event_loop() {
+    while (true) {
+        MarketEvent event;
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            queue_cv.wait(lock, [this] {
+                return stop_requested_.load(std::memory_order_acquire) || !price_queue.empty();
+            });
+            if (stop_requested_.load(std::memory_order_acquire)) return;
+            event = std::move(price_queue.front());
+            price_queue.pop_front();
+        }
+        process_event(event);
+    }
 }
 
 sentum::order::Snapshot TradeEngine::execute(sentum::order::Side side, double quantity, double price,
@@ -142,6 +175,8 @@ TradeAction TradeEngine::evaluate(double price) {
 TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::time_point now,
                                      const std::string& source, const MarketEvent* event) {
     std::lock_guard<std::mutex> lock(state_mutex);
+    if (finalization_error_) std::rethrow_exception(finalization_error_);
+    if (stop_requested_.load(std::memory_order_acquire)) return TradeAction::NONE;
     auto& dashboard = sentum::dashboard::DashboardState::global();
     auto& control = sentum::runtime::RuntimeControl::global();
 
@@ -210,27 +245,54 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
 
 TradeAction TradeEngine::close_position(double market_price, const std::string& reason,
                                         std::chrono::system_clock::time_point now) {
-    const auto fill = execute(sentum::order::Side::Sell, position.quantity, market_price, now, "sell");
-    if (!fill.exchange_confirmed_fill()) return TradeAction::NONE;
+    try {
+        // Ordinary writer contention must resolve before producing an exit fill.
+        auto finalization = history->begin_finalization();
+        const auto fill = execute(sentum::order::Side::Sell, position.quantity, market_price, now, "sell");
+        if (!fill.exchange_confirmed_fill()) return TradeAction::NONE;
 
-    position.exit_price = fill.average_fill_price;
-    position.exit_time = fill.updated_at;
-    position.close_reason = reason;
-    position.stop_loss_triggered = reason == "stop_loss";
-    position.take_profit_triggered = reason == "take_profit";
-    position.gross_profit = (position.exit_price - position.entry_price) * position.quantity;
-    position.fee_exit = position.exit_price * position.quantity * risk.sell_fee_percent;
-    position.net_profit = position.gross_profit - position.fee_entry - position.fee_exit;
-    total_profit += position.net_profit;
-    if (position.net_profit >= 0.0) ++win_count; else ++lose_count;
-    logger.log(position, TradeAction::SELL);
-    history->save(position);
-    completed_.push_back(position);
-    last_exit = position.exit_time;
-    sentum::dashboard::DashboardState::global().merge({{"last_exit_reason", reason}, {"last_trade_profit", position.net_profit}});
-    position.open = false;
-    strategy->reset();
-    return TradeAction::SELL;
+        TradePosition closed = position;
+        closed.open = false;
+        closed.exit_price = fill.average_fill_price;
+        closed.executed_price = fill.average_fill_price;
+        closed.exit_time = fill.updated_at;
+        closed.client_order_id = fill.client_order_id;
+        closed.exchange_order_id = std::to_string(fill.exchange_order_id);
+        closed.finalization_id = TradeHistoryRepository::new_finalization_id();
+        closed.close_reason = reason;
+        closed.stop_loss_triggered = reason == "stop_loss";
+        closed.take_profit_triggered = reason == "take_profit";
+        closed.gross_profit = (closed.exit_price - closed.entry_price) * closed.quantity;
+        closed.fee_exit = closed.exit_price * closed.quantity * risk.sell_fee_percent;
+        closed.net_profit = closed.gross_profit - closed.fee_entry - closed.fee_exit;
+
+        std::exception_ptr persistence_error;
+        try {
+            finalization.complete(closed);
+        } catch (...) {
+            persistence_error = std::current_exception();
+            finalization_error_ = persistence_error;
+        }
+
+        // A confirmed fill remains closed even if its history projection failed.
+        // Apply its complete accounting once; further evaluation is latched off.
+        position = closed;
+        completed_.push_back(closed);
+        total_profit += closed.net_profit;
+        if (closed.net_profit >= 0.0) ++win_count; else ++lose_count;
+        last_exit = closed.exit_time;
+        strategy->reset();
+        if (persistence_error) {
+            std::rethrow_exception(persistence_error);
+        }
+
+        logger.log(closed, TradeAction::SELL);
+        sentum::dashboard::DashboardState::global().merge({{"last_exit_reason", reason}, {"last_trade_profit", closed.net_profit}});
+        return TradeAction::SELL;
+    } catch (...) {
+        if (!finalization_error_) finalization_error_ = std::current_exception();
+        std::rethrow_exception(finalization_error_);
+    }
 }
 
 TradePosition TradeEngine::get_current_position() const { std::lock_guard<std::mutex> lock(state_mutex); return position; }
