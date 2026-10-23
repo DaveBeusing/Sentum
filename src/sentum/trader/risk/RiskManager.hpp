@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
+#include <sentum/time/Clock.hpp>
 #include <sentum/trader/strategy/IStrategy.hpp>
 #include <sentum/trader/types/RiskConfig.hpp>
 
@@ -17,12 +21,16 @@ struct RiskDecision {
 
 class RiskManager {
 public:
-    explicit RiskManager(const RiskConfig& config) : config_(config) {}
+    explicit RiskManager(const RiskConfig& config,
+                         std::shared_ptr<IClock> clock = std::make_shared<SystemClock>())
+        : config_(config), clock_(std::move(clock)) {
+        if (!clock_) throw std::invalid_argument("Risk manager requires a clock");
+    }
 
     RiskDecision approve_entry(const StrategySignal& signal, double price,
         std::chrono::system_clock::time_point price_time,
         std::chrono::system_clock::time_point last_exit) const {
-        const auto now = std::chrono::system_clock::now();
+        const auto now = clock_->now();
         if (signal.action != TradeAction::BUY) return {false, "signal is not BUY"};
         if (price <= 0.0) return {false, "invalid market price"};
         if (now - price_time > std::chrono::milliseconds(config_.max_data_age_ms)) return {false, "market data is stale"};
@@ -44,4 +52,5 @@ public:
 
 private:
     RiskConfig config_;
+    std::shared_ptr<IClock> clock_;
 };

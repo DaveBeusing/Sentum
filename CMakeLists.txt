@@ -113,6 +113,12 @@ if(BUILD_TESTING)
 	set_tests_properties(tls_client_context PROPERTIES TIMEOUT 60)
 	add_dependencies(sentum_runtime_lifecycle_tests sentum_tls_client_context_tests)
 
+	add_executable(sentum_replay_risk_clock_tests tests/replay_risk_clock_tests.cpp)
+	target_link_libraries(sentum_replay_risk_clock_tests PRIVATE sentum_core)
+	add_test(NAME replay_risk_clock COMMAND sentum_replay_risk_clock_tests)
+	set_tests_properties(replay_risk_clock PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_replay_risk_clock_tests)
+
 	add_executable(sentum_market_hot_path_tests tests/market_hot_path_tests.cpp)
 	target_link_libraries(sentum_market_hot_path_tests PRIVATE sentum_core)
 	add_test(NAME market_hot_path COMMAND sentum_market_hot_path_tests)

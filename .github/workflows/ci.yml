@@ -162,6 +162,7 @@ jobs:
           assert report['folds'] == 2
           assert len(report['leaderboard']) == 4
           assert report['leaderboard'][0]['validation_score'] >= report['leaderboard'][-1]['validation_score']
+          assert all(trial['train']['trades'] > 0 for trial in report['leaderboard']), 'historical training must execute trades'
           with open('log/research_trials.csv') as f:
               rows = list(csv.DictReader(f))
           assert len(rows) == 4
@@ -236,6 +237,13 @@ jobs:
 
           ./build/sentum_experiment "$root/experiment.json"
           first="$(find "$root/experiments" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+          python3 - "$first/research.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as f:
+              report = json.load(f)
+          assert all(trial['validation']['trades'] > 0 for trial in report['leaderboard']), 'historical validation must execute trades'
+          assert report['holdout_evaluated'] and report['final_holdout']['trades'] > 0, 'canonical holdout must execute trades'
+          PY
           python3 tools/verify_research.py "$first" --registry "$root/experiments.sqlite3"
           sleep 0.05
           ./build/sentum_experiment "$root/experiment.json"

@@ -35,7 +35,7 @@ TradeEngine::~TradeEngine() { stop(); }
 
 void TradeEngine::initialize_components() {
     if (!strategy) strategy = std::make_unique<MomentumStrategy>();
-    risk_manager = std::make_unique<RiskManager>(risk);
+    risk_manager = std::make_unique<RiskManager>(risk, clock);
     history = std::make_unique<TradeHistoryRepository>(history_path);
     execution_venue = std::make_unique<sentum::execution::SimulatedExecutionVenue>(api ? "paper" : "replay");
     execution_venue->set_fill_model(risk.spread_percent, risk.slippage_percent);

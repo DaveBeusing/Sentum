@@ -19,6 +19,12 @@ timestamp_ms,price,volume
 
 Volume is optional.
 
+## Execution time
+
+Replay and research advance a replay clock with the historical market events. The trading engine and risk manager share that clock, so data freshness and the cooldown after an exit are evaluated on the same timeline, independently of the host's current date. The configured freshness limit still applies: an event exactly at the maximum age is accepted, and an older event is rejected. A new entry is permitted when the configured cooldown has fully elapsed.
+
+Paper, shadow and Testnet execution retain the system clock by default. Freshness compares the evaluation time with the market event's timestamp; an old event cannot make itself fresh by supplying its own timestamp as the current time.
+
 ## Parameter search
 
 Research configuration defines a bounded Cartesian parameter grid. Typical dimensions include strategy lookback/threshold and execution assumptions such as stop loss, take profit and slippage. `max_trials` prevents accidental unbounded search spaces.
