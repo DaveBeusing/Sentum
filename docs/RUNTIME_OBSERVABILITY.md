@@ -69,6 +69,13 @@ Runtime metrics expose:
 
 Drops remain fail-visible through the collector's accepted/dropped counters and drop rate. No item is silently overwritten to reduce pressure.
 
+SQLite write failures are reported independently through `collector_persistence`.
+Its accepted, committed, unpersisted and unrecovered counts include the writer's
+current batch as well as the queue. `RETRYING` degrades health until the retained batch
+commits; `FAILED` is latched and remains visible after shutdown. Queue overflow is not
+used as a substitute for durable-write failure accounting. See
+[Collector persistence](COLLECTOR_PERSISTENCE.md) for the retry and failure contract.
+
 ## Thread-safety contract
 
 The persistence queue remains SPSC: one market-data producer and one database writer.

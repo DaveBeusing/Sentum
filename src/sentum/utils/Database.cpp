@@ -12,6 +12,7 @@ Database::Database(const std::string& db_path) {
         throw std::runtime_error("Failed to open database: " + message);
     }
     sqlite3_busy_timeout(db, 5000);
+    sqlite3_extended_result_codes(db, 1);
     exec_or_throw("PRAGMA journal_mode=WAL;");
     exec_or_throw("PRAGMA synchronous=NORMAL;");
     exec_or_throw("PRAGMA temp_store=MEMORY;");
@@ -52,41 +53,62 @@ bool Database::ensure_table() {
     }
 }
 
-bool Database::bind_and_step(const std::string& symbol, const Kline& kline) {
+int Database::bind_and_step(const std::string& symbol, const Kline& kline) {
     sqlite3_reset(upsert_stmt);
     sqlite3_clear_bindings(upsert_stmt);
-    sqlite3_bind_text(upsert_stmt, 1, symbol.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(upsert_stmt, 2, kline.timestamp);
-    sqlite3_bind_double(upsert_stmt, 3, kline.open);
-    sqlite3_bind_double(upsert_stmt, 4, kline.high);
-    sqlite3_bind_double(upsert_stmt, 5, kline.low);
-    sqlite3_bind_double(upsert_stmt, 6, kline.close);
-    sqlite3_bind_double(upsert_stmt, 7, kline.volume);
-    return sqlite3_step(upsert_stmt) == SQLITE_DONE;
+    int code = sqlite3_bind_text(upsert_stmt, 1, symbol.c_str(), -1, SQLITE_TRANSIENT);
+    if (code == SQLITE_OK) code = sqlite3_bind_int64(upsert_stmt, 2, kline.timestamp);
+    if (code == SQLITE_OK) code = sqlite3_bind_double(upsert_stmt, 3, kline.open);
+    if (code == SQLITE_OK) code = sqlite3_bind_double(upsert_stmt, 4, kline.high);
+    if (code == SQLITE_OK) code = sqlite3_bind_double(upsert_stmt, 5, kline.low);
+    if (code == SQLITE_OK) code = sqlite3_bind_double(upsert_stmt, 6, kline.close);
+    if (code == SQLITE_OK) code = sqlite3_bind_double(upsert_stmt, 7, kline.volume);
+    if (code == SQLITE_OK) code = sqlite3_step(upsert_stmt);
+    // A failed COMMIT must not leave a live UPSERT statement or transaction behind.
+    sqlite3_reset(upsert_stmt);
+    return code == SQLITE_DONE ? SQLITE_OK : code;
 }
 
 bool Database::save_kline_batch(const std::vector<std::pair<std::string, Kline>>& batch) {
-    if (batch.empty()) return true;
-    if (sqlite3_exec(db, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr) != SQLITE_OK) return false;
-    for (const auto& item : batch) {
-        if (!bind_and_step(item.first, item.second)) {
-            sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
-            return false;
-        }
-    }
-    return sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr) == SQLITE_OK;
+    std::vector<KlineBatchItem> items;
+    items.reserve(batch.size());
+    for (const auto& item : batch) items.push_back({&item.first, item.second});
+    return save_kline_batch(items);
 }
 
 bool Database::save_kline_batch(const std::vector<KlineBatchItem>& batch) {
-    if (batch.empty()) return true;
-    if (sqlite3_exec(db, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr) != SQLITE_OK) return false;
-    for (const auto& item : batch) {
-        if (!item.symbol || !bind_and_step(*item.symbol, item.kline)) {
-            sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
-            return false;
-        }
+    return save_kline_batch_result(batch).committed;
+}
+
+KlineWriteResult Database::failed_write(int sqlite_code) {
+    sqlite3_reset(upsert_stmt);
+    int rollback_code = SQLITE_OK;
+    if (sqlite3_get_autocommit(db) == 0) {
+        rollback_code = sqlite3_exec(db, "ROLLBACK;", nullptr, nullptr, nullptr);
+        if (rollback_code == SQLITE_OK && sqlite3_get_autocommit(db) == 0) rollback_code = SQLITE_ERROR;
     }
-    return sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr) == SQLITE_OK;
+    return {false, sqlite_code, rollback_code};
+}
+
+KlineWriteResult Database::save_kline_batch_result(const std::vector<KlineBatchItem>& batch,
+                                                  int busy_timeout_ms) {
+    if (batch.empty()) return {true, SQLITE_OK, SQLITE_OK};
+    if (busy_timeout_ms < 0) return {false, SQLITE_MISUSE, SQLITE_OK};
+    sqlite3_busy_timeout(db, busy_timeout_ms);
+    struct RestoreTimeout {
+        sqlite3* database;
+        ~RestoreTimeout() { sqlite3_busy_timeout(database, 5000); }
+    } restore{db};
+
+    int code = sqlite3_exec(db, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr);
+    if (code != SQLITE_OK) return failed_write(code);
+    for (const auto& item : batch) {
+        code = item.symbol ? bind_and_step(*item.symbol, item.kline) : SQLITE_MISUSE;
+        if (code != SQLITE_OK) return failed_write(code);
+    }
+    code = sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
+    if (code != SQLITE_OK) return failed_write(code);
+    return {true, SQLITE_OK, SQLITE_OK};
 }
 
 bool Database::save_klines(const std::string& symbol, const std::vector<Kline>& klines) {

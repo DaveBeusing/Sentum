@@ -48,7 +48,7 @@ struct WebsocketLifecycleTestAccess {
         return !client.joining_ && !client.thread_.joinable() && !client.impl_ && !client.running();
     }
 
-    static void emit(BinanceWebsocketClient& client) { client.handle_message(R"({"p":"100"})"); }
+    static void emit(BinanceWebsocketClient& client) { client.handle_message(R"({"p":"100"})", false); }
     static void emit(BinanceUserDataStream& client) { client.handle_message(R"({"e":"executionReport"})"); }
 };
 

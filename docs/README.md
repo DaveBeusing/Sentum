@@ -4,11 +4,15 @@ This directory contains the current functional documentation for Sentum. Documen
 
 ## Runtime and operation
 
+- [Public market stream recovery](MARKET_STREAM_RECOVERY.md)
+
 - [Trading console](TRADING_CONSOLE.md) — interactive Paper/Testnet terminal views and Paper controls.
 - [Web dashboard](DASHBOARD.md) — local read-only browser dashboard, bind configuration and API.
 - [Runtime performance](PERFORMANCE.md) — market-data hot path, persistence architecture, telemetry and benchmarks.
 - [Execution safety](LIVE_TRADING_SAFETY.md) — supported execution boundaries and operational safety expectations.
 - [Trade finalization and recovery](TRADE_FINALIZATION_RECOVERY.md) — SQLite contention, durable simulated close records and restart recovery.
+- [Trailing-stop risk policy](TRAILING_STOP_RISK.md) — monotonic long-position protection, configuration limits and gap execution behavior.
+- [Collector persistence](COLLECTOR_PERSISTENCE.md) — retained batches, bounded retries, failed shutdown and unrecovered candle accounting.
 
 ## Research
 

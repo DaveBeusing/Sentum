@@ -76,6 +76,8 @@ inline std::vector<OperatorAlert> derive_operator_alerts(const nlohmann::json& s
 	const bool entries_paused = json_bool(snapshot, "entries_paused");
 	const auto performance = snapshot.value("performance", nlohmann::json::object());
 	const auto pressure = json_text(performance, "queue_pressure", "normal");
+	const auto persistence = snapshot.value("collector_persistence", nlohmann::json::object());
+	const auto persistence_status = json_text(persistence, "status");
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
 	const auto governance = json_text(control_plane, "governance_state", "UNAVAILABLE");
 	const auto evidence = json_text(control_plane, "evidence_status", json_text(control_plane, "evidence_state", "MISSING"));
@@ -124,7 +126,27 @@ inline std::vector<OperatorAlert> derive_operator_alerts(const nlohmann::json& s
 			true));
 	}
 
-	if (pressure == "saturated" || pressure == "critical") {
+	if (market_connected && snapshot.contains("market_data_fresh") && !json_bool(snapshot, "market_data_fresh")) {
+        alerts.push_back(make_operator_alert(
+            "market.stale", "MARKET_DATA", OperatorAlertSeverity::Warning,
+            "Market data stale", "The socket is connected but valid prices are unavailable or too old",
+            "New entries remain blocked; position management resumes when a fresh valid price arrives.",
+            "SYSTEM", true, 2, true));
+    }
+
+    if (persistence_status == "FAILED" || persistence_status == "RETRYING") {
+        const bool failed = persistence_status == "FAILED";
+        alerts.push_back(make_operator_alert(
+            "persistence.write_failure", "PERSISTENCE",
+            failed ? OperatorAlertSeverity::Critical : OperatorAlertSeverity::Warning,
+            failed ? "Collector persistence failed" : "Collector persistence retrying",
+            failed ? json_text(persistence, "failure_reason", "SQLite writes failed") : "A retained SQLite batch is awaiting commit",
+            failed ? "Inspect SQLite error codes and unrecovered candle counts; the runtime is stopping." :
+                     "New entries are blocked until the retained batch commits. Inspect database lock contention.",
+            "SYSTEM", true, failed ? 3 : 2, true));
+    }
+
+    if (pressure == "saturated" || pressure == "critical") {
 		alerts.push_back(make_operator_alert(
 			"persistence.pressure",
 			"PERSISTENCE",

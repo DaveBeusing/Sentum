@@ -1,5 +1,6 @@
 #pragma once
 
+#include <charconv>
 #include <cstdint>
 #include <stdexcept>
 #include <string_view>
@@ -9,6 +10,7 @@ namespace sentum::collector {
 struct ParsedKline {
     std::string_view symbol;
     std::int64_t timestamp = 0;
+    std::int64_t event_time = 0;
     double open = 0.0;
     double high = 0.0;
     double low = 0.0;
@@ -23,6 +25,18 @@ public:
         const auto kline = payload.find("\"k\":{");
         if (kline == std::string_view::npos) return false;
         const auto body = payload.substr(kline + 5);
+        // E is the update time; t is the candle's identity/start and may be
+        // older than the freshness budget even for a newly closed candle.
+        out.event_time = 0;
+        const auto prefix = payload.substr(0, kline);
+        const auto event_pos = prefix.find("\"E\":");
+        if (event_pos != std::string_view::npos) {
+            const char* begin = prefix.data() + event_pos + 4;
+            const char* end = prefix.data() + prefix.size();
+            const auto parsed = std::from_chars(begin, end, out.event_time);
+            if (parsed.ec != std::errc{} || parsed.ptr == begin || parsed.ptr == end ||
+                (*parsed.ptr != ',' && *parsed.ptr != '}')) return false;
+        }
         return string_field(body, "s", out.symbol) &&
                integer_field(body, "t", out.timestamp) &&
                decimal_field(body, "o", out.open) &&

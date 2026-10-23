@@ -271,13 +271,19 @@ def scenario_commands(args):
             [executable(args.build_dir, "sentum_governed_incident_lifecycle_runtime_tests")],
         ]
     if args.scenario == "persistence-write-failure":
-        return [[executable(args.build_dir, "sentum_notification_delivery_evidence_repository_tests")]]
-    return [[
+        return [
+            [executable(args.build_dir, "sentum_notification_delivery_evidence_repository_tests")],
+            [executable(args.build_dir, "sentum_collector_persistence_tests")],
+        ]
+    commands = [[
         scenario_binary,
         "--scenario", args.scenario,
         "--duration-seconds", str(args.duration_seconds),
         "--seed", str(args.seed),
     ]]
+    if args.scenario == "all-faults":
+        commands.append([executable(args.build_dir, "sentum_collector_persistence_tests")])
+    return commands
 
 
 def aggregate_scenario_metrics(parsed_results):
