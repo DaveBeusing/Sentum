@@ -2,10 +2,10 @@
 #include <mutex>
 #include <stdexcept>
 
-#include <boost/asio/ssl/context.hpp>
 #include <websocketpp/client.hpp>
 #include <websocketpp/config/asio_client.hpp>
 
+#include <sentum/api/TlsClientContext.hpp>
 #include <sentum/collector/Collector.hpp>
 #include <sentum/collector/FastBinanceKlineParser.hpp>
 #include <sentum/market/MarketEventBus.hpp>
@@ -209,10 +209,9 @@ void Collector::run() {
         if (running.load(std::memory_order_acquire)) {
             impl->websocket.clear_access_channels(websocketpp::log::alevel::all);
             impl->websocket.clear_error_channels(websocketpp::log::elevel::all);
-            impl->websocket.set_tls_init_handler([](websocketpp::connection_hdl) {
-                auto ctx = websocketpp::lib::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::tls_client);
-                ctx->set_options(boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::no_sslv2 | boost::asio::ssl::context::no_sslv3);
-                return ctx;
+            const std::string hostname = "stream.binance.com";
+            impl->websocket.set_tls_init_handler([hostname](websocketpp::connection_hdl) {
+                return sentum::api::make_tls_client_context(hostname);
             });
             impl->websocket.set_open_handler([this](websocketpp::connection_hdl hdl) {
                 std::lock_guard<std::mutex> lock(impl->mutex); impl->connection = hdl; impl->connection_valid = true;
@@ -257,7 +256,7 @@ void Collector::run() {
                 }
             });
 
-            std::string url = "wss://stream.binance.com:443/stream?streams=";
+            std::string url = "wss://" + hostname + ":443/stream?streams=";
             for (std::size_t i = 0; i < canonical_symbols.size(); ++i) {
                 url += canonical_symbols[i] + "@kline_1s";
                 if (i + 1 < canonical_symbols.size()) url += "/";

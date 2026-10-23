@@ -107,6 +107,12 @@ if(BUILD_TESTING)
 	add_test(NAME runtime_lifecycle COMMAND sentum_runtime_lifecycle_tests)
 	set_tests_properties(runtime_lifecycle PROPERTIES TIMEOUT 60)
 
+	add_executable(sentum_tls_client_context_tests tests/tls_client_context_tests.cpp)
+	target_link_libraries(sentum_tls_client_context_tests PRIVATE sentum_core)
+	add_test(NAME tls_client_context COMMAND sentum_tls_client_context_tests)
+	set_tests_properties(tls_client_context PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_tls_client_context_tests)
+
 	add_executable(sentum_market_hot_path_tests tests/market_hot_path_tests.cpp)
 	target_link_libraries(sentum_market_hot_path_tests PRIVATE sentum_core)
 	add_test(NAME market_hot_path COMMAND sentum_market_hot_path_tests)

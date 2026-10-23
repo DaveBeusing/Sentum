@@ -8,12 +8,12 @@
 #include <string>
 #include <thread>
 
-#include <boost/asio/ssl/context.hpp>
 #include <nlohmann/json.hpp>
 #include <websocketpp/client.hpp>
 #include <websocketpp/config/asio_client.hpp>
 
 #include <sentum/api/BinanceSpotExecutionClient.hpp>
+#include <sentum/api/TlsClientContext.hpp>
 
 class IUserDataStream {
 public:
@@ -69,12 +69,13 @@ private:
             impl_->client.start_perpetual();
             impl_->client.clear_access_channels(websocketpp::log::alevel::all);
             impl_->client.clear_error_channels(websocketpp::log::elevel::all);
-            impl_->client.set_tls_init_handler([](websocketpp::connection_hdl) {
-                auto context = websocketpp::lib::make_shared<boost::asio::ssl::context>(boost::asio::ssl::context::tls_client);
-                context->set_options(boost::asio::ssl::context::default_workarounds |
-                                     boost::asio::ssl::context::no_sslv2 |
-                                     boost::asio::ssl::context::no_sslv3);
-                return context;
+            const std::string websocket_base = BinanceSpotExecutionClient::websocket_base_url();
+            const websocketpp::uri endpoint(websocket_base);
+            if (!endpoint.get_valid() || !endpoint.get_secure()) {
+                throw std::runtime_error("User data stream requires a valid TLS endpoint");
+            }
+            impl_->client.set_tls_init_handler([hostname = endpoint.get_host()](websocketpp::connection_hdl) {
+                return sentum::api::make_tls_client_context(hostname);
             });
             impl_->client.set_open_handler([this](websocketpp::connection_hdl handle) {
                 std::lock_guard<std::mutex> lock(impl_->mutex);
@@ -93,8 +94,7 @@ private:
                 catch (...) { /* malformed exchange events never mutate local order state */ }
             });
             websocketpp::lib::error_code ec;
-            auto connection = impl_->client.get_connection(
-                std::string(BinanceSpotExecutionClient::websocket_base_url()) + listen_key_, ec);
+            auto connection = impl_->client.get_connection(websocket_base + listen_key_, ec);
             if (ec) throw std::runtime_error("User data stream connection failed: " + ec.message());
             impl_->client.connect(connection);
             impl_->client.run();
