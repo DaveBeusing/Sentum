@@ -119,6 +119,18 @@ if(BUILD_TESTING)
 	set_tests_properties(replay_risk_clock PROPERTIES TIMEOUT 60)
 	add_dependencies(sentum_runtime_lifecycle_tests sentum_replay_risk_clock_tests)
 
+	add_executable(sentum_paper_account_durability_tests tests/paper_account_durability_tests.cpp)
+	target_link_libraries(sentum_paper_account_durability_tests PRIVATE sentum_core)
+	add_test(NAME paper_account_durability COMMAND sentum_paper_account_durability_tests)
+	set_tests_properties(paper_account_durability PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_paper_account_durability_tests)
+
+	add_executable(sentum_paper_account_runtime_tests tests/paper_account_runtime_tests.cpp)
+	target_link_libraries(sentum_paper_account_runtime_tests PRIVATE sentum_core)
+	add_test(NAME paper_account_runtime COMMAND sentum_paper_account_runtime_tests)
+	set_tests_properties(paper_account_runtime PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_paper_account_runtime_tests)
+
 	add_executable(sentum_market_hot_path_tests tests/market_hot_path_tests.cpp)
 	target_link_libraries(sentum_market_hot_path_tests PRIVATE sentum_core)
 	add_test(NAME market_hot_path COMMAND sentum_market_hot_path_tests)

@@ -106,6 +106,14 @@ Paper trading uses a persistent simulated account rather than the authenticated 
 
 The account persists equity, realized P/L and closed-trade count across restarts. Position sizing uses the current simulated equity.
 
+Only a missing state file starts a new account. An existing file must contain the original five fields: `currency`, `initial_balance`, `equity`, `realized_profit` and `closed_trades`; no schema-version migration is required. Currency and initial balance must match the current configuration. Balances and profit must be finite numbers, and the closed-trade count must be a nonnegative integer within the supported range. Malformed, incomplete, unreadable or incompatible state causes an explicit error and is left untouched. State files must be regular files; symbolic links and other file types are rejected. To start a separate account with another initial balance or currency, configure another `statePath`.
+
+Use one writer per account path on a Linux filesystem that supports hard links, atomic rename, and file and directory `fsync`. Saves create a private, exclusively created temporary file in the state directory, write and synchronize its complete contents, retain the previous file, then atomically replace and synchronize the directory entry. The in-memory balance, profit and trade count change only after this durable commit. Reset uses the same transaction. Failed writes, file synchronization and replacement leave the previous account bytes and in-memory values unchanged; the implementation never removes the destination to retry a failed rename. Existing files named `<statePath>.tmp` are not reused or deleted.
+
+If directory synchronization fails after replacement, Sentum attempts to restore the previous file and synchronize that restoration. If either recovery operation fails, `PaperAccount::PersistenceError::state_uncertain()` is true and that account instance rejects subsequent reads and changes. Stop the runtime, reconcile the configured file with the previous file named in the error when one was retained, and resolve the storage failure before restarting. The uncertainty latch belongs to the current process; restarting does not itself prove that reconciliation happened. Temporary files left by interrupted work are not automatically used to restore or reset an account, and files from other transactions are not removed during cleanup.
+
+A persistence failure during runtime accounting, a strategy change or final settlement is reported as an error after all runtime workers have shut down and results in a nonzero process exit status. It is never reported as a successful account save.
+
 ## Promoted models
 
 `paper.modelDefinition` may point to a registered model definition. Sentum requires that model to have reached the `paper` promotion stage in `log/models.sqlite3`; otherwise startup fails closed. When accepted, the model supplies its strategy, symbol and risk-configuration path.
