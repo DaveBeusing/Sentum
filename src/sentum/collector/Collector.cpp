@@ -390,4 +390,8 @@ void Collector::run() {
     running.store(false, std::memory_order_release);
     producer_stopped.store(true, std::memory_order_release);
     queue_cv.notify_all();
+    // A joined producer's thread id can be reused while its writer still
+    // drains. Clear callback identity before this thread can be recycled.
+    std::lock_guard<std::mutex> lock(lifecycle_mutex);
+    ws_worker_id = {};
 }

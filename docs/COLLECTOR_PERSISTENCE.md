@@ -43,6 +43,18 @@ the retained failure after cleanup through `rethrow_persistence_failure()`. A fa
 collector cannot be restarted automatically. Neither a zero queue depth nor a joined
 writer can turn that failure into successful shutdown evidence.
 
+The runtime coordinator observes the terminal failure, stops the run and joins the
+trader, market producer, database writer and scanner before reporting failure to the
+caller. Shutdown also checks storage after joining: a write that first fails during
+the drain cannot be reported as a successful stop. Existing trader and paper-account
+failure diagnostics retain their priority; the collector failure and its unrecovered
+count are appended when failures occur together. The Paper entry point consequently
+returns a failure exit status after cleanup.
+
+The start guard checks the terminal latch again after waiting for any previous
+producer and writer to join. A concurrent restart cannot pass an early healthy check
+and replace the old worker after that worker has latched a write failure.
+
 This is bounded in-process retention, not a durable recovery journal. On owner
 destruction or process exit, accepted but uncommitted candles cannot be recovered from
 this queue. The final `unrecovered` count and failure diagnostic explicitly report that
@@ -78,6 +90,15 @@ persisted` for a successful drain. Overflow and post-failure refusals were never
 accepted and are reported separately. Runtime health is degraded while retrying;
 terminal persistence failure stops the run and remains an error after cleanup.
 
+Runtime status also exposes `persistence_healthy` and
+`entries_blocked_by_persistence`. New entries require healthy persistence at the
+decision boundary, independently of stream freshness. During a retry, existing
+positions can still be managed on valid fresh prices. Operator status is `DEGRADED`
+while retrying and `HALTED` for terminal failure; `persistence.write_failure` is a
+warning or critical alert respectively. The browser shows candle persistence health
+separately from socket and market freshness. A live collector with no pending writes
+does not claim `drained`: that field certifies completed shutdown only.
+
 ## Verification
 
 `collector_persistence_tests` uses real local SQLite transactions and triggers. It
@@ -88,3 +109,11 @@ accounting. A failed collector retains its batch and exact unrecovered count, re
 new intake and refuses restart. The regression runs in Release and the sanitizer
 build graph. The runtime qualification runner also requires it for `all-faults` and
 `persistence-write-failure` evidence.
+
+`market_stream_recovery_tests` additionally drives the production collector through a
+verified local TLS WebSocket into a SQLite trigger rejection. It verifies transport
+cancellation, no restart, the retained canonical batch, exact unrecovered accounting,
+coordinator failure propagation and complete cleanup. A controlled SQLite statement
+gate exercises failure first latched during shutdown and a concurrent restart while
+the previous writer is retrying. These fixtures also verify that simultaneous trader,
+account and collector diagnostics survive shutdown. No external exchange is used.

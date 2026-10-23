@@ -52,6 +52,8 @@ private:
     std::exception_ptr paper_account_error_;
     // Written by the trader worker; inspected only after that worker is joined.
     std::exception_ptr trader_error_;
+    // Written by the coordinator; shutdown rechecks storage after joining it.
+    std::exception_ptr collector_error_;
 
     std::unique_ptr<Database> db;
     std::unique_ptr<MarketDataStore> market_store;

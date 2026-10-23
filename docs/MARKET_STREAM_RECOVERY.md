@@ -44,7 +44,7 @@ Protocol field meanings follow the [Binance Spot WebSocket Streams specification
 
 ## Decision and position behavior
 
-New Paper entries require a fresh collector and a fresh per-symbol price stream. An entry-readiness guard is evaluated at the trading decision; the one-second dashboard refresh is not the authority for enabling entries. Operator pause remains independent and is never cleared automatically by a reconnect.
+New Paper entries require a fresh collector, a fresh per-symbol price stream and healthy collector persistence. An entry-readiness guard is evaluated at the trading decision; the one-second dashboard refresh is not the authority for enabling entries. Operator pause remains independent and is never cleared automatically by a reconnect.
 
 An existing simulated position remains open during an outage. The engine does not invent a fill, close at a cached quote, or reset strategy/position ownership merely because the transport reconnects. It resumes stop, target and holding-time evaluation on a fresh valid price. A stop crossed during the gap is filled using that resumed simulated market price under the existing spread/slippage model; the configured stop price is not a guaranteed execution price. Risk exits remain available from fresh per-symbol prices while the collector is still unavailable for new entries.
 
@@ -55,6 +55,8 @@ Public-stream recovery also applies to the client used by Testnet. It updates pu
 Paper publishes `collector_market_stream` and, when a trader exists, `price_market_stream`. Aggregate `market_data_connected` and `market_data_fresh` require both relevant streams. `entries_blocked_by_market_data` records the entry guard; `last_market_event_age_ms` is the worst relevant event age or `-1` when a required source has no valid event.
 
 The existing operational policy reports `DEGRADED` for disconnected data and for an open-but-stale stream. The browser shows socket connectivity and freshness separately. The alert policy emits `market.stale` for a connected stream without current valid events. Runtime process health, socket health and data freshness are deliberately separate measurements.
+
+`collector_persistence` reports write status and accepted/committed/unrecovered counts independently of transport state. Retryable storage failure blocks new entries until the retained batch commits. Terminal storage failure cancels market intake and stops the run; after all workers join, shutdown retains error health and propagates the storage failure to the caller. See [Collector persistence and failure accounting](COLLECTOR_PERSISTENCE.md) for the retry and retention contract.
 
 ## Qualification
 
@@ -70,7 +72,10 @@ The existing operational policy reports `DEGRADED` for disconnected data and for
 - invalid/old/extreme event timestamps and invalid freshness configuration;
 - blocked new entries during collector unavailability;
 - an open simulated position surviving an outage and resuming its stop on a fresh gap price;
-- operator degraded status and stale-data alerts.
+- operator degraded status and stale-data alerts;
+- an actual TLS-delivered candle rejected by SQLite stopping its transport and coordinator with exact retained failure accounting;
+- storage failure during shutdown preserving all finalization diagnostics;
+- a concurrent restart waiting for a retrying writer and rejecting the failure latched before that writer joins.
 
 The `market-data-reconnect` runtime-qualification scenario now closes a real local TLS transport, observes disconnected health, reconnects the same `Collector`, and verifies all 192 received candles in SQLite. It no longer substitutes two manually constructed persistence writers for a network reconnect. The new tests are part of Release CTest and the existing sanitizer dependency graph. They make no credentialed exchange request and do not establish live-exchange soak evidence.
 

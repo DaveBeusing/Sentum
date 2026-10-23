@@ -50,6 +50,8 @@ inline OperationalStatus derive_operational_status(const nlohmann::json& snapsho
 	const bool market_connected = safety_bool(snapshot, "market_data_connected");
 	const auto perf = snapshot.value("performance", nlohmann::json::object());
 	const auto pressure = safety_text(perf, "queue_pressure", "normal");
+	const auto persistence = snapshot.value("collector_persistence", nlohmann::json::object());
+	const auto persistence_status = safety_text(persistence, "status");
 
 	if (health == "stopped") {
 		OperationalStatus result;
@@ -85,12 +87,22 @@ inline OperationalStatus derive_operational_status(const nlohmann::json& snapsho
 		return {OperationalState::Halted, "HALTED", "Kill switch active", "Inspect MARKET and SYSTEM; do not resume until the halt cause is resolved"};
 	}
 
+	if (persistence_status == "FAILED") {
+		return {OperationalState::Halted, "HALTED", "Collector persistence failed",
+			"Inspect SQLite diagnostics and unrecovered candles; the failed run cannot resume automatically"};
+	}
+
 	if (health != "healthy" && health != "starting") {
 		return {OperationalState::Halted, "HALTED", "Runtime health: " + health, "Inspect SYSTEM; trading must remain fail-closed"};
 	}
 
 	if (health == "starting") {
 		return {OperationalState::Starting, "STARTING", "Runtime starting", "Observe SYSTEM until runtime is healthy"};
+	}
+
+	if (persistence_status == "RETRYING") {
+		return {OperationalState::Degraded, "DEGRADED", "Collector persistence retrying",
+			"New entries are blocked while the retained batch waits for a successful commit"};
 	}
 
 	if (!market_connected) {

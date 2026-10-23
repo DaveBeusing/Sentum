@@ -4,6 +4,24 @@
 #include <sentum/collector/Collector.hpp>
 
 struct MarketStreamTestAccess {
+    static bool joining(Collector& collector) {
+        std::lock_guard<std::mutex> lock(collector.lifecycle_mutex);
+        return collector.joining;
+    }
+
+    static bool joined(Collector& collector) {
+        std::lock_guard<std::mutex> lock(collector.lifecycle_mutex);
+        return !collector.ws_thread.joinable() && !collector.writer_thread.joinable();
+    }
+
+    static bool retained_canonical_batch(const Collector& collector, std::size_t expected) {
+        if (collector.pending_batch.size() != expected) return false;
+        for (const auto& item : collector.pending_batch) {
+            if (item.symbol != &collector.canonical_symbols.front()) return false;
+        }
+        return true;
+    }
+
     static void before_connect(Collector& collector, std::function<void()> callback) {
         std::lock_guard<std::mutex> lock(collector.lifecycle_mutex);
         if (collector.ws_thread.joinable()) throw std::logic_error("Configure fixture before starting worker");
