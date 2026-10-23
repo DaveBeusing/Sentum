@@ -3,6 +3,7 @@
 #include <sentum/dashboard/DashboardState.hpp>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -15,6 +16,29 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+
+namespace sentum::paper {
+struct PaperAccountTestAccess {
+    static inline int sync_calls = 0;
+    static inline int replace_calls = 0;
+
+    static int fail_replacement_sync(int descriptor) {
+        if (++sync_calls == 3) { errno = EIO; return -1; }
+        return ::fsync(descriptor);
+    }
+
+    static int fail_restore(int from_fd, const char* from, int to_fd, const char* to) {
+        if (++replace_calls == 2) { errno = EACCES; return -1; }
+        return ::renameat(from_fd, from, to_fd, to);
+    }
+
+    static void uncertain_restore(PaperAccount& account) {
+        sync_calls = replace_calls = 0;
+        account.file_operations_.sync = fail_replacement_sync;
+        account.file_operations_.replace = fail_restore;
+    }
+};
+} // namespace sentum::paper
 
 namespace {
 
@@ -102,6 +126,11 @@ struct ExecutionEngineTestAccess {
     }
 
     static void mark_running(ExecutionEngine& engine) { engine.running.store(true); }
+
+    static void fail_worker_and_account_restore(ExecutionEngine& engine, const std::string& message) {
+        engine.trader_error_ = std::make_exception_ptr(TradeHistoryRepository::FinalizationError(message, true, false));
+        sentum::paper::PaperAccountTestAccess::uncertain_restore(*engine.paper_account);
+    }
 };
 
 namespace {
@@ -267,6 +296,54 @@ void test_control_change_account_limit_survives_shutdown() {
             "shutdown cleared the account-limit error");
 }
 
+void test_worker_and_account_recovery_errors_remain_visible_together() {
+    TemporaryDirectory directory;
+    const auto path = directory.path / "account.json";
+    const auto worker_error = "Confirmed close retained in " + (directory.path / "trade-recovery.sqlite3").string();
+    std::string diagnostic;
+    std::string original;
+    std::atomic<int> exited{0};
+    {
+        ExecutionEngine engine;
+        ExecutionEngineTestAccess::prepare(engine, path, exited);
+        original = read_file(path);
+        ExecutionEngineTestAccess::fail_worker_and_account_restore(engine, worker_error);
+        std::string progress_detail;
+        bool retained_worker_type = false;
+        try {
+            engine.stop([&](std::size_t step, std::size_t, const std::string& detail) {
+                if (step == 6) progress_detail = detail;
+            });
+        } catch (const TradeHistoryRepository::FinalizationError& error) {
+            retained_worker_type = std::string(error.what()) == worker_error && error.recovery_recorded();
+        }
+        require(retained_worker_type, "combined failure replaced the original worker exception type or identity");
+        require(exited.load() == 3 && ExecutionEngineTestAccess::released(engine),
+                "combined worker/account failure retained runtime workers");
+        const auto status = sentum::dashboard::DashboardState::global().snapshot();
+        require(status.at("health") == "error", "combined failure was reported as healthy");
+        diagnostic = status.at("last_error").get<std::string>();
+        require(diagnostic.find(worker_error) != std::string::npos,
+                "combined diagnostic lost the original trade recovery evidence");
+        require(diagnostic.find("recovery durability is uncertain") != std::string::npos &&
+                diagnostic.find("previous state retained at ") != std::string::npos,
+                "worker failure concealed the account uncertainty and retained-file diagnostic");
+        require(progress_detail.find(diagnostic) != std::string::npos,
+                "shutdown progress omitted the combined recovery diagnostic");
+    }
+    require(read_file("log/core.log").find(diagnostic) != std::string::npos,
+            "combined recovery diagnostic was not flushed to the runtime log");
+    bool retained_previous = false;
+    for (const auto& entry : std::filesystem::directory_iterator(directory.path)) {
+        if (entry.path().filename().string().find(".sentum-paper-") == 0) {
+            retained_previous = read_file(entry.path()) == original;
+            require(diagnostic.find(entry.path().string()) != std::string::npos,
+                    "diagnostic did not identify the retained previous account file");
+        }
+    }
+    require(retained_previous, "combined failure did not retain the original account for reconciliation");
+}
+
 } // namespace
 
 int main() {
@@ -277,6 +354,7 @@ int main() {
         test_failed_persistence_still_stops_all_workers();
         test_control_change_failure_survives_shutdown();
         test_control_change_account_limit_survives_shutdown();
+        test_worker_and_account_recovery_errors_remain_visible_together();
         test_destructor_contains_persistence_failure_after_cleanup();
         std::cout << "paper_account_runtime_tests passed\n";
         return 0;

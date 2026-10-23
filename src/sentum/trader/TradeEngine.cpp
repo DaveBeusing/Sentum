@@ -52,6 +52,7 @@ void TradeEngine::enqueue_price(double price) {
     event.close = price;
     {
         std::lock_guard<std::mutex> lock(queue_mutex);
+        if (stop_requested_.load(std::memory_order_acquire)) return;
         if (price_queue.size() >= max_queue_size) price_queue.pop_front();
         price_queue.push_back(std::move(event));
     }
@@ -61,46 +62,78 @@ void TradeEngine::enqueue_price(double price) {
 void TradeEngine::stop() {
     {
         std::lock_guard<std::mutex> lock(queue_mutex);
-        if (!running.exchange(false)) return;
+        stop_requested_.store(true, std::memory_order_release);
+        running.store(false, std::memory_order_release);
     }
-    if (price_stream) price_stream->stop();
-    if (execution_venue) execution_venue->stop();
     queue_cv.notify_all();
 }
 
+bool TradeEngine::try_stop_when_flat() {
+    // Serializing the stop request with decisions prevents an entry between
+    // observing a flat position and cancelling a worker for reconfiguration.
+    std::lock_guard<std::mutex> lock(state_mutex);
+    if (position.open) return false;
+    stop();
+    return true;
+}
+
 void TradeEngine::run() {
-    if (!isPaperTrading) throw std::runtime_error("Live trading is disabled until order execution is production-ready");
-    if (!api) throw std::runtime_error("Network run requires BinanceRestClient");
-    if (running.exchange(true)) return;
-    engine_logger.start();
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        if (run_started_ || stop_requested_.load(std::memory_order_acquire)) return;
+        run_started_ = true;
+        running.store(true, std::memory_order_release);
+    }
     try {
-        if (!runtime_configured_) risk = load_risk_config("config/risk.json");
-        initialize_components();
-        sentum::dashboard::DashboardState::global().merge({
-            {"strategy_name", strategy->name()}, {"entries_paused", sentum::runtime::RuntimeControl::global().entries_paused()}
-        });
-        price_stream = std::make_unique<BinanceWebsocketClient>(symbol);
-        price_stream->set_on_price([this](double price) { enqueue_price(price); });
-        price_stream->start();
-        while (running.load()) {
-            MarketEvent event;
-            {
-                std::unique_lock<std::mutex> lock(queue_mutex);
-                queue_cv.wait(lock, [this] { return !running.load() || !price_queue.empty(); });
-                if (!running.load() && price_queue.empty()) break;
-                event = std::move(price_queue.front());
-                price_queue.pop_front();
-            }
-            process_event(event);
+        if (!isPaperTrading) throw std::runtime_error("Live trading is disabled until order execution is production-ready");
+        if (!api) throw std::runtime_error("Network run requires BinanceRestClient");
+        engine_logger.start();
+        {
+            std::lock_guard<std::mutex> lock(state_mutex);
+            if (!runtime_configured_) risk = load_risk_config("config/risk.json");
+            initialize_components();
+            sentum::dashboard::DashboardState::global().merge({
+                {"strategy_name", strategy->name()}, {"entries_paused", sentum::runtime::RuntimeControl::global().entries_paused()}
+            });
         }
+        {
+            // The stream is owned by this worker. Cancellation only signals it;
+            // no other thread can access partially initialized runtime objects.
+            std::lock_guard<std::mutex> lock(queue_mutex);
+            if (!stop_requested_.load(std::memory_order_acquire)) {
+                price_stream = std::make_unique<BinanceWebsocketClient>(symbol);
+                price_stream->set_on_price([this](double price) { enqueue_price(price); });
+                price_stream->start();
+            }
+        }
+        run_event_loop();
     } catch (...) {
         stop();
+        if (price_stream) price_stream->stop();
+        if (execution_venue) execution_venue->stop();
         engine_logger.stop();
         throw;
     }
+    stop();
     if (price_stream) price_stream->stop();
     if (execution_venue) execution_venue->stop();
     engine_logger.stop();
+}
+
+void TradeEngine::run_event_loop() {
+    while (true) {
+        MarketEvent event;
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            queue_cv.wait(lock, [this] {
+                return stop_requested_.load(std::memory_order_acquire) || !price_queue.empty();
+            });
+            if (stop_requested_.load(std::memory_order_acquire)) return;
+            event = std::move(price_queue.front());
+            price_queue.pop_front();
+        }
+        process_event(event);
+    }
 }
 
 sentum::order::Snapshot TradeEngine::execute(sentum::order::Side side, double quantity, double price,
@@ -143,6 +176,7 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
                                      const std::string& source, const MarketEvent* event) {
     std::lock_guard<std::mutex> lock(state_mutex);
     if (finalization_error_) std::rethrow_exception(finalization_error_);
+    if (stop_requested_.load(std::memory_order_acquire)) return TradeAction::NONE;
     auto& dashboard = sentum::dashboard::DashboardState::global();
     auto& control = sentum::runtime::RuntimeControl::global();
 

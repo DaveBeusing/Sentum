@@ -51,6 +51,7 @@ bool ExecutionEngine::request_stop() {
 void ExecutionEngine::start() {
     if (running.load()) return;
     paper_account_error_ = nullptr;
+    trader_error_ = nullptr;
     init();
     running.store(true);
     sentum::dashboard::DashboardState::global().set("health", "healthy");
@@ -76,12 +77,12 @@ void ExecutionEngine::stop(ShutdownProgressCallback progress) {
         stop_trader();
     } catch (const std::exception& error) {
         finalization_error = std::current_exception();
-        logger.log("[ERROR] Final paper account persistence: " + std::string(error.what()));
+        logger.log("[ERROR] Trader finalization: " + std::string(error.what()));
         sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", error.what()}});
     } catch (...) {
         finalization_error = std::current_exception();
-        logger.log("[ERROR] Final paper account persistence failed");
-        sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", "Final paper account persistence failed"}});
+        logger.log("[ERROR] Trader finalization failed");
+        sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", "Trader finalization failed"}});
     }
 
     report(2, "Disconnecting market stream and flushing database writer");
@@ -89,7 +90,8 @@ void ExecutionEngine::stop(ShutdownProgressCallback progress) {
 
     report(3, "Joining runtime coordinator");
     if (main_thread.joinable() && main_thread.get_id() != std::this_thread::get_id()) main_thread.join();
-    if (paper_account_error_) finalization_error = paper_account_error_;
+    if (trader_error_) finalization_error = trader_error_;
+    else if (paper_account_error_) finalization_error = paper_account_error_;
 
     report(4, "Joining scanner worker");
     if (scanner_thread.joinable() && scanner_thread.get_id() != std::this_thread::get_id()) scanner_thread.join();
@@ -101,13 +103,22 @@ void ExecutionEngine::stop(ShutdownProgressCallback progress) {
         {"market_data_connected", false}
     });
 
+    std::string finalization_diagnostic;
     if (finalization_error) {
         try { std::rethrow_exception(finalization_error); }
         catch (const std::exception& error) {
-            sentum::dashboard::DashboardState::global().set("last_error", error.what());
-        } catch (...) {}
+            finalization_diagnostic = error.what();
+        } catch (...) { finalization_diagnostic = "Unknown trader finalization failure"; }
+        if (trader_error_ && paper_account_error_) {
+            try { std::rethrow_exception(paper_account_error_); }
+            catch (const std::exception& error) {
+                finalization_diagnostic += "; paper account settlement also failed: " + std::string(error.what());
+            } catch (...) { finalization_diagnostic += "; paper account settlement also failed with an unknown error"; }
+        }
+        sentum::dashboard::DashboardState::global().set("last_error", finalization_diagnostic);
+        logger.log("[ERROR] Shutdown finalization: " + finalization_diagnostic);
     }
-    report(6, finalization_error ? "Shutdown complete; paper account persistence failed" : "Shutdown complete");
+    report(6, finalization_error ? "Shutdown complete; " + finalization_diagnostic : "Shutdown complete");
     if (finalization_error) std::rethrow_exception(finalization_error);
 }
 
@@ -175,12 +186,11 @@ void ExecutionEngine::apply_runtime_control() {
     const auto generation = control.generation();
     if (generation == applied_control_generation_) return;
 
-    bool position_open = false;
-    {
-        std::lock_guard<std::mutex> lock(trader_mutex);
-        position_open = trader && trader->get_current_position().open;
-    }
-    if (position_open) {
+    // Scanner starts and coordinator replacement share one ownership transaction.
+    // Cancellation is latched before joining, including before the worker starts.
+    std::lock_guard<std::mutex> lock(trader_mutex);
+    if (!running.load(std::memory_order_acquire)) return;
+    if (trader && !trader->try_stop_when_flat()) {
         sentum::dashboard::DashboardState::global().set("control_pending", "waiting_for_position_exit");
         return;
     }
@@ -196,8 +206,8 @@ void ExecutionEngine::apply_runtime_control() {
     std::string restart_symbol;
     { std::lock_guard<std::mutex> lock(symbol_mutex); restart_symbol = current_symbol; }
     if (!auto_symbol && !manual_symbol.empty()) restart_symbol = manual_symbol;
-    if (trader_active.load(std::memory_order_acquire)) stop_trader();
-    if (!restart_symbol.empty()) start_trader_for(restart_symbol);
+    stop_trader_locked();
+    if (!restart_symbol.empty()) start_trader_for_locked(restart_symbol);
     applied_control_generation_ = generation;
 }
 
@@ -305,7 +315,6 @@ void ExecutionEngine::monitor_scanner() {
                 } else symbol.swap(pending_scanner_symbol);
             }
             if (symbol.empty() || trader_active.load()) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); continue; }
-            { std::lock_guard<std::mutex> lock(symbol_mutex); current_symbol = symbol; }
             start_trader_for(symbol);
         }
     } catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::monitor_scanner: " + std::string(e.what())); request_stop(); }
@@ -313,8 +322,16 @@ void ExecutionEngine::monitor_scanner() {
 
 void ExecutionEngine::start_trader_for(const std::string& symbol) {
     std::lock_guard<std::mutex> lock(trader_mutex);
+    start_trader_for_locked(symbol);
+}
+
+void ExecutionEngine::start_trader_for_locked(const std::string& symbol) {
     if (!running.load(std::memory_order_acquire)) return;
-    if (trader_thread.joinable()) trader_thread.join();
+    if (trader_active.load(std::memory_order_acquire)) return;
+    // A naturally completed worker still owns final profit and must be settled
+    // before its instance is replaced. Never join a worker without cancellation.
+    if (trader || trader_thread.joinable()) stop_trader_locked();
+    if (!running.load(std::memory_order_acquire)) return;
     auto risk = load_risk_config(config.paperRiskConfigPath);
     if (paper_account) risk.max_total_capital = paper_account->equity();
     auto strategy = sentum::strategy::StrategyFactory::create(sentum::runtime::RuntimeControl::global().strategy());
@@ -334,15 +351,38 @@ void ExecutionEngine::start_trader_for(const std::string& symbol) {
             {"max_data_age_ms", risk.max_data_age_ms}
         }}
     });
-    trader_thread = std::thread([this, trader_instance] {
-        try { trader_instance->run(); }
-        catch (const std::exception& e) { logger.log("[ERROR] ExecutionEngine::start_trader_for: " + std::string(e.what())); }
+    try {
+        trader_thread = std::thread([this, trader_instance] {
+            try {
+                if (!running.load(std::memory_order_acquire)) trader_instance->stop();
+                trader_instance->run();
+            } catch (const std::exception& e) {
+                trader_error_ = std::current_exception();
+                logger.log("[ERROR] Paper trader: " + std::string(e.what()));
+                sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", e.what()}});
+                request_stop();
+            } catch (...) {
+                trader_error_ = std::current_exception();
+                logger.log("[ERROR] Paper trader failed");
+                sentum::dashboard::DashboardState::global().merge({{"health", "error"}, {"last_error", "Paper trader failed"}});
+                request_stop();
+            }
+            trader_active.store(false, std::memory_order_release);
+        });
+    } catch (...) {
         trader_active.store(false, std::memory_order_release);
-    });
+        trader.reset();
+        throw;
+    }
+    { std::lock_guard<std::mutex> lock(symbol_mutex); current_symbol = symbol; }
 }
 
 void ExecutionEngine::stop_trader() {
     std::lock_guard<std::mutex> lock(trader_mutex);
+    stop_trader_locked();
+}
+
+void ExecutionEngine::stop_trader_locked() {
     if (trader) trader->stop();
     if (trader_thread.joinable() && trader_thread.get_id() != std::this_thread::get_id()) trader_thread.join();
 
@@ -360,5 +400,6 @@ void ExecutionEngine::stop_trader() {
     }
     trader.reset();
     trader_active.store(false, std::memory_order_release);
+    if (trader_error_) std::rethrow_exception(trader_error_);
     if (persistence_error) std::rethrow_exception(persistence_error);
 }

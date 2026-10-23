@@ -113,6 +113,12 @@ if(BUILD_TESTING)
 	set_tests_properties(websocket_lifecycle PROPERTIES TIMEOUT 60)
 	add_dependencies(sentum_runtime_lifecycle_tests sentum_websocket_lifecycle_tests)
 
+	add_executable(sentum_trader_lifecycle_tests tests/trader_lifecycle_tests.cpp)
+	target_link_libraries(sentum_trader_lifecycle_tests PRIVATE sentum_core)
+	add_test(NAME trader_lifecycle COMMAND sentum_trader_lifecycle_tests)
+	set_tests_properties(trader_lifecycle PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_trader_lifecycle_tests)
+
 	add_executable(sentum_trade_finalization_tests tests/trade_finalization_tests.cpp)
 	target_link_libraries(sentum_trade_finalization_tests PRIVATE sentum_core)
 	add_test(NAME trade_finalization COMMAND sentum_trade_finalization_tests)

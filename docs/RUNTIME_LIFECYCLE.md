@@ -44,6 +44,20 @@ The CI dashboard smoke adds a second containment layer: every HTTP request has a
 
 ## Queue shutdown policy
 
+### Paper trader ownership and replacement
+
+The coordinator and scanner share a single trader ownership mutex. Runtime-control changes hold that mutex across the flat-position check, cancellation, worker join, final account settlement and replacement launch. Scanner requests recheck the active trader while holding the same mutex; a rejected request cannot change the current symbol. A completed worker is stopped and joined, and its final realized profit is settled, before its instance is replaced.
+
+Flat-only cancellation is serialized with strategy decisions. If an entry completes while a strategy or symbol change is pending, replacement remains deferred until that position exits. If cancellation wins while the trader is flat, subsequent queued decisions cannot create a new position on that instance.
+
+Each `TradeEngine` has one worker lifetime. Its stop request remains latched even when cancellation happens before `run()` begins, and another `run()` call cannot restart that instance. `stop()` signals the queue predicate under its mutex and wakes the worker. The worker owns creation and teardown of its price stream, execution venue and logger; cancellation never races a second thread against partially initialized resources. Pending price decisions are discarded after cancellation, and the owner joins the worker before reading final totals or destroying it.
+
+A trader worker exception marks runtime health as `error`, stops the coordinator and scanner, and prevents automatic replacement. Shutdown still joins the failed worker and completes account settlement and the remaining subsystem cleanup. It then reports the retained worker exception instead of publishing successful completion. This behavior does not provide restart reconciliation for an open position; recovery and durable trade-finalization rules are separate contracts.
+
+If account settlement also fails, the original trader exception remains the propagated failure. The final runtime diagnostic, shutdown progress and core log include both failures, preserving any account uncertainty warning and retained recovery-file path.
+
+`trader_lifecycle_tests` exercises early cancellation before the real worker entry point, cancellation concurrent with an entry decision, idle queue wake-up, scanner contention during active ownership and replacement, requested strategy/symbol identity, partial-start failure propagation, and shutdown during replacement. Gated local workers control the relevant ordering; no exchange connection is required.
+
 ### Collector persistence
 
 The collector rejects new external intake by clearing `running`, then stops and joins the WebSocket producer. The persistence writer has a separate producer-completion state and is not allowed to exit merely because `running` became false. It remains alive until the producer has published completion and the queue is empty. This prevents a final WebSocket callback from enqueueing a kline after the persistence writer has already exited.

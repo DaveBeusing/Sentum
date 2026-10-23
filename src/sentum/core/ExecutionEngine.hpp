@@ -50,6 +50,8 @@ private:
     std::string pending_scanner_symbol;
     // Updates hold trader_mutex; shutdown inspects this after joining the coordinator.
     std::exception_ptr paper_account_error_;
+    // Written by the trader worker; inspected only after that worker is joined.
+    std::exception_ptr trader_error_;
 
     std::unique_ptr<Database> db;
     std::unique_ptr<MarketDataStore> market_store;
@@ -79,6 +81,8 @@ private:
     void run_main_loop();
     void monitor_scanner();
     void start_trader_for(const std::string& symbol);
+    void start_trader_for_locked(const std::string& symbol);
     void stop_trader();
+    void stop_trader_locked();
     void apply_runtime_control();
 };
