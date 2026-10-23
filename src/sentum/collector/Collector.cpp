@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <mutex>
 #include <stdexcept>
@@ -64,6 +65,69 @@ double Collector::drop_rate() const {
     return total == 0 ? 0.0 : static_cast<double>(rejected) / static_cast<double>(total);
 }
 
+bool Collector::persistence_failed() const noexcept {
+    return persistence_state.load(std::memory_order_acquire) == PersistenceState::Failed;
+}
+
+bool Collector::persistence_healthy() const noexcept {
+    return persistence_state.load(std::memory_order_acquire) == PersistenceState::Healthy;
+}
+
+nlohmann::json Collector::persistence_snapshot() const {
+    std::lock_guard<std::mutex> lock(persistence_mutex);
+    const auto state = persistence_state.load(std::memory_order_acquire);
+    const auto committed = persisted.load(std::memory_order_acquire);
+    // Queue publication can precede the producer's diagnostic increment. Every
+    // committed item was admitted, even when that counter update is still pending.
+    const auto accepted = std::max(enqueued.load(std::memory_order_acquire), committed);
+    const auto unpersisted = accepted > committed ? accepted - committed : 0;
+    const bool writer_active = persistence_writer_active.load(std::memory_order_acquire);
+    return {
+        {"status", state == PersistenceState::Failed ? "FAILED" : state == PersistenceState::Retrying ? "RETRYING" : "HEALTHY"},
+        {"accepted", accepted}, {"persisted", committed}, {"unpersisted", unpersisted},
+        {"unrecovered", state == PersistenceState::Failed ? unpersisted : 0},
+        {"write_failures", persistence_write_failures.load(std::memory_order_relaxed)},
+        {"retries", persistence_retries.load(std::memory_order_relaxed)},
+        {"rejected_after_failure", persistence_rejected.load(std::memory_order_relaxed)},
+        {"queue_overflow_drops", dropped.load(std::memory_order_relaxed)},
+        {"last_sqlite_code", persistence_sqlite_code}, {"last_rollback_code", persistence_rollback_code},
+        {"failure_reason", persistence_failure_reason}, {"writer_active", writer_active},
+        {"drained", state == PersistenceState::Healthy && unpersisted == 0 && !writer_active &&
+                    !running.load(std::memory_order_acquire) && producer_stopped.load(std::memory_order_acquire)}
+    };
+}
+
+void Collector::rethrow_persistence_failure() const {
+    if (!persistence_failed()) return;
+    const auto snapshot = persistence_snapshot();
+    throw std::runtime_error("Collector persistence failed: " + snapshot.at("failure_reason").get<std::string>() +
+                             "; sqlite_code=" + std::to_string(snapshot.at("last_sqlite_code").get<int>()) +
+                             "; rollback_code=" + std::to_string(snapshot.at("last_rollback_code").get<int>()) +
+                             "; accepted=" + std::to_string(snapshot.at("accepted").get<std::uint64_t>()) +
+                             "; unrecovered=" + std::to_string(snapshot.at("unrecovered").get<std::uint64_t>()));
+}
+
+void Collector::request_transport_stop() {
+    if (!impl->io_initialized.load(std::memory_order_acquire)) return;
+    std::lock_guard<std::mutex> lock(impl->mutex);
+    impl->websocket.stop_perpetual();
+    impl->websocket.stop();
+}
+
+void Collector::fail_persistence(int sqlite_code, int rollback_code, const char* reason) noexcept {
+    {
+        std::lock_guard<std::mutex> lock(persistence_mutex);
+        persistence_sqlite_code = sqlite_code;
+        persistence_rollback_code = rollback_code;
+        persistence_failure_reason = reason;
+        persistence_state.store(PersistenceState::Failed, std::memory_order_release);
+    }
+    running.store(false, std::memory_order_release);
+    try { request_transport_stop(); } catch (...) {}
+    queue_cv.notify_all();
+    try { logger.log("Collector persistence failed: " + persistence_snapshot().dump()); } catch (...) {}
+}
+
 void Collector::update_queue_pressure(std::size_t depth, bool saturated) noexcept {
     auto& perf = sentum::market::RuntimePerformanceMetrics::global();
     perf.observe_queue_depth(depth);
@@ -86,6 +150,7 @@ void Collector::update_queue_pressure(std::size_t depth, bool saturated) noexcep
 }
 
 void Collector::start() {
+    rethrow_persistence_failure();
     if (running.exchange(true, std::memory_order_acq_rel)) return;
     producer_stopped.store(false, std::memory_order_release);
     queue_pressure_level_.store(static_cast<std::uint8_t>(sentum::market::QueuePressureLevel::Normal), std::memory_order_relaxed);
@@ -136,11 +201,16 @@ void Collector::stop() {
     update_queue_pressure(queue.size_approx(), false);
     logger.log("Collector stopped: enqueued=" + std::to_string(enqueued.load()) +
                " dropped=" + std::to_string(dropped.load()) +
-               " drop_rate=" + std::to_string(drop_rate()));
+               " drop_rate=" + std::to_string(drop_rate()) +
+               " persistence=" + persistence_snapshot().dump());
     logger.stop();
 }
 
 bool Collector::try_enqueue(const std::string* symbol, Kline kline) {
+    if (persistence_failed()) {
+        persistence_rejected.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
     const auto result = queue.try_push_observed(KlineBatchItem{symbol, std::move(kline)});
     if (!result.accepted) {
         dropped.fetch_add(1, std::memory_order_relaxed);
@@ -158,8 +228,19 @@ bool Collector::try_enqueue(const std::string* symbol, Kline kline) {
 }
 
 void Collector::writer_loop() {
+    persistence_writer_active.store(true, std::memory_order_release);
+    try {
+        writer_loop_impl();
+    } catch (...) {
+        persistence_write_failures.fetch_add(1, std::memory_order_relaxed);
+        fail_persistence(SQLITE_INTERNAL, SQLITE_OK, "Unexpected persistence writer failure");
+    }
+    persistence_writer_active.store(false, std::memory_order_release);
+}
+
+void Collector::writer_loop_impl() {
     using namespace std::chrono_literals;
-    std::vector<KlineBatchItem> batch;
+    auto& batch = pending_batch;
     batch.reserve(batch_size);
     auto last_metrics = std::chrono::steady_clock::now();
 
@@ -178,9 +259,45 @@ void Collector::writer_loop() {
         }
 
         update_queue_pressure(queue.size_approx(), false);
-        {
-            sentum::market::ScopedLatency latency(sentum::market::RuntimePerformanceMetrics::global().sqlite_batch_latency);
-            if (!db_ref.save_kline_batch(batch)) logger.log("SQLite batch UPSERT failed, size=" + std::to_string(batch.size()));
+        const auto retry_deadline = std::chrono::steady_clock::now() + persistence_retry_budget;
+        auto retry_delay = 25ms;
+        for (std::size_t attempt = 0; ; ++attempt) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                retry_deadline - std::chrono::steady_clock::now());
+            const int wait_ms = static_cast<int>(std::clamp<std::int64_t>(remaining.count(), 0, persistence_sqlite_wait_ms));
+            KlineWriteResult result;
+            {
+                sentum::market::ScopedLatency latency(sentum::market::RuntimePerformanceMetrics::global().sqlite_batch_latency);
+                result = db_ref.save_kline_batch_result(batch, wait_ms);
+            }
+            if (result.committed) {
+                persisted.fetch_add(batch.size(), std::memory_order_release);
+                persistence_state.store(PersistenceState::Healthy, std::memory_order_release);
+                break;
+            }
+
+            persistence_write_failures.fetch_add(1, std::memory_order_relaxed);
+            {
+                std::lock_guard<std::mutex> lock(persistence_mutex);
+                persistence_sqlite_code = result.sqlite_code;
+                persistence_rollback_code = result.rollback_code;
+            }
+            const bool exhausted = attempt + 1 >= persistence_max_attempts ||
+                                   std::chrono::steady_clock::now() >= retry_deadline;
+            if (!result.retryable() || exhausted) {
+                fail_persistence(result.sqlite_code, result.rollback_code,
+                    result.rollback_code != SQLITE_OK ? "SQLite transaction rollback failed" :
+                    result.retryable() ? "SQLite contention exceeded the retry budget" : "SQLite write rejected");
+                return;
+            }
+
+            persistence_state.store(PersistenceState::Retrying, std::memory_order_release);
+            persistence_retries.fetch_add(1, std::memory_order_relaxed);
+            std::unique_lock<std::mutex> lock(wait_mutex);
+            queue_cv.wait_until(lock, std::min(retry_deadline, std::chrono::steady_clock::now() + retry_delay), [this] {
+                return !running.load(std::memory_order_acquire) && producer_stopped.load(std::memory_order_acquire);
+            });
+            retry_delay = std::min(retry_delay * 2, 200ms);
         }
         batch.clear();
         if (std::chrono::steady_clock::now() - last_metrics >= 10s) {

@@ -10,6 +10,7 @@ This directory contains the current functional documentation for Sentum. Documen
 - [Execution safety](LIVE_TRADING_SAFETY.md) — supported execution boundaries and operational safety expectations.
 - [Trade finalization and recovery](TRADE_FINALIZATION_RECOVERY.md) — SQLite contention, durable simulated close records and restart recovery.
 - [Trailing-stop risk policy](TRAILING_STOP_RISK.md) — monotonic long-position protection, configuration limits and gap execution behavior.
+- [Collector persistence](COLLECTOR_PERSISTENCE.md) — retained batches, bounded retries, failed shutdown and unrecovered candle accounting.
 
 ## Research
 

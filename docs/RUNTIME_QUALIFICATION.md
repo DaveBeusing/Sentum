@@ -80,7 +80,7 @@ The seed is recorded in every report and controls deterministic Paper input. The
 | `unresolved-order-restart` | Startup reconciliation with an unresolved exchange order latches the kill switch and blocks new submissions. |
 | `balance-mismatch` | `AccountReconciler` detects authoritative account/local quantity divergence and emits unsuccessful reconciliation evidence. |
 | `persistence-pressure` | Real bounded Collector queue saturation, drop accounting, pressure evidence and later drain. |
-| `persistence-write-failure` | Existing durable-delivery persistence failure/restart regression is executed as qualification evidence and must fail closed. |
+| `persistence-write-failure` | Durable-delivery persistence failure/restart and collector SQLite contention, rollback, write-error and unrecovered-accounting regressions execute as qualification evidence and must fail closed. |
 | `dashboard-recovery` | Dashboard partial initialization failure on an occupied port followed by bounded successful recovery and shutdown. |
 | `runtime-restart` | Existing notification-delivery and governed-incident runtime restart regressions verify persisted authoritative state reconstruction. |
 | `kill-switch-recovery` | Automatic recovery remains blocked until the explicit reconciled-resume confirmation is supplied. |
@@ -170,7 +170,7 @@ Incomplete evidence is never converted to PASS.
 
 The persistence-pressure scenario drives the real bounded Collector queue until saturation is reached. Saturation must remain visible as a rejected enqueue and an explicit saturation metric; data is never silently overwritten.
 
-After pressure injection, the queue must drain to zero under the normal persistence writer. Queue high-water, saturation events and drop count are retained in qualification evidence.
+After pressure injection with healthy storage, every accepted candle must commit under the normal persistence writer. A zero queue depth alone does not prove a successful drain. Queue high-water, saturation events and drop count are retained in qualification evidence. The `all-faults` and `persistence-write-failure` commands also run `collector_persistence_tests`, which requires temporary SQLite contention to recover without lost accepted candles and permanent errors to produce a bounded failed stop with exact unrecovered accounting. No expected fault is reported as a healthy drained collector.
 
 ## Execution-truth and recovery invariants
 

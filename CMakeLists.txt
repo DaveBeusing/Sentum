@@ -160,6 +160,12 @@ if(BUILD_TESTING)
 	add_test(NAME market_hot_path COMMAND sentum_market_hot_path_tests)
 	set_tests_properties(market_hot_path PROPERTIES TIMEOUT 60)
 
+	add_executable(sentum_collector_persistence_tests tests/collector_persistence_tests.cpp)
+	target_link_libraries(sentum_collector_persistence_tests PRIVATE sentum_core)
+	add_test(NAME collector_persistence COMMAND sentum_collector_persistence_tests)
+	set_tests_properties(collector_persistence PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_collector_persistence_tests)
+
 	add_executable(sentum_runtime_observability_tests tests/runtime_observability_tests.cpp)
 	target_link_libraries(sentum_runtime_observability_tests PRIVATE sentum_core)
 	add_test(NAME runtime_observability COMMAND sentum_runtime_observability_tests)
@@ -172,6 +178,7 @@ if(BUILD_TESTING)
 		COMMAND sentum_runtime_qualification_scenarios --scenario all-faults --duration-seconds 1 --seed 1
 	)
 	set_tests_properties(runtime_qualification_faults PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_qualification_scenarios sentum_collector_persistence_tests)
 
 	add_executable(sentum_dashboard_snapshot_tests tests/dashboard_snapshot_tests.cpp)
 	target_link_libraries(sentum_dashboard_snapshot_tests PRIVATE sentum_core)
