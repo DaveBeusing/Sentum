@@ -107,6 +107,12 @@ if(BUILD_TESTING)
 	add_test(NAME runtime_lifecycle COMMAND sentum_runtime_lifecycle_tests)
 	set_tests_properties(runtime_lifecycle PROPERTIES TIMEOUT 60)
 
+	add_executable(sentum_websocket_lifecycle_tests tests/websocket_lifecycle_tests.cpp)
+	target_link_libraries(sentum_websocket_lifecycle_tests PRIVATE sentum_core)
+	add_test(NAME websocket_lifecycle COMMAND sentum_websocket_lifecycle_tests)
+	set_tests_properties(websocket_lifecycle PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_websocket_lifecycle_tests)
+
 	add_executable(sentum_tls_client_context_tests tests/tls_client_context_tests.cpp)
 	target_link_libraries(sentum_tls_client_context_tests PRIVATE sentum_core)
 	add_test(NAME tls_client_context COMMAND sentum_tls_client_context_tests)

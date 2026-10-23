@@ -54,6 +54,16 @@ The writer wake predicate follows the same contract: during shutdown it sleeps w
 
 The logger queue is always inspected and swapped while holding its mutex. On stop the worker is explicitly awakened and exits only when the queue is empty. Concurrent producers cannot race an unlocked `std::queue::empty()` check.
 
+## Concrete WebSocket ownership
+
+`BinanceWebsocketClient` and `BinanceUserDataStream` initialize a fresh Asio endpoint synchronously before publishing each worker. Calling `stop()` or destroying either client before `start()` is safe. A stop request remains effective while worker preparation is pending, so delayed preparation cannot create a connection after cancellation.
+
+Start and stop serialize thread ownership. The owner joins a previous worker before replacing its endpoint; repeated and competing stop calls converge on the same joined state. Joining releases the lifecycle mutex so a message callback can call `stop()` while another thread is waiting for that callback to finish. Callback-driven stop requests cancellation; the owning thread subsequently joins and destroys the client. Destroying the client from its own callback is outside this ownership contract.
+
+A failed startup can be stopped safely and followed by an explicit restart using a new endpoint. Worker liveness is separate from authenticated subscription readiness and connection recovery; this lifecycle contract does not establish either of those properties.
+
+`websocket_lifecycle_tests` exercises both concrete clients with controlled preparation and callback gates, including failed startup, early cancellation, immediate destruction, callback-stop during an owner join, and repeated/concurrent start-stop. These tests use real local Asio initialization and cancellation without contacting an exchange.
+
 ## CI lifecycle evidence
 
 The standard CI release job must run the registered CTest lifecycle suite before the CLI, research, dashboard, and benchmark smoke checks. The sanitizer matrix executes the same lifecycle suite under AddressSanitizer, UndefinedBehaviorSanitizer, and ThreadSanitizer.
