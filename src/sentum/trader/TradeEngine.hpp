@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -49,6 +50,8 @@ public:
     std::string strategy_name() const;
 
 private:
+    friend struct TradeEngineTestAccess;
+
     void initialize_components();
     void enqueue_price(double price);
     TradeAction evaluate_at(double price, std::chrono::system_clock::time_point now, const std::string& source,
@@ -77,6 +80,7 @@ private:
     std::shared_ptr<IClock> clock;
     std::string history_path = "log/klines.sqlite3";
     std::vector<TradePosition> completed_;
+    std::exception_ptr finalization_error_;
     std::chrono::system_clock::time_point last_exit{};
     std::unique_ptr<BinanceWebsocketClient> price_stream;
     std::atomic<double> latest_price{0.0};

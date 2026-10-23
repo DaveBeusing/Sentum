@@ -116,6 +116,8 @@ If directory synchronization fails after replacement, Sentum attempts to restore
 
 A persistence failure during runtime accounting, a strategy change or final settlement is reported as an error after all runtime workers have shut down and results in a nonzero process exit status. It is never reported as a successful account save.
 
+Completed simulated trades also have a separate history finalization contract. Before submitting a simulated exit, the trader reserves the SQLite history writer with a five-second busy budget. A confirmed close receives an immutable identity and is recorded in a recovery journal before its history row is committed. A persistence failure halts further trading, retains the confirmed closed position and its accounting once, and is reported after worker cleanup. On reopening, recorded closes are transferred into history idempotently. Keep the history database and its `.trade-finalizations.sqlite3` companion together; see [Trade finalization and recovery](TRADE_FINALIZATION_RECOVERY.md) for failure states and the account-reconciliation boundary.
+
 ## Promoted models
 
 `paper.modelDefinition` may point to a registered model definition. Sentum requires that model to have reached the `paper` promotion stage in `log/models.sqlite3`; otherwise startup fails closed. When accepted, the model supplies its strategy, symbol and risk-configuration path.

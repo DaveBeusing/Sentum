@@ -25,6 +25,8 @@ Replay and research advance a replay clock with the historical market events. Th
 
 Paper, shadow and Testnet execution retain the system clock by default. Freshness compares the evaluation time with the market event's timestamp; an old event cannot make itself fresh by supplying its own timestamp as the current time.
 
+Completed simulated positions are marked closed before they are copied to results or written as SELL evidence. Their holding duration is calculated from the confirmed entry and exit timestamps, so historical durations remain stable after the run. File-backed trade history follows the [finalization and recovery contract](TRADE_FINALIZATION_RECOVERY.md); in-memory research histories intentionally have no restart durability.
+
 ## Parameter search
 
 Research configuration defines a bounded Cartesian parameter grid. Typical dimensions include strategy lookback/threshold and execution assumptions such as stop loss, take profit and slippage. `max_trials` prevents accidental unbounded search spaces.

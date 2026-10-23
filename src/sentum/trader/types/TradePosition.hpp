@@ -17,6 +17,7 @@ struct TradePosition {
     std::string order_type;
     std::string client_order_id;
     std::string exchange_order_id;
+    std::string finalization_id;
     double reference_price = 0.0;
     double entry_price = 0.0;
     double quantity = 0.0;

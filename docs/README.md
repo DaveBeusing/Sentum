@@ -8,6 +8,7 @@ This directory contains the current functional documentation for Sentum. Documen
 - [Web dashboard](DASHBOARD.md) — local read-only browser dashboard, bind configuration and API.
 - [Runtime performance](PERFORMANCE.md) — market-data hot path, persistence architecture, telemetry and benchmarks.
 - [Execution safety](LIVE_TRADING_SAFETY.md) — supported execution boundaries and operational safety expectations.
+- [Trade finalization and recovery](TRADE_FINALIZATION_RECOVERY.md) — SQLite contention, durable simulated close records and restart recovery.
 
 ## Research
 

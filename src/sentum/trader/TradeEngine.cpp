@@ -142,6 +142,7 @@ TradeAction TradeEngine::evaluate(double price) {
 TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::time_point now,
                                      const std::string& source, const MarketEvent* event) {
     std::lock_guard<std::mutex> lock(state_mutex);
+    if (finalization_error_) std::rethrow_exception(finalization_error_);
     auto& dashboard = sentum::dashboard::DashboardState::global();
     auto& control = sentum::runtime::RuntimeControl::global();
 
@@ -210,27 +211,54 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
 
 TradeAction TradeEngine::close_position(double market_price, const std::string& reason,
                                         std::chrono::system_clock::time_point now) {
-    const auto fill = execute(sentum::order::Side::Sell, position.quantity, market_price, now, "sell");
-    if (!fill.exchange_confirmed_fill()) return TradeAction::NONE;
+    try {
+        // Ordinary writer contention must resolve before producing an exit fill.
+        auto finalization = history->begin_finalization();
+        const auto fill = execute(sentum::order::Side::Sell, position.quantity, market_price, now, "sell");
+        if (!fill.exchange_confirmed_fill()) return TradeAction::NONE;
 
-    position.exit_price = fill.average_fill_price;
-    position.exit_time = fill.updated_at;
-    position.close_reason = reason;
-    position.stop_loss_triggered = reason == "stop_loss";
-    position.take_profit_triggered = reason == "take_profit";
-    position.gross_profit = (position.exit_price - position.entry_price) * position.quantity;
-    position.fee_exit = position.exit_price * position.quantity * risk.sell_fee_percent;
-    position.net_profit = position.gross_profit - position.fee_entry - position.fee_exit;
-    total_profit += position.net_profit;
-    if (position.net_profit >= 0.0) ++win_count; else ++lose_count;
-    logger.log(position, TradeAction::SELL);
-    history->save(position);
-    completed_.push_back(position);
-    last_exit = position.exit_time;
-    sentum::dashboard::DashboardState::global().merge({{"last_exit_reason", reason}, {"last_trade_profit", position.net_profit}});
-    position.open = false;
-    strategy->reset();
-    return TradeAction::SELL;
+        TradePosition closed = position;
+        closed.open = false;
+        closed.exit_price = fill.average_fill_price;
+        closed.executed_price = fill.average_fill_price;
+        closed.exit_time = fill.updated_at;
+        closed.client_order_id = fill.client_order_id;
+        closed.exchange_order_id = std::to_string(fill.exchange_order_id);
+        closed.finalization_id = TradeHistoryRepository::new_finalization_id();
+        closed.close_reason = reason;
+        closed.stop_loss_triggered = reason == "stop_loss";
+        closed.take_profit_triggered = reason == "take_profit";
+        closed.gross_profit = (closed.exit_price - closed.entry_price) * closed.quantity;
+        closed.fee_exit = closed.exit_price * closed.quantity * risk.sell_fee_percent;
+        closed.net_profit = closed.gross_profit - closed.fee_entry - closed.fee_exit;
+
+        std::exception_ptr persistence_error;
+        try {
+            finalization.complete(closed);
+        } catch (...) {
+            persistence_error = std::current_exception();
+            finalization_error_ = persistence_error;
+        }
+
+        // A confirmed fill remains closed even if its history projection failed.
+        // Apply its complete accounting once; further evaluation is latched off.
+        position = closed;
+        completed_.push_back(closed);
+        total_profit += closed.net_profit;
+        if (closed.net_profit >= 0.0) ++win_count; else ++lose_count;
+        last_exit = closed.exit_time;
+        strategy->reset();
+        if (persistence_error) {
+            std::rethrow_exception(persistence_error);
+        }
+
+        logger.log(closed, TradeAction::SELL);
+        sentum::dashboard::DashboardState::global().merge({{"last_exit_reason", reason}, {"last_trade_profit", closed.net_profit}});
+        return TradeAction::SELL;
+    } catch (...) {
+        if (!finalization_error_) finalization_error_ = std::current_exception();
+        std::rethrow_exception(finalization_error_);
+    }
 }
 
 TradePosition TradeEngine::get_current_position() const { std::lock_guard<std::mutex> lock(state_mutex); return position; }
