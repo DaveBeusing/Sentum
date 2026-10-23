@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <stdexcept>
 
@@ -234,7 +235,10 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
     }
     if (price > position.highest_price) {
         position.highest_price = price;
-        if (position.trailing_sl_enabled) position.stop_loss_price = price * (1.0 - position.trailing_sl_percent);
+        if (position.trailing_sl_enabled) {
+            position.stop_loss_price = std::max(position.stop_loss_price,
+                                               price * (1.0 - position.trailing_sl_percent));
+        }
     }
     if (price < position.lowest_price) position.lowest_price = price;
     if (price <= position.stop_loss_price) return close_position(price, "stop_loss", now);

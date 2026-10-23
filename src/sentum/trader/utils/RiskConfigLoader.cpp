@@ -1,3 +1,4 @@
+#include <cmath>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -14,6 +15,19 @@ std::int64_t required_integer(const nlohmann::json& j, const char* key) {
     if (!j.contains(key) || !j.at(key).is_number_integer()) throw std::runtime_error(std::string("Missing or invalid risk key: ") + key);
     return j.at(key).get<std::int64_t>();
 }
+}
+
+void validate_stop_loss_config(const RiskConfig& config) {
+    if (!std::isfinite(config.stop_loss_percent) ||
+        config.stop_loss_percent <= 0.0 || config.stop_loss_percent >= 1.0) {
+        throw std::invalid_argument("stop_loss_percent must be finite and strictly between zero and one");
+    }
+    if (!std::isfinite(config.trailing_sl_percent) ||
+        config.trailing_sl_percent < 0.0 || config.trailing_sl_percent >= 1.0 ||
+        (config.trailing_sl_enabled && config.trailing_sl_percent == 0.0)) {
+        throw std::invalid_argument(
+            "trailing_sl_percent must be finite, below one, and positive when trailing stop loss is enabled");
+    }
 }
 
 RiskConfig load_risk_config(const std::string& path) {
@@ -44,6 +58,7 @@ RiskConfig load_risk_config(const std::string& path) {
     c.trailing_tp_enabled = j.value("trailing_tp_enabled", false);
     c.trailing_tp_percent = j.value("trailing_tp_percent", 0.0);
 
+    validate_stop_loss_config(c);
     if (c.max_total_capital <= 0.0 || c.risk_per_trade <= 0.0 || c.risk_per_trade > 1.0) throw std::runtime_error("Invalid capital or risk_per_trade");
     if (c.stop_loss_percent <= 0.0 || c.take_profit_percent <= 0.0) throw std::runtime_error("Stop loss and take profit must be positive");
     if (c.buy_fee_percent < 0.0 || c.sell_fee_percent < 0.0 || c.slippage_percent < 0.0 || c.spread_percent < 0.0) throw std::runtime_error("Execution costs cannot be negative");

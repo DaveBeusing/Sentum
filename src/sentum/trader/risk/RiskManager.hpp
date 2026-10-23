@@ -11,6 +11,7 @@
 #include <sentum/time/Clock.hpp>
 #include <sentum/trader/strategy/IStrategy.hpp>
 #include <sentum/trader/types/RiskConfig.hpp>
+#include <sentum/trader/utils/RiskConfigLoader.hpp>
 
 struct RiskDecision {
     bool approved = false;
@@ -25,6 +26,7 @@ public:
                          std::shared_ptr<IClock> clock = std::make_shared<SystemClock>())
         : config_(config), clock_(std::move(clock)) {
         if (!clock_) throw std::invalid_argument("Risk manager requires a clock");
+        validate_stop_loss_config(config_);
     }
 
     RiskDecision approve_entry(const StrategySignal& signal, double price,

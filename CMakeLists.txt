@@ -137,6 +137,12 @@ if(BUILD_TESTING)
 	set_tests_properties(replay_risk_clock PROPERTIES TIMEOUT 60)
 	add_dependencies(sentum_runtime_lifecycle_tests sentum_replay_risk_clock_tests)
 
+	add_executable(sentum_trailing_stop_risk_tests tests/trailing_stop_risk_tests.cpp)
+	target_link_libraries(sentum_trailing_stop_risk_tests PRIVATE sentum_core)
+	add_test(NAME trailing_stop_risk COMMAND sentum_trailing_stop_risk_tests)
+	set_tests_properties(trailing_stop_risk PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_trailing_stop_risk_tests)
+
 	add_executable(sentum_paper_account_durability_tests tests/paper_account_durability_tests.cpp)
 	target_link_libraries(sentum_paper_account_durability_tests PRIVATE sentum_core)
 	add_test(NAME paper_account_durability COMMAND sentum_paper_account_durability_tests)
