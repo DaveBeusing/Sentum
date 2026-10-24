@@ -36,7 +36,11 @@ struct NotificationChannelOperations {
 struct NotificationDispatchOperationsMetrics {
 	bool available = false;
 	std::string status = "UNAVAILABLE";
+	bool running = false;
+	bool accepting = false;
+	bool recovery_required = false;
 	std::size_t queued = 0;
+	std::size_t recovery_pending = 0;
 	std::size_t dispatching = 0;
 	std::uint64_t delivered = 0;
 	std::uint64_t retriable_failed = 0;
@@ -45,6 +49,10 @@ struct NotificationDispatchOperationsMetrics {
 	double provider_latency_ms_average = 0.0;
 	std::uint64_t timeout_count = 0;
 	std::uint64_t queue_rejections = 0;
+	std::uint64_t snapshot_errors = 0;
+	std::uint64_t persistence_errors = 0;
+	std::uint64_t worker_errors = 0;
+	std::string last_error;
 	bool execution_authorized = false;
 };
 
@@ -249,7 +257,11 @@ inline NotificationDispatchOperationsMetrics notification_dispatch_metrics_from_
 	if (!runtime.is_object() || !runtime.contains("status")) return metrics;
 	metrics.available = true;
 	metrics.status = runtime.value("status", std::string("UNAVAILABLE"));
+	metrics.running = runtime.value("running", metrics.status == "RUNNING" || metrics.status == "DEGRADED");
+	metrics.accepting = runtime.value("accepting", metrics.status == "RUNNING");
+	metrics.recovery_required = runtime.value("recovery_required", false);
 	metrics.queued = runtime.value("queued", static_cast<std::size_t>(0));
+	metrics.recovery_pending = runtime.value("recovery_pending", static_cast<std::size_t>(0));
 	metrics.dispatching = runtime.value("dispatching", static_cast<std::size_t>(0));
 	metrics.delivered = runtime.value("delivered", static_cast<std::uint64_t>(0));
 	metrics.retriable_failed = runtime.value("retriable_failed", static_cast<std::uint64_t>(0));
@@ -258,6 +270,10 @@ inline NotificationDispatchOperationsMetrics notification_dispatch_metrics_from_
 	metrics.provider_latency_ms_average = runtime.value("provider_latency_ms_average", 0.0);
 	metrics.timeout_count = runtime.value("timeout_count", static_cast<std::uint64_t>(0));
 	metrics.queue_rejections = runtime.value("queue_rejections", static_cast<std::uint64_t>(0));
+	metrics.snapshot_errors = runtime.value("snapshot_errors", static_cast<std::uint64_t>(0));
+	metrics.persistence_errors = runtime.value("persistence_errors", static_cast<std::uint64_t>(0));
+	metrics.worker_errors = runtime.value("worker_errors", static_cast<std::uint64_t>(0));
+	metrics.last_error = runtime.value("last_error", std::string{});
 	metrics.execution_authorized = false;
 	return metrics;
 }
@@ -290,7 +306,11 @@ inline nlohmann::json notification_operations_json(const NotificationOperationsV
 	const auto dispatch_runtime = nlohmann::json{
 		{"available", view.dispatch_runtime.available},
 		{"status", view.dispatch_runtime.status},
+		{"running", view.dispatch_runtime.running},
+		{"accepting", view.dispatch_runtime.accepting},
+		{"recovery_required", view.dispatch_runtime.recovery_required},
 		{"queued", view.dispatch_runtime.queued},
+		{"recovery_pending", view.dispatch_runtime.recovery_pending},
 		{"dispatching", view.dispatch_runtime.dispatching},
 		{"delivered", view.dispatch_runtime.delivered},
 		{"retriable_failed", view.dispatch_runtime.retriable_failed},
@@ -299,6 +319,10 @@ inline nlohmann::json notification_operations_json(const NotificationOperationsV
 		{"provider_latency_ms_average", view.dispatch_runtime.provider_latency_ms_average},
 		{"timeout_count", view.dispatch_runtime.timeout_count},
 		{"queue_rejections", view.dispatch_runtime.queue_rejections},
+		{"snapshot_errors", view.dispatch_runtime.snapshot_errors},
+		{"persistence_errors", view.dispatch_runtime.persistence_errors},
+		{"worker_errors", view.dispatch_runtime.worker_errors},
+		{"last_error", view.dispatch_runtime.last_error},
 		{"execution_authorized", false}
 	};
 	return {

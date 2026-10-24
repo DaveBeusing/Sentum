@@ -50,6 +50,8 @@ public:
 	nlohmann::json metrics_json() const;
 
 private:
+	enum class EnqueueResult { Accepted, Full, Unavailable };
+
 	struct WorkItem {
 		std::chrono::steady_clock::time_point due;
 		std::uint64_t sequence = 0;
@@ -67,10 +69,14 @@ private:
 	std::atomic<bool> accepting_{false};
 	std::atomic<bool> stop_requested_{false};
 	std::atomic<bool> provider_cancellation_{false};
+	std::atomic<bool> recovery_required_{false};
 
 	mutable std::mutex queue_mutex_;
 	std::condition_variable queue_cv_;
 	std::vector<WorkItem> queue_;
+	// Startup may restore more accepted work than the queue alone can hold:
+	// workers and the queue could both own durable work before interruption.
+	std::vector<WorkItem> recovery_queue_;
 	std::uint64_t queue_sequence_ = 0;
 
 	mutable std::mutex state_mutex_;
@@ -84,6 +90,7 @@ private:
 	std::vector<std::thread> workers_;
 
 	std::atomic<std::size_t> queued_{0};
+	std::atomic<std::size_t> recovery_pending_{0};
 	std::atomic<std::size_t> dispatching_{0};
 	std::atomic<std::uint64_t> delivered_total_{0};
 	std::atomic<std::uint64_t> retriable_failed_total_{0};
@@ -94,17 +101,23 @@ private:
 	std::atomic<std::uint64_t> timeout_count_{0};
 	std::atomic<std::uint64_t> queue_rejections_{0};
 	std::atomic<std::uint64_t> snapshot_errors_{0};
+	std::atomic<std::uint64_t> persistence_errors_{0};
+	std::atomic<std::uint64_t> worker_errors_{0};
 
 	mutable std::mutex publish_mutex_;
 	std::string last_published_metrics_;
 
 	void recover();
 	void scheduler_loop();
-	void worker_loop();
+	void worker_loop() noexcept;
+	void process_work(NotificationDeliveryAttempt attempt);
 	bool take_work(WorkItem& item);
-	bool enqueue(NotificationDeliveryAttempt attempt, std::chrono::steady_clock::time_point due, bool require_accepting);
+	EnqueueResult enqueue(NotificationDeliveryAttempt attempt, std::chrono::steady_clock::time_point due, bool require_accepting);
+	void refill_recovery_queue_locked();
 	void persist(const NotificationDeliveryAttempt& attempt);
 	void record_terminal_queue_rejection(NotificationDeliveryAttempt attempt, const char* code, const char* reason);
+	void latch_failure(const char* error) noexcept;
+	void request_stop();
 	void set_status(std::string status, std::string error = {});
 	void publish_metrics();
 };
