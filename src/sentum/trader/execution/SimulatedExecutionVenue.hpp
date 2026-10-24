@@ -42,6 +42,9 @@ public:
         s.side = request.side;
         s.state = order::State::Filled;
         s.requested_quantity = request.quantity;
+        s.locally_owned = true;
+        s.base_asset = request.base_asset;
+        s.quote_asset = request.quote_asset;
         s.executed_quantity = request.quantity;
         s.average_fill_price = fill;
         s.cumulative_quote_quantity = request.quantity * fill;

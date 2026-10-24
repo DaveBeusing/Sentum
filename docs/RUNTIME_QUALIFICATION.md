@@ -76,7 +76,7 @@ The seed is recorded in every report and controls deterministic Paper input. The
 | `market-data-reconnect` | Collector lifecycle and persistence continuity across a controlled producer disconnect/restart boundary without network dependency. |
 | `user-stream-interruption` | `LiveOrderSession` User Data Stream health loss, fail-closed kill switch and stream rebuild through an injected stream boundary. |
 | `listen-key-keepalive` | Keepalive failure, submission blocking, stream rebuild and required explicit recovery. |
-| `partial-fill` | `OrderManager` exchange-event path; partial execution remains non-final until an exchange-confirmed `FILLED` event. |
+| `partial-fill` | `OrderManager` and `ConfirmedPositionLedger` exchange-event path; partial execution contributes inventory, remains non-final, and duplicate complete fills do not double inventory. |
 | `unresolved-order-restart` | Startup reconciliation with an unresolved exchange order latches the kill switch and blocks new submissions. |
 | `balance-mismatch` | `AccountReconciler` detects authoritative account/local quantity divergence and emits unsuccessful reconciliation evidence. |
 | `persistence-pressure` | Real bounded Collector queue saturation, drop accounting, pressure evidence and later drain. |
@@ -177,7 +177,8 @@ After pressure injection with healthy storage, every accepted candle must commit
 Qualification must preserve these runtime invariants:
 
 - REST placement acknowledgement is not a confirmed fill;
-- partial fill is not treated as a complete confirmed position;
+- partial execution contributes its confirmed quantity while the order remains non-final;
+- duplicate cumulative execution and commission evidence is applied once;
 - Testnet execution truth remains downstream of exchange-confirmed events and reconciliation;
 - ambiguous restart state stays blocked;
 - stream failure disables submissions;
