@@ -35,7 +35,10 @@ RiskConfig load_risk_config(const std::string& path) {
     if (!file.is_open()) throw std::runtime_error("Cannot open risk configuration: " + path);
     nlohmann::json j;
     file >> j;
+    return parse_risk_config(j);
+}
 
+RiskConfig parse_risk_config(const nlohmann::json& j) {
     RiskConfig c;
     c.max_total_capital = required_number(j, "max_total_capital");
     c.risk_per_trade = required_number(j, "risk_per_trade");

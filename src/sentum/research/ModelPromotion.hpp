@@ -4,13 +4,19 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <limits>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -22,6 +28,7 @@
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/trader/strategy/StrategyFramework.hpp>
 #include <sentum/trader/types/RiskConfig.hpp>
+#include <sentum/trader/utils/RiskConfigLoader.hpp>
 
 namespace sentum::promotion {
 
@@ -73,6 +80,8 @@ struct StageEvidence {
     double sharpe = 0.0;
     double sortino = 0.0;
     std::string artifact;
+    std::string definition_revision;
+    std::int64_t model_revision = 0;
 };
 
 struct ModelDefinition {
@@ -85,13 +94,13 @@ struct ModelDefinition {
     std::string risk_config = "config/risk.json";
     nlohmann::json strategy;
     PromotionPolicy policy;
+    nlohmann::json document = nlohmann::json::object();
 };
 
-inline ModelDefinition load_model_definition(const std::string& path) {
-    std::ifstream file(path);
-    if (!file) throw std::runtime_error("Cannot open model definition: " + path);
-    nlohmann::json j; file >> j;
+inline ModelDefinition parse_model_definition(const nlohmann::json& j) {
+    if (!j.is_object()) throw std::runtime_error("Model definition must be a JSON object");
     ModelDefinition d;
+    d.document = j;
     d.model_id = j.value("model_id", std::string{});
     d.name = j.value("name", d.model_id);
     d.symbol = j.value("symbol", std::string{});
@@ -114,12 +123,89 @@ inline ModelDefinition load_model_definition(const std::string& path) {
     return d;
 }
 
+inline ModelDefinition load_model_definition(const std::string& path) {
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("Cannot open model definition: " + path);
+    nlohmann::json j; file >> j;
+    return parse_model_definition(j);
+}
+
+inline nlohmann::json risk_config_json(const RiskConfig& risk) {
+    return {
+        {"max_total_capital", risk.max_total_capital}, {"risk_per_trade", risk.risk_per_trade},
+        {"stop_loss_percent", risk.stop_loss_percent}, {"take_profit_percent", risk.take_profit_percent},
+        {"trailing_sl_enabled", risk.trailing_sl_enabled}, {"trailing_sl_percent", risk.trailing_sl_percent},
+        {"trailing_tp_enabled", risk.trailing_tp_enabled}, {"trailing_tp_percent", risk.trailing_tp_percent},
+        {"buy_fee_percent", risk.buy_fee_percent}, {"sell_fee_percent", risk.sell_fee_percent},
+        {"slippage_percent", risk.slippage_percent}, {"spread_percent", risk.spread_percent},
+        {"leverage", risk.leverage}, {"min_quantity", risk.min_quantity}, {"max_quantity", risk.max_quantity},
+        {"step_size", risk.step_size}, {"min_notional", risk.min_notional},
+        {"cooldown_seconds", risk.cooldown_seconds}, {"max_holding_seconds", risk.max_holding_seconds},
+        {"max_data_age_ms", risk.max_data_age_ms}
+    };
+}
+
+inline nlohmann::json model_definition_json(const ModelDefinition& d) {
+    if (d.model_id.empty() || d.symbol.empty() || d.source_experiment_run.empty() || !d.strategy.is_object())
+        throw std::runtime_error("Model identity requires model_id, symbol, source experiment and strategy");
+    for (const auto value : {d.policy.min_net_profit, d.policy.min_profit_factor, d.policy.min_win_rate,
+                             d.policy.min_sharpe, d.policy.max_drawdown})
+        if (!std::isfinite(value)) throw std::runtime_error("Promotion policy thresholds must be finite");
+    if (d.policy.min_trades > static_cast<std::uint64_t>(std::numeric_limits<sqlite3_int64>::max()))
+        throw std::runtime_error("Promotion policy trade count exceeds the supported range");
+    auto document = d.document;
+    if (!document.is_object()) document = nlohmann::json::object();
+    document["model_id"] = d.model_id;
+    document["name"] = d.name;
+    document["symbol"] = d.symbol;
+    document["source_experiment_run"] = d.source_experiment_run;
+    document["source_git_commit"] = d.source_git_commit;
+    document["source_config_sha256"] = d.source_config_sha256;
+    document["risk_config"] = d.risk_config;
+    document["strategy"] = d.strategy;
+    auto policy = document.value("promotion_policy", nlohmann::json::object());
+    if (!policy.is_object()) throw std::runtime_error("Promotion policy must be a JSON object");
+    policy["min_trades"] = d.policy.min_trades;
+    policy["min_net_profit"] = d.policy.min_net_profit;
+    policy["min_profit_factor"] = d.policy.min_profit_factor;
+    policy["min_win_rate"] = d.policy.min_win_rate;
+    policy["min_sharpe"] = d.policy.min_sharpe;
+    policy["max_drawdown"] = d.policy.max_drawdown;
+    document["promotion_policy"] = std::move(policy);
+    return document;
+}
+
+inline nlohmann::json read_model_risk_document(const ModelDefinition& model) {
+    std::ifstream file(model.risk_config);
+    if (!file) throw std::runtime_error("Cannot open model risk configuration: " + model.risk_config);
+    nlohmann::json risk; file >> risk;
+    if (!risk.is_object()) throw std::runtime_error("Model risk configuration must be a JSON object");
+    return risk;
+}
+
+inline std::string model_definition_revision(const ModelDefinition& model, const nlohmann::json& risk_document) {
+    const auto definition = model_definition_json(model);
+    const auto risk = risk_config_json(parse_risk_config(risk_document));
+    // Bind both the complete documents and the effective default-expanded risk.
+    // This prevents newly supported fields from silently inheriting old approval.
+    return sentum::research::Sha256::string(nlohmann::json{
+        {"revision_format", 1}, {"definition", definition},
+        {"risk_document", risk_document}, {"effective_risk", risk}
+    }.dump());
+}
+
+inline std::string model_definition_revision(const ModelDefinition& model) {
+    return model_definition_revision(model, read_model_risk_document(model));
+}
+
 inline StageEvidence evidence_from_metrics(const std::string& stage, const BacktestMetrics& m,
                                            std::int64_t start, std::int64_t finish, std::string artifact = {}) {
     return {stage,start,finish,m.trades,m.net_profit,m.max_drawdown,m.profit_factor,m.win_rate,m.expectancy,m.sharpe,m.sortino,std::move(artifact)};
 }
 
 inline bool passes_policy(const StageEvidence& e, const PromotionPolicy& p, std::string& reason) {
+    for (const auto value : {e.net_profit, e.max_drawdown, e.win_rate, e.sharpe})
+        if (!std::isfinite(value)) { reason = "non-finite promotion evidence"; return false; }
     if (e.trades < p.min_trades) { reason = "insufficient trades"; return false; }
     if (e.net_profit < p.min_net_profit) { reason = "net profit below threshold"; return false; }
     if (!std::isfinite(e.profit_factor) || e.profit_factor < p.min_profit_factor) { reason = "profit factor below threshold"; return false; }
