@@ -99,7 +99,11 @@ Snapshot snapshot(const Request& request, State state) {
     result.state = state;
     result.requested_quantity = request.quantity;
     result.updated_at = std::chrono::system_clock::now();
-    if (state != State::Pending && state != State::Rejected) result.exchange_order_id = 42;
+    result.locally_owned = true;
+    result.base_asset = "BTC";
+    result.quote_asset = "USDT";
+    if (state != State::Pending && state != State::Rejected)
+        result.exchange_order_id = request.side == Side::Buy ? 42 : 43;
     if (state == State::Filled) {
         result.executed_quantity = request.quantity;
         result.average_fill_price = 100.0;
@@ -144,15 +148,23 @@ public:
     nlohmann::json open_orders() const override { return nlohmann::json::array(); }
     nlohmann::json place_market_order(const Request& request) const override {
         ++placements;
+        latest = request;
         if (during_placement) during_placement(request);
-        if (reject) throw std::runtime_error("fixture rejection");
-        return {{"orderId", 42}};
+        if (reject) throw BinanceRequestError(BinanceRequestError::Kind::Rejected, "fixture rejection", -2010);
+        return {{"symbol", request.symbol}, {"clientOrderId", request.client_order_id}, {"orderId", 42}};
     }
-    nlohmann::json cancel_order(const std::string&, const std::string&) const override {
+    nlohmann::json query_order(const std::string&, const std::string&) const override {
+        throw std::runtime_error("fixture order outcome is unavailable");
+    }
+    nlohmann::json cancel_order(const std::string& symbol, const std::string& id) const override {
         ++cancellations;
-        return nlohmann::json::object();
+        return {{"symbol", symbol}, {"origClientOrderId", id}, {"clientOrderId", "cancel-" + id},
+                {"orderId", 42}, {"side", latest.side == Side::Buy ? "BUY" : "SELL"},
+                {"origQty", latest.quantity}, {"executedQty", "0"},
+                {"cummulativeQuoteQty", "0"}, {"status", "CANCELED"}};
     }
     mutable std::atomic<int> placements{0}, cancellations{0};
+    mutable Request latest;
     bool reject = false;
     std::function<void(const Request&)> during_placement;
 };
@@ -340,7 +352,8 @@ void terminal_stream_update_is_not_republished_by_ack() {
     client.during_placement = [&](const Request& request) {
         manager.on_user_data_event({{"e","executionReport"},{"c",request.client_order_id},
             {"s",request.symbol},{"i",42},{"S","BUY"},{"q","1"},{"z","1"},{"Z","100"},
-            {"X","FILLED"},{"E",1700000000000LL}});
+            {"X","FILLED"},{"x","TRADE"},{"l","1"},{"t",1},{"n","0"},{"N",nullptr},
+            {"E",1700000000000LL}});
     };
     bounded([&] {
         const auto result = manager.submit_market({"BTCUSDT", Side::Buy, 1, "filled-before-ack"});
