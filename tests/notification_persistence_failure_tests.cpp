@@ -8,6 +8,8 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -163,9 +165,25 @@ private:
 	std::unordered_set<std::string> effects_;
 };
 
-NotificationProviderRegistry registry(const std::shared_ptr<FixtureProvider>& provider) {
+NotificationProviderRegistry registry(const std::shared_ptr<INotificationProvider>& provider) {
 	NotificationProviderRegistry result;
 	result.add("PAGER", provider);
+	return result;
+}
+
+class CallbackProvider final : public INotificationProvider {
+public:
+	using Callback = std::function<NotificationDispatchResult(const NotificationDispatchRequest&, const std::atomic<bool>&)>;
+	explicit CallbackProvider(Callback callback) : callback_(std::move(callback)) {}
+	NotificationDispatchResult dispatch(const NotificationDispatchRequest& request,
+		const std::atomic<bool>& cancelled) override { return callback_(request, cancelled); }
+private:
+	Callback callback_;
+};
+
+NotificationDispatchResult delivered_result() {
+	NotificationDispatchResult result;
+	result.accepted = result.delivered = true;
 	return result;
 }
 
@@ -383,6 +401,167 @@ void recovery_staging_preserves_bounds_and_cancellation() {
 	for (const auto& attempt : active) require(attempt.attempt == 1 && !attempt.terminal && attempt.retry_backoff_seconds == 5,
 		"staged shutdown changed a durable retry budget");
 }
+
+void concurrent_restart_joins_old_failure_before_recovery() {
+	TemporaryDatabase database;
+	std::atomic<std::size_t> calls{0};
+	std::atomic<bool> cancelled_seen{false}, release{false};
+	std::atomic<bool> durable_violation{false};
+	auto provider = std::make_shared<CallbackProvider>([&](const auto& request, const auto& cancelled) {
+		const auto record = latest(database.path, request.dedup_key);
+		if (record.state != "DISPATCHED" || record.attempt != request.attempt) durable_violation.store(true);
+		if (calls.fetch_add(1) == 0) {
+			const auto deadline = std::chrono::steady_clock::now() + 5s;
+			while (!release.load() && std::chrono::steady_clock::now() < deadline) {
+				if (cancelled.load()) cancelled_seen.store(true);
+				std::this_thread::sleep_for(5ms);
+			}
+		}
+		return delivered_result();
+	});
+	NotificationDispatchRuntime runtime(configuration(), policy(), registry(provider), database.path);
+	SqliteControl control(database.path);
+	control.execute("CREATE TRIGGER reject_old_result BEFORE INSERT ON notification_delivery_evidence "
+		"WHEN NEW.state='DELIVERED' BEGIN SELECT RAISE(ABORT,'old provider result write failed'); END;");
+	runtime.start();
+	const auto routes = plan("restart-during-failure");
+	require(runtime.submit(routes) == 1, "concurrent restart fixture was not admitted");
+	eventually([&] { return calls.load() == 1; }, "old provider did not begin dispatch");
+	auto stopping = std::async(std::launch::async, [&] { runtime.stop(); });
+	eventually([&] { return cancelled_seen.load(); }, "external stop did not request provider cancellation");
+	auto restarting = std::async(std::launch::async, [&] { runtime.start(); });
+	const bool restart_waited = restarting.wait_for(100ms) == std::future_status::timeout;
+	const bool stop_waited = stopping.wait_for(0ms) == std::future_status::timeout;
+	release.store(true);
+	stopping.get();
+	restarting.get();
+	control.execute("DROP TRIGGER reject_old_result;");
+	require(restart_waited && stop_waited, "restart replaced worker ownership before the prior provider returned");
+	const auto recovered = latest(database.path, routes.intents.front().dedup_key);
+	require(recovered.state == "FAILED" && recovered.failure_code == "INTERRUPTED" && recovered.attempt == 1,
+		"restart did not recover the durable result of the old worker");
+	const auto metrics = runtime.metrics_json();
+	require(metrics.at("persistence_errors") == 1 && metrics.at("worker_errors") == 1 &&
+		metrics.at("recovery_required") == false && metrics.at("status") == "RUNNING" && calls.load() == 1,
+		"restart cleared failure ownership before accounting for the old worker");
+	eventually([&] { return runtime.metrics_json().at("delivered") == 1; }, "serialized restart did not recover delivery", 8s);
+	runtime.stop();
+	require(calls.load() == 2 && !durable_violation.load() &&
+		latest(database.path, routes.intents.front().dedup_key).attempt == 2,
+		"serialized recovery changed dispatch identity or durable attempt order");
+}
+
+void recovery_waits_for_an_in_flight_submission() {
+	for (bool fail_pending : {false, true}) {
+		TemporaryDatabase database;
+		auto provider = std::make_shared<FixtureProvider>(database.path);
+		NotificationDispatchRuntime* owner = nullptr;
+		std::atomic<bool> callback_stopped{false};
+		NotificationDispatchRuntime runtime(configuration(), policy(), registry(provider), database.path, {}, [&](const auto& metrics) {
+			if (fail_pending && metrics.at("recovery_required") == true) {
+				owner->stop();
+				callback_stopped.store(true);
+			}
+		});
+		owner = &runtime;
+		SqliteControl control(database.path);
+		if (fail_pending) control.execute("CREATE TRIGGER reject_late_pending BEFORE INSERT ON notification_delivery_evidence "
+			"WHEN NEW.state='PENDING' BEGIN SELECT RAISE(ABORT,'late admission write failed'); END;");
+		runtime.start();
+		control.execute("BEGIN IMMEDIATE;");
+		const auto routes = plan("submission-during-stop");
+		auto submitting = std::async(std::launch::async, [&] { return runtime.submit(routes); });
+		const bool submission_waited = submitting.wait_for(100ms) == std::future_status::timeout;
+		runtime.stop();
+		auto restarting = std::async(std::launch::async, [&] { runtime.start(); });
+		const bool restart_waited = restarting.wait_for(100ms) == std::future_status::timeout;
+		control.execute("COMMIT;");
+		std::size_t admitted = 0;
+		bool failed = false;
+		try { admitted = submitting.get(); } catch (const std::runtime_error&) { failed = true; }
+		restarting.get();
+		require(submission_waited && restart_waited && admitted == 0 && failed == fail_pending,
+			"recovery overtook a durable submission from the previous runtime");
+		if (fail_pending) {
+			control.execute("DROP TRIGGER reject_late_pending;");
+			require(callback_stopped.load() && runtime.submit(routes) == 1,
+				"restart retained cancellation or duplicate ownership from the failed old admission");
+		}
+		eventually([&] { return runtime.metrics_json().at("delivered") == 1; }, "late PENDING work was not recoverable");
+		require(runtime.submit(routes) == 0, "recovery lost ownership of the in-flight submission key");
+		runtime.stop();
+		require(provider->calls() == 1 && !provider->durable_violation(), "in-flight submission recovery duplicated delivery");
+	}
+}
+
+void callback_cancellation_leaves_thread_joins_with_the_owner() {
+	{
+		TemporaryDatabase database;
+		NotificationDispatchRuntime* owner = nullptr;
+		auto provider = std::make_shared<CallbackProvider>([&](const auto&, const auto&) {
+			owner->stop();
+			return delivered_result();
+		});
+		NotificationDispatchRuntime runtime(configuration(), policy(), registry(provider), database.path);
+		owner = &runtime;
+		runtime.start();
+		require(runtime.submit(plan("provider-cancellation")) == 1, "callback cancellation fixture was not admitted");
+		eventually([&] { return runtime.metrics_json().at("delivered") == 1; }, "provider cancellation joined its own worker");
+		runtime.stop();
+		require(!runtime.running(), "external owner did not join the callback-cancelled worker");
+	}
+	{
+		TemporaryDatabase database;
+		NotificationDispatchRuntime* owner = nullptr;
+		std::atomic<bool> entered{false};
+		auto provider = std::make_shared<CallbackProvider>([&](const auto&, const auto& cancelled) {
+			entered.store(true);
+			const auto deadline = std::chrono::steady_clock::now() + 3s;
+			while (!cancelled.load() && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(5ms);
+			owner->stop();
+			return delivered_result();
+		});
+		NotificationDispatchRuntime runtime(configuration(), policy(), registry(provider), database.path);
+		owner = &runtime;
+		runtime.start();
+		require(runtime.submit(plan("callback-during-join")) == 1, "external join fixture was not admitted");
+		eventually([&] { return entered.load(); }, "provider did not enter external join fixture");
+		const auto before_stop = std::chrono::steady_clock::now();
+		runtime.stop();
+		require(std::chrono::steady_clock::now() - before_stop < 1s && !runtime.running(),
+			"callback cancellation waited for the external owner joining that callback");
+	}
+	{
+		TemporaryDatabase database;
+		NotificationDispatchRuntime* owner = nullptr;
+		std::atomic<bool> observed{false};
+		auto provider = std::make_shared<FixtureProvider>(database.path);
+		NotificationDispatchRuntime runtime(configuration(), policy(), registry(provider), database.path, [&] {
+			owner->stop();
+			observed.store(true);
+			return NotificationRuntimeSnapshot{};
+		});
+		owner = &runtime;
+		runtime.start();
+		eventually([&] { return observed.load(); }, "snapshot cancellation joined its own scheduler");
+		runtime.stop();
+		require(!runtime.running(), "external owner did not join the callback-cancelled scheduler");
+	}
+	{
+		TemporaryDatabase database;
+		NotificationDispatchRuntime* owner = nullptr;
+		std::atomic<bool> observed{false};
+		auto provider = std::make_shared<FixtureProvider>(database.path);
+		NotificationDispatchRuntime runtime(configuration(), policy(), registry(provider), database.path, {}, [&](const auto& metrics) {
+			if (metrics.at("running") == true && !observed.exchange(true)) owner->stop();
+		});
+		owner = &runtime;
+		runtime.start();
+		require(observed.load(), "startup did not publish its callback cancellation fixture");
+		runtime.stop();
+		require(!runtime.running(), "metrics callback cancellation was not joinable by the external owner");
+	}
+}
 }
 
 int main() {
@@ -392,6 +571,9 @@ int main() {
 		provider_result_failure_reuses_delivery_identity();
 		unknown_provider_exception_does_not_escape_worker();
 		recovery_staging_preserves_bounds_and_cancellation();
+		concurrent_restart_joins_old_failure_before_recovery();
+		recovery_waits_for_an_in_flight_submission();
+		callback_cancellation_leaves_thread_joins_with_the_owner();
 		std::cout << "Notification persistence failure tests passed\n";
 		return 0;
 	} catch (const std::exception& error) {

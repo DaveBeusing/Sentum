@@ -69,6 +69,8 @@ Already accepted queued work may finish if its required evidence writes succeed.
 
 After the storage fault is repaired, stopping and restarting the notification runtime reloads durable state before clearing the admission latch. Stopping alone preserves `DEGRADED`, `last_error` and `recovery_required`; `running=false` distinguishes the stopped runtime. Scheduler errors cannot replace this first delivery failure or reopen admission. Shutdown clears only in-memory queues and recovery staging; their durable records remain available for restart.
 
+Lifecycle transitions are serialized. A concurrent restart waits for all previous workers and any in-flight admission write before reconstructing durable delivery state; a late provider result cannot overwrite the restarted worker ownership or clear its failure accounting. Cancellation requested from a provider, snapshot or metrics callback only signals shutdown. An external `stop()` or subsequent `start()` owns the actual joins, so callbacks never join themselves or wait for an owner already joining them. `running` remains true while those owned threads still require a join.
+
 If a provider accepted a notification but the result could not be persisted, recovery may call that provider again with the same delivery key. Suppressing a second external effect requires the provider's idempotency support. No exactly-once external delivery guarantee is claimed for providers without that support.
 
 ## Provider registry
@@ -127,5 +129,7 @@ notification_dispatch_runtime_tests covers delivery success, provider rejection,
 `notification_routing_policy_tests` covers nested route types, missing fields, numeric boundaries, channel/audience identity validation, direct lookup, controlled runtime construction failure before provider work, the shipped policy and a valid scheduler delivery. It is also part of the sanitizer build graph.
 
 notification_persistence_failure_tests combines a full retry queue with SQLite trigger failures, verifies continued worker/process execution and accurate durable counters, and restarts the unchanged single-slot configuration with multiple outstanding durable deliveries. It also covers initial-write rejection, provider-result uncertainty with stable idempotency keys, unknown provider exceptions, paused admission, retained failure diagnostics and provider calls only after DISPATCHED commits. All provider behavior is local to the test process.
+
+The persistence suite also blocks an old provider during a concurrent restart, then fails its final durable write and verifies recovery of that exact attempt. A SQLite write lock verifies recovery waits for an admission still committing from the preceding run. Provider, scheduler and metrics callbacks exercise cancellation, including cancellation while an external caller is already joining the worker.
 
 All three targets are registered in CTest and attached to the existing ASan, UBSan and TSan build dependency graph.

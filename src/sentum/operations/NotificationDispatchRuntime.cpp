@@ -46,6 +46,27 @@ private:
 	std::atomic<std::size_t>& count_;
 };
 
+// User callbacks may request cancellation while an external owner is joining
+// the runtime. Such requests must not wait for that owner or join themselves.
+class RuntimeCallbackScope {
+public:
+	explicit RuntimeCallbackScope(const NotificationDispatchRuntime* owner) noexcept
+		: owner_(owner), previous_(current_) { current_ = this; }
+	~RuntimeCallbackScope() { current_ = previous_; }
+	static bool contains(const NotificationDispatchRuntime* owner) noexcept {
+		for (auto* scope = current_; scope; scope = scope->previous_) {
+			if (scope->owner_ == owner) return true;
+		}
+		return false;
+	}
+private:
+	const NotificationDispatchRuntime* owner_;
+	RuntimeCallbackScope* previous_;
+	static thread_local RuntimeCallbackScope* current_;
+};
+
+thread_local RuntimeCallbackScope* RuntimeCallbackScope::current_ = nullptr;
+
 } // namespace
 
 NotificationDispatchRuntime::NotificationDispatchRuntime(
@@ -134,7 +155,6 @@ void NotificationDispatchRuntime::record_terminal_queue_rejection(
 	attempt = mark_notification_terminal_failure(std::move(attempt), code, reason);
 	persist(attempt);
 	terminal_failed_total_.fetch_add(1, std::memory_order_relaxed);
-	publish_metrics();
 }
 
 void NotificationDispatchRuntime::recover() {
@@ -201,59 +221,56 @@ void NotificationDispatchRuntime::request_stop() {
 }
 
 void NotificationDispatchRuntime::start() {
-	bool expected = false;
-	if (!started_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
+	// A callback can cancel its owner, but recovery and thread replacement must
+	// be completed by an external caller after the old callbacks have returned.
+	if (RuntimeCallbackScope::contains(this)) return;
+	std::unique_lock<std::mutex> lifecycle_lock(lifecycle_mutex_);
+	if (started_.load(std::memory_order_acquire)) {
+		if (!stop_requested_.load(std::memory_order_acquire)) return;
+		request_stop();
+		join_and_clear();
+	}
+	started_.store(true, std::memory_order_release);
 
 	try {
-		stop_requested_.store(false, std::memory_order_release);
-		provider_cancellation_.store(false, std::memory_order_release);
 		if (!configuration_.enabled) {
+			stop_requested_.store(false, std::memory_order_release);
+			provider_cancellation_.store(false, std::memory_order_release);
 			accepting_.store(false, std::memory_order_release);
 			set_status("DISABLED");
-			publish_metrics();
-			return;
+		} else {
+			{
+				// Complete any submission that raced the preceding stop before
+				// recovering its durable state or replacing duplicate ownership.
+				std::lock_guard<std::mutex> submission_lock(submission_mutex_);
+				stop_requested_.store(false, std::memory_order_release);
+				provider_cancellation_.store(false, std::memory_order_release);
+				recover();
+				recovery_required_.store(false, std::memory_order_release);
+				accepting_.store(true, std::memory_order_release);
+			}
+			set_status("RUNNING");
+			workers_.reserve(configuration_.worker_count);
+			for (std::size_t index = 0; index < configuration_.worker_count; ++index) {
+				workers_.emplace_back(&NotificationDispatchRuntime::worker_loop, this);
+			}
+			if (snapshot_source_) scheduler_thread_ = std::thread(&NotificationDispatchRuntime::scheduler_loop, this);
 		}
-
-		recover();
-		recovery_required_.store(false, std::memory_order_release);
-		accepting_.store(true, std::memory_order_release);
-		set_status("RUNNING");
-		workers_.reserve(configuration_.worker_count);
-		for (std::size_t index = 0; index < configuration_.worker_count; ++index) {
-			workers_.emplace_back(&NotificationDispatchRuntime::worker_loop, this);
-		}
-		if (snapshot_source_) scheduler_thread_ = std::thread(&NotificationDispatchRuntime::scheduler_loop, this);
-		publish_metrics();
 	} catch (...) {
 		request_stop();
-		if (scheduler_thread_.joinable() && scheduler_thread_.get_id() != std::this_thread::get_id()) {
-			scheduler_thread_.join();
-		}
-		for (auto& worker : workers_) {
-			if (worker.joinable() && worker.get_id() != std::this_thread::get_id()) worker.join();
-		}
-		workers_.clear();
-		{
-			std::lock_guard<std::mutex> lock(queue_mutex_);
-			queue_.clear();
-			recovery_queue_.clear();
-			queued_.store(0, std::memory_order_release);
-			recovery_pending_.store(0, std::memory_order_release);
-		}
-		started_.store(false, std::memory_order_release);
+		join_and_clear();
 		throw;
 	}
+	lifecycle_lock.unlock();
+	publish_metrics();
 }
 
-void NotificationDispatchRuntime::stop() noexcept {
-	if (!started_.exchange(false, std::memory_order_acq_rel)) return;
-	request_stop();
-
-	if (scheduler_thread_.joinable() && scheduler_thread_.get_id() != std::this_thread::get_id()) {
+void NotificationDispatchRuntime::join_and_clear() {
+	if (scheduler_thread_.joinable()) {
 		scheduler_thread_.join();
 	}
 	for (auto& worker : workers_) {
-		if (worker.joinable() && worker.get_id() != std::this_thread::get_id()) worker.join();
+		if (worker.joinable()) worker.join();
 	}
 	workers_.clear();
 
@@ -264,13 +281,27 @@ void NotificationDispatchRuntime::stop() noexcept {
 		queued_.store(0, std::memory_order_release);
 		recovery_pending_.store(0, std::memory_order_release);
 	}
+	started_.store(false, std::memory_order_release);
+}
+
+void NotificationDispatchRuntime::stop() noexcept {
+	if (RuntimeCallbackScope::contains(this)) {
+		request_stop();
+		return;
+	}
+	std::unique_lock<std::mutex> lifecycle_lock(lifecycle_mutex_);
+	if (!started_.load(std::memory_order_acquire)) return;
+	request_stop();
+	join_and_clear();
 	set_status(configuration_.enabled ? "STOPPED" : "DISABLED");
+	lifecycle_lock.unlock();
 	publish_metrics();
 }
 
 std::size_t NotificationDispatchRuntime::submit(const NotificationRoutingPlan& plan) {
 	if (!configuration_.enabled || !accepting_.load(std::memory_order_acquire)) return 0;
 	std::size_t accepted = 0;
+	std::unique_lock<std::mutex> submission_lock(submission_mutex_);
 	for (const auto& intent : plan.intents) {
 		if (!accepting_.load(std::memory_order_acquire)) break;
 		if (!intent.delivery_authorized || intent.status != "ELIGIBLE" || intent.dedup_key.empty()) continue;
@@ -299,6 +330,7 @@ std::size_t NotificationDispatchRuntime::submit(const NotificationRoutingPlan& p
 				"bounded notification dispatch queue rejected eligible work");
 		}
 	}
+	submission_lock.unlock();
 	publish_metrics();
 	return accepted;
 }
@@ -330,6 +362,7 @@ bool NotificationDispatchRuntime::take_work(WorkItem& item) {
 }
 
 void NotificationDispatchRuntime::worker_loop() noexcept {
+	RuntimeCallbackScope callback_scope(this);
 	try {
 		WorkItem work;
 		while (take_work(work)) {
@@ -414,6 +447,7 @@ void NotificationDispatchRuntime::process_work(NotificationDeliveryAttempt attem
 }
 
 void NotificationDispatchRuntime::scheduler_loop() {
+	RuntimeCallbackScope callback_scope(this);
 	std::uint64_t last_generation = 0;
 	while (!stop_requested_.load(std::memory_order_acquire)) {
 		bool lifecycle_observed = false;
@@ -520,6 +554,7 @@ void NotificationDispatchRuntime::publish_metrics() {
 			if (serialized == last_published_metrics_) return;
 			last_published_metrics_ = serialized;
 		}
+		RuntimeCallbackScope callback_scope(this);
 		metrics_sink_(metrics);
 	} catch (...) {
 		// Metrics publication is observational and must never affect dispatch authority.

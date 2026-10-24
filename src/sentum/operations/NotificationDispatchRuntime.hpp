@@ -70,6 +70,8 @@ private:
 	std::atomic<bool> stop_requested_{false};
 	std::atomic<bool> provider_cancellation_{false};
 	std::atomic<bool> recovery_required_{false};
+	std::mutex lifecycle_mutex_;
+	std::mutex submission_mutex_;
 
 	mutable std::mutex queue_mutex_;
 	std::condition_variable queue_cv_;
@@ -120,6 +122,7 @@ private:
 	void record_terminal_queue_rejection(NotificationDeliveryAttempt attempt, const char* code, const char* reason);
 	void latch_failure(const char* error) noexcept;
 	void request_stop();
+	void join_and_clear();
 	void set_status(std::string status, std::string error = {});
 	void publish_metrics();
 };
