@@ -5,6 +5,7 @@
 #pragma once
 
 #include <sentum/api/ReconnectingMarketStream.hpp>
+#include <sentum/api/BinanceEnvironment.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -20,7 +21,8 @@ public:
 	using TradeCallback = std::function<void(double, std::chrono::system_clock::time_point)>;
     using HealthCallback = std::function<void(const sentum::api::MarketStreamHealth&)>;
     explicit BinanceWebsocketClient(const std::string& symbol,
-        std::chrono::milliseconds maximum_event_age = std::chrono::milliseconds(2000));
+        std::chrono::milliseconds maximum_event_age = std::chrono::milliseconds(2000),
+        sentum::api::BinanceEnvironment environment = sentum::api::BinanceEnvironment::PublicMarketData);
 	~BinanceWebsocketClient();
 
 	void start();
@@ -29,6 +31,8 @@ public:
     void set_on_trade(const TradeCallback& callback);
     void set_on_health(const HealthCallback& callback);
     sentum::api::MarketStreamHealth stream_health() const;
+    sentum::api::BinanceEnvironment environment() const noexcept { return environment_; }
+    std::string endpoint() const { return sentum::api::market_trade_url(environment_, symbol); }
 
 private:
 	friend struct WebsocketLifecycleTestAccess;
@@ -36,6 +40,7 @@ private:
 	struct Impl;
 	std::unique_ptr<Impl> impl;
 	std::string symbol;
+    const sentum::api::BinanceEnvironment environment_;
 	std::atomic<bool> running;
 	std::thread ws_thread;
 	std::thread::id worker_id;

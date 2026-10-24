@@ -1,12 +1,14 @@
 #include <algorithm>
 #include <chrono>
 #include <stdexcept>
+#include <type_traits>
 
 #include <sentum/core/RuntimeControl.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
 #include <sentum/market/RuntimePerformanceMetrics.hpp>
 #include <sentum/trader/TradeEngine.hpp>
 #include <sentum/trader/strategy/MomentumStrategy.hpp>
+#include <sentum/trader/risk/PositionExitPolicy.hpp>
 
 namespace {
 constexpr std::uint32_t kStrategyLatencySampleEvery = 64;
@@ -62,6 +64,7 @@ bool TradeEngine::live_price_ready() const {
 void TradeEngine::enqueue_price(double price) { enqueue_price(price, clock->now()); }
 
 void TradeEngine::enqueue_price(double price, std::chrono::system_clock::time_point timestamp) {
+    if (!std::isfinite(price) || price <= 0.0) return;
     latest_price.store(price, std::memory_order_relaxed);
     MarketEvent event;
     event.type = MarketEvent::Type::Trade;
@@ -160,6 +163,9 @@ void TradeEngine::run_event_loop() {
 sentum::order::Snapshot TradeEngine::execute(sentum::order::Side side, double quantity, double price,
                                               std::chrono::system_clock::time_point now, const char* purpose) {
     if (!execution_venue) throw std::logic_error("Execution venue is not initialized");
+    if (!std::isfinite(price) || price <= 0.0 || !std::isfinite(quantity) || quantity <= 0.0 ||
+        !std::isfinite(price * quantity) || price * quantity <= 0.0)
+        throw std::invalid_argument("Execution price, quantity and notional must be finite and positive");
     execution_venue->set_market(price, now);
     sentum::order::Request request;
     request.symbol = symbol;
@@ -175,9 +181,14 @@ TradeAction TradeEngine::process_event(const MarketEvent& event) {
     sentum::market::SampledScopedLatency decision_latency(
         sentum::market::RuntimePerformanceMetrics::global().strategy_decision_latency,
         decision_sampler);
-    if (event.symbol != symbol || event.price <= 0.0) return TradeAction::NONE;
-    const auto age = clock->now() - event.timestamp;
-    if (age > std::chrono::milliseconds(risk.max_data_age_ms)) {
+    if (event.symbol != symbol || !std::isfinite(event.price) || event.price <= 0.0) return TradeAction::NONE;
+    const auto current = clock->now();
+    using Ticks = std::make_unsigned_t<std::chrono::system_clock::duration::rep>;
+    const auto age = static_cast<Ticks>(current.time_since_epoch().count()) -
+        static_cast<Ticks>(event.timestamp.time_since_epoch().count());
+    const auto maximum_age = static_cast<Ticks>(std::chrono::duration_cast<std::chrono::system_clock::duration>(
+        std::chrono::milliseconds(risk.max_data_age_ms)).count());
+    if (current >= event.timestamp && age > maximum_age) {
         engine_logger.log("[RISK] stale market event rejected");
         return TradeAction::NONE;
     }
@@ -195,6 +206,7 @@ TradeAction TradeEngine::evaluate(double price) {
 
 TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::time_point now,
                                      const std::string& source, const MarketEvent* event) {
+    if (!std::isfinite(price) || price <= 0.0) return TradeAction::NONE;
     std::lock_guard<std::mutex> lock(state_mutex);
     if (finalization_error_) std::rethrow_exception(finalization_error_);
     if (stop_requested_.load(std::memory_order_acquire) || !live_price_ready()) return TradeAction::NONE;
@@ -257,17 +269,10 @@ TradeAction TradeEngine::evaluate_at(double price, std::chrono::system_clock::ti
         logger.log(position, TradeAction::BUY);
         return TradeAction::BUY;
     }
-    if (price > position.highest_price) {
-        position.highest_price = price;
-        if (position.trailing_sl_enabled) {
-            position.stop_loss_price = std::max(position.stop_loss_price,
-                                               price * (1.0 - position.trailing_sl_percent));
-        }
-    }
-    if (price < position.lowest_price) position.lowest_price = price;
-    if (price <= position.stop_loss_price) return close_position(price, "stop_loss", now);
-    if (price >= position.take_profit_price) return close_position(price, "take_profit", now);
-    if (now - position.entry_time >= std::chrono::seconds(risk.max_holding_seconds)) return close_position(price, "maximum_holding_time", now);
+    const auto reason = sentum::risk::evaluate_position_exit(price, now, position.entry_time,
+        position.highest_price, position.lowest_price, position.stop_loss_price, position.take_profit_price,
+        position.trailing_sl_enabled, position.trailing_sl_percent, std::chrono::seconds(risk.max_holding_seconds));
+    if (reason) return close_position(price, reason, now);
     return TradeAction::NONE;
 }
 
@@ -293,6 +298,9 @@ TradeAction TradeEngine::close_position(double market_price, const std::string& 
         closed.gross_profit = (closed.exit_price - closed.entry_price) * closed.quantity;
         closed.fee_exit = closed.exit_price * closed.quantity * risk.sell_fee_percent;
         closed.net_profit = closed.gross_profit - closed.fee_entry - closed.fee_exit;
+        if (!std::isfinite(closed.gross_profit) || !std::isfinite(closed.net_profit) ||
+            !std::isfinite(closed.fee_entry) || !std::isfinite(closed.fee_exit))
+            throw std::runtime_error("Simulated trade settlement overflowed");
 
         std::exception_ptr persistence_error;
         try {

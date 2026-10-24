@@ -49,7 +49,11 @@ struct WebsocketLifecycleTestAccess {
     }
 
     static void emit(BinanceWebsocketClient& client) { client.handle_message(R"({"p":"100"})", false); }
-    static void emit(BinanceUserDataStream& client) { client.handle_message(R"({"e":"executionReport"})"); }
+    static void emit(BinanceUserDataStream& client) {
+        client.handle_message(nlohmann::json{{"id", client.request_id_}, {"status", 200},
+            {"result", {{"subscriptionId", 0}}}}.dump());
+        client.handle_message(R"({"subscriptionId":0,"event":{"e":"executionReport"}})");
+    }
 };
 
 namespace {
@@ -110,7 +114,9 @@ struct MarketFixture {
 
 struct UserFixture {
     std::function<void()> callback;
-    BinanceUserDataStream client{"lifecycle-fixture", [this](const nlohmann::json& event) {
+    BinanceUserDataStream client{[](const std::string& id) {
+        return nlohmann::json{{"id", id}, {"method", "userDataStream.subscribe.signature"}};
+    }, [this](const nlohmann::json& event) {
         require(event.at("e") == "executionReport", "user callback received an unexpected payload");
         if (callback) callback();
     }};

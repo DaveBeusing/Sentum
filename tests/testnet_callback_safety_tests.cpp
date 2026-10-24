@@ -114,6 +114,8 @@ Snapshot snapshot(const Request& request, State state) {
 
 class SyncVenue final : public sentum::execution::IExecutionVenue {
 public:
+    std::optional<nlohmann::json> load_position_policy(const std::string&) const override { return policy_; }
+    void save_position_policy(const std::string&, const nlohmann::json& policy) override { policy_ = policy; }
     void start(UpdateHandler handler) override { handler_ = std::move(handler); ready_.store(true); }
     void stop() noexcept override { ready_.store(false); ++stops; }
     Snapshot submit(const Request& request) override {
@@ -139,6 +141,7 @@ public:
     Request latest;
 private:
     UpdateHandler handler_;
+    std::optional<nlohmann::json> policy_;
     std::atomic<bool> ready_{false}, killed_{false};
 };
 
@@ -171,6 +174,8 @@ public:
 
 class ManagedVenue final : public sentum::execution::IExecutionVenue {
 public:
+    std::optional<nlohmann::json> load_position_policy(const std::string&) const override { return policy_; }
+    void save_position_policy(const std::string&, const nlohmann::json& policy) override { policy_ = policy; }
     ManagedVenue() : manager(exchange) {}
     void start(UpdateHandler handler) override { manager.set_update_handler(std::move(handler)); manager.reconcile_startup(); }
     void stop() noexcept override { ++stops; manager.activate_kill_switch(); }
@@ -183,6 +188,7 @@ public:
     MockExchange exchange;
     sentum::order::OrderManager manager;
     std::atomic<int> stops{0}, kills{0};
+    std::optional<nlohmann::json> policy_;
 };
 
 RiskConfig risk() {

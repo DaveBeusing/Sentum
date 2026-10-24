@@ -33,6 +33,8 @@ struct Request {
     std::string client_order_id;
     std::string base_asset;
     std::string quote_asset;
+    // Canonical exchange quantity, when validated against exact decimal filters.
+    std::string quantity_text;
 };
 
 struct ExecutionCommission {

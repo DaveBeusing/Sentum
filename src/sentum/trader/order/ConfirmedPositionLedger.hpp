@@ -38,6 +38,19 @@ struct AppliedExecutionDelta {
 // State labels do not decide exposure: a cancelled order can retain a real fill.
 class ConfirmedPositionLedger {
 public:
+    // Validate a complete chronological replay before replacing any live state.
+    void restore(const std::vector<Snapshot>& replay) {
+        ConfirmedPositionLedger recovered;
+        for (const auto& snapshot : replay) recovered.on_order_update(snapshot);
+        std::lock_guard<std::mutex> lock(mutex_);
+        positions_.swap(recovered.positions_);
+        assets_.swap(recovered.assets_);
+        applied_.swap(recovered.applied_);
+        client_identities_.swap(recovered.client_identities_);
+        execution_order_.swap(recovered.execution_order_);
+        commission_totals_.swap(recovered.commission_totals_);
+    }
+
     AppliedExecutionDelta on_order_update(const Snapshot& order) {
         if (!order.locally_owned) return {};
         validate_numbers(order);
