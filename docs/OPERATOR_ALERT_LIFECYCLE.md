@@ -61,6 +61,12 @@ snapshot. The scheduler reports degraded status and unavailable lifecycle eviden
 subsequent polls may retry the observation. Previously accepted delivery work retains
 its own durable identity and recovery contract.
 
+A later successful observation restores snapshot health. It also publishes lifecycle
+changes when new delivery intake is paused, so a committed clear or recurrence cannot
+leave an old generation or acknowledgement in the runtime view. A separate latched
+delivery-storage failure still keeps the dispatcher degraded and blocks new delivery;
+lifecycle recovery cannot clear that latch.
+
 Generation and observation values are positive integers within the supported SQLite
 integer range. Corrupt, rounded or contradictory metadata is rejected. A generation
 at the maximum supported integer cannot wrap to a previously used key: reactivation
@@ -117,6 +123,8 @@ in-process recording provider with real SQLite persistence:
 - migration from multiple legacy generations without resetting delivery deduplication;
 - acknowledgement retention within an episode and isolation from later episodes;
 - failed initial lifecycle writes and failed clears, with rollback and no new delivery;
+- health recovery after a successful observation and current episode publication while
+  delivery intake remains paused by a separate persistence fault;
 - current-condition visibility under uninitialized, stale and corrupt episode storage;
 - integer exhaustion and rounded JSON identity rejection.
 

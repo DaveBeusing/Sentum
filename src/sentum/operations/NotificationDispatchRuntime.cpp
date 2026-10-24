@@ -436,6 +436,10 @@ void NotificationDispatchRuntime::scheduler_loop() {
 				const auto plan = derive_notification_routing_plan(routed_snapshot, routing_policy_);
 				(void)submit(plan);
 				last_generation = snapshot.generation;
+				set_status("RUNNING");
+				// Episode changes remain observable while new delivery intake is
+				// paused. A delivery-storage latch still prevents status recovery.
+				publish_metrics();
 			}
 		} catch (const std::exception& error) {
 			if (!lifecycle_observed) {

@@ -131,7 +131,8 @@ private:
 };
 
 std::unique_ptr<NotificationDispatchRuntime> runtime_for(const std::string& path, SnapshotSource& source,
-                                                       const std::shared_ptr<RecordingProvider>& provider) {
+                                                       const std::shared_ptr<RecordingProvider>& provider,
+                                                       NotificationDispatchRuntime::MetricsSink metrics_sink = {}) {
     NotificationDispatchConfiguration configuration;
     configuration.enabled = true;
     configuration.worker_count = 1;
@@ -143,7 +144,7 @@ std::unique_ptr<NotificationDispatchRuntime> runtime_for(const std::string& path
     NotificationProviderRegistry registry;
     registry.add("PAGER", provider);
     return std::make_unique<NotificationDispatchRuntime>(configuration, routing_policy(), std::move(registry), path,
-                                                        [&] { return source.read(); });
+                                                        [&] { return source.read(); }, std::move(metrics_sink));
 }
 
 OperatorAlertLifecycleItem episode(const std::string& path, const std::string& id) {
@@ -315,9 +316,13 @@ void failed_lifecycle_write_never_authorizes_an_episode() {
     control.execute("CREATE TRIGGER reject_episode BEFORE INSERT ON notification_alert_lifecycle "
                     "BEGIN SELECT RAISE(ABORT,'fixture lifecycle write failure'); END;");
     runtime->start();
-    eventually([&] { return runtime->metrics_json().at("snapshot_errors").get<std::uint64_t>() > 0; },
+    eventually([&] {
+        const auto metrics = runtime->metrics_json();
+        return metrics.at("snapshot_errors").get<std::uint64_t>() > 0 && metrics.at("status") == "DEGRADED";
+    },
                "lifecycle write failure was not observable");
-    require(provider->requests().empty() && runtime->metrics_json().at("alert_lifecycle_status") == "UNAVAILABLE",
+    require(provider->requests().empty() && runtime->metrics_json().at("alert_lifecycle_status") == "UNAVAILABLE" &&
+            runtime->metrics_json().at("status") == "DEGRADED",
             "uncommitted lifecycle authorized delivery");
     {
         NotificationDeliveryEvidenceRepository reader(temporary.path, NotificationDeliveryEvidenceOpenMode::ReadOnly);
@@ -326,6 +331,8 @@ void failed_lifecycle_write_never_authorizes_an_episode() {
     }
     control.execute("DROP TRIGGER reject_episode;");
     wait_terminal(temporary.path, "market.disconnected", 1);
+    eventually([&] { return runtime->metrics_json().at("status") == "RUNNING"; },
+               "successful lifecycle observation did not recover snapshot health");
     control.execute("CREATE TRIGGER reject_clear BEFORE UPDATE ON notification_alert_lifecycle WHEN NEW.state='CLEARED' "
                     "BEGIN SELECT RAISE(ABORT,'fixture clear write failure'); END;");
     const auto failures = runtime->metrics_json().at("snapshot_errors").get<std::uint64_t>();
@@ -345,6 +352,65 @@ void failed_lifecycle_write_never_authorizes_an_episode() {
     source.wait_polls();
     source.set(outage());
     wait_terminal(temporary.path, "market.disconnected", 2);
+    runtime->stop();
+}
+
+void paused_intake_still_publishes_current_episode_identity() {
+    TemporaryDatabase temporary;
+    auto acknowledged = outage(true);
+    acknowledged["operations_control_plane"]["alert_acknowledgements"] = {{{"alert_id", "runtime.kill_switch"},
+        {"generation", 1}, {"actor", "operator"}, {"reason", "reviewed first episode"}}};
+    SnapshotSource source(acknowledged);
+    auto provider = std::make_shared<RecordingProvider>();
+    std::mutex published_mutex;
+    nlohmann::json published = nlohmann::json::object();
+    auto runtime = runtime_for(temporary.path, source, provider, [&](const auto& metrics) {
+        std::lock_guard<std::mutex> lock(published_mutex);
+        published = metrics;
+    });
+    const auto published_metrics = [&] {
+        std::lock_guard<std::mutex> lock(published_mutex);
+        return published;
+    };
+    const auto published_episode = [&](std::size_t generation, const char* state) {
+        const auto metrics = published_metrics();
+        if (!metrics.contains("alert_lifecycle") || metrics.at("alert_lifecycle_status") != "AVAILABLE") return false;
+        for (const auto& item : metrics.at("alert_lifecycle")) {
+            if (item.at("id") == "runtime.kill_switch" && item.at("generation") == generation &&
+                item.at("state") == state) return true;
+        }
+        return false;
+    };
+    runtime->start();
+    eventually([&] { return published_episode(1, "ACKNOWLEDGED"); }, "initial acknowledged episode was not published");
+
+    SqliteControl control(temporary.path);
+    control.execute("CREATE TRIGGER reject_delivery BEFORE INSERT ON notification_delivery_evidence "
+                    "BEGIN SELECT RAISE(ABORT,'fixture delivery write failure'); END;");
+    bool rejected = false;
+    try { runtime->submit(derive_notification_routing_plan(outage(), routing_policy())); }
+    catch (const std::exception&) { rejected = true; }
+    require(rejected && runtime->metrics_json().at("recovery_required") == true &&
+            runtime->metrics_json().at("accepting") == false, "delivery fault did not pause new intake");
+    control.execute("DROP TRIGGER reject_delivery;");
+
+    source.set(healthy());
+    eventually([&] { return published_episode(1, "CLEARED"); }, "paused intake hid the committed clear from metrics");
+    source.set(acknowledged);
+    eventually([&] {
+        return published_episode(2, "NEW") || published_episode(2, "ACTIVE");
+    }, "paused intake hid the committed recurrence from metrics");
+
+    const auto metrics = published_metrics();
+    require(metrics.at("status") == "DEGRADED" && metrics.at("recovery_required") == true &&
+            metrics.at("accepting") == false, "lifecycle recovery cleared the delivery-storage failure latch");
+    auto projected = acknowledged;
+    projected["notification_dispatch_runtime"] = metrics;
+    const auto visible = derive_operator_alert_center_view(projected);
+    require(visible.active == 1 && visible.items.front().generation == 2 &&
+            visible.items.front().state != "ACKNOWLEDGED" && visible.items.front().acknowledged_by.empty(),
+            "stale published identity carried acknowledgement into a new episode");
+    require(provider->requests().empty(), "lifecycle publication resumed delivery before durable recovery");
     runtime->stop();
 }
 
@@ -419,6 +485,7 @@ int main() {
         restart_keeps_active_episode_and_cleared_tombstone();
         legacy_delivery_history_sets_generation_floor();
         acknowledgements_survive_restart_without_covering_recurrence();
+        paused_intake_still_publishes_current_episode_identity();
         failed_lifecycle_write_never_authorizes_an_episode();
         unavailable_or_stale_episode_storage_keeps_conditions_visible();
         generation_exhaustion_is_fail_closed();
