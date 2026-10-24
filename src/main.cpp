@@ -195,7 +195,7 @@ int testnet_main(const sentum::cli::Options& options) {
     RiskConfig risk = load_risk_config("config/risk.json");
     auto venue = std::make_unique<sentum::execution::BinanceTestnetExecutionVenue>();
     sentum::execution::TestnetStrategyRuntime runtime(options.symbol,risk,std::make_unique<MomentumStrategy>(),std::move(venue));
-    runtime.start(); dashboard.set("health","healthy");
+    runtime.start();
     auto notifications = sentum::operations::start_notification_dispatch_runtime();
     auto incidents = sentum::operations::start_governed_incident_lifecycle_runtime(SENTUM_GIT_COMMIT);
     std::unique_ptr<sentum::ui::TerminalUi> tui;

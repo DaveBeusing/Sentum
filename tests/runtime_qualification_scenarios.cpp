@@ -283,7 +283,11 @@ nlohmann::json scenario_partial_fill() {
     MockSpotExecutionClient client;
     sentum::order::OrderManager manager(client);
     std::vector<sentum::order::Snapshot> updates;
-    manager.set_update_handler([&](const sentum::order::Snapshot& update) { updates.push_back(update); });
+    sentum::order::ConfirmedPositionLedger ledger;
+    manager.set_update_handler([&](const sentum::order::Snapshot& update) {
+        updates.push_back(update);
+        ledger.on_order_update(update);
+    });
     manager.reconcile_startup();
 
     sentum::order::Request request{"BTCUSDT", sentum::order::Side::Buy, 1.0, "qualification-order", "BTC", "USDT"};
@@ -295,10 +299,17 @@ nlohmann::json scenario_partial_fill() {
     require(partial.has_value(), "partial fill order disappeared");
     require(partial->state == sentum::order::State::PartiallyFilled, "partial fill state was not preserved");
     require(!partial->exchange_confirmed_fill(), "partial fill was treated as a confirmed complete fill");
+    require(ledger.get("BTCUSDT").has_value() &&
+                std::abs(ledger.get("BTCUSDT")->quantity - 0.4) < 1e-12,
+            "partial exchange execution was absent from confirmed inventory");
 
     manager.on_user_data_event(execution_report("FILLED", 1.0, 1.0, 101.0, 77, 0.6));
     const auto filled = manager.get(request.client_order_id);
     require(filled.has_value() && filled->exchange_confirmed_fill(), "final exchange fill was not authoritative");
+    manager.on_user_data_event(execution_report("FILLED", 1.0, 1.0, 101.0, 77, 0.6));
+    require(ledger.get("BTCUSDT").has_value() &&
+                std::abs(ledger.get("BTCUSDT")->quantity - 1.0) < 1e-12,
+            "duplicate complete fill changed confirmed inventory");
 
     return {
         {"order_updates", updates.size()},

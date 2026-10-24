@@ -11,12 +11,14 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <unordered_map>
 
 #include <sentum/api/BinanceWebsocketClient.hpp>
 #include <sentum/dashboard/DashboardState.hpp>
 #include <sentum/observability/StatusReporter.hpp>
 #include <sentum/trader/execution/IExecutionVenue.hpp>
 #include <sentum/trader/order/OrderEventRepository.hpp>
+#include <sentum/trader/order/ConfirmedPositionLedger.hpp>
 #include <sentum/trader/risk/RiskManager.hpp>
 #include <sentum/trader/strategy/IStrategy.hpp>
 #include <sentum/trader/types/RiskConfig.hpp>
@@ -36,10 +38,11 @@ public:
         if (running_.exchange(true)) return;
         set_status("mode", "testnet");
         set_status("symbol", symbol_);
-        set_status("kill_switch_active", false);
+        set_status("kill_switch_active", venue_->killed());
         set_status("reconciliation_complete", false);
         venue_->start([this](const order::Snapshot& update) { on_order_update(update); });
         set_status("reconciliation_complete", venue_->ready());
+        set_status("kill_switch_active", venue_->killed());
         price_stream_ = std::make_unique<BinanceWebsocketClient>(symbol_, std::chrono::milliseconds(risk_.max_data_age_ms));
         price_stream_->set_on_health([this](const sentum::api::MarketStreamHealth& health) {
             set_status("market_data_connected", health.connected);
@@ -52,7 +55,7 @@ public:
         set_status("market_data_connected", price_stream_->stream_health().connected);
         set_status("market_data_fresh", price_stream_->stream_health().fresh);
         set_status("user_stream_connected", true);
-        sentum::dashboard::DashboardState::global().set("health", "healthy");
+        sentum::dashboard::DashboardState::global().set("health", venue_->ready() && !venue_->killed() ? "healthy" : "blocked");
     }
 
     void stop() noexcept {
@@ -102,7 +105,7 @@ private:
         std::optional<order::Request> request;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (!running_.load() || kill_requested_.load() || submission_in_progress_ || !active_order_.empty()) return;
+            if (!running_.load() || kill_requested_.load() || reconciliation_pending_ || submission_in_progress_ || !active_order_.empty()) return;
 
             if (confirmed_quantity_ <= 0.0) {
                 const auto signal = strategy_->on_price(price, now);
@@ -123,6 +126,7 @@ private:
                 request = order::Request{symbol_, order::Side::Sell, confirmed_quantity_, id(symbol_, "sell")};
             }
             active_order_ = request->client_order_id;
+            owned_orders_.emplace(active_order_, OwnedOrder{request->side});
             submission_in_progress_ = true;
         }
 
@@ -146,40 +150,98 @@ private:
     }
 
     void on_order_update(const order::Snapshot& update) {
-        try { events_.save(update, "exchange"); }
-        catch (...) { kill(); }
-        set_status("last_order_state", order::to_string(update.state));
-        set_status("orders_pending", update.state == order::State::Pending || update.state == order::State::Acknowledged ? 1 : 0);
-        set_status("orders_partially_filled", update.state == order::State::PartiallyFilled ? 1 : 0);
-        set_status("last_user_event_age_ms", 0);
-
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (update.symbol != symbol_ || update.client_order_id != active_order_) return;
-        if (update.state == order::State::Rejected || update.state == order::State::Cancelled) {
-            active_order_.clear();
+        bool identity_conflict = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            const auto owner = owned_orders_.find(update.client_order_id);
+            if (!update.locally_owned || update.symbol != symbol_ || owner == owned_orders_.end()) return;
+            identity_conflict = owner->second.side != update.side ||
+                (owner->second.exchange_order_id > 0 && update.exchange_order_id > 0 &&
+                 owner->second.exchange_order_id != update.exchange_order_id);
+        }
+        if (identity_conflict) {
+            kill();
+            try { set_status("last_execution_error", "Order identity changed; reconciliation required"); } catch (...) {}
             return;
         }
-        if (!update.exchange_confirmed_fill()) return;
-        if (update.side == order::Side::Buy) {
-            confirmed_quantity_ = update.executed_quantity;
-            entry_price_ = update.average_fill_price;
-            entry_time_ = update.updated_at;
-            set_status("confirmed_position_quantity", confirmed_quantity_);
-            set_status("confirmed_entry_price", entry_price_);
-            sentum::dashboard::DashboardState::global().set("active_position",
-                nlohmann::json{{"symbol",symbol_},{"quantity",confirmed_quantity_},{"entry_price",entry_price_}});
-        } else {
-            confirmed_quantity_ = 0.0;
-            entry_price_ = 0.0;
-            entry_time_ = {};
-            last_exit_ = update.updated_at;
-            strategy_->reset();
-            set_status("confirmed_position_quantity", 0.0);
-            set_status("last_exit_reason", exit_reason_);
-            sentum::dashboard::DashboardState::global().set("active_position", nullptr);
+
+        // Evidence failures block submission immediately, outside the state
+        // mutex: killing the venue can synchronously deliver cancellation.
+        try { events_.save(update, "exchange"); }
+        catch (...) { kill(); }
+
+        bool show_update = false;
+        bool reconcile_required = update.state == order::State::Unknown || update.requires_reconciliation;
+        bool position_changed = false;
+        double quantity = 0.0, entry_price = 0.0;
+        bool exited = false;
+        std::string exit_reason;
+        try {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto& owner = owned_orders_.at(update.client_order_id);
+            if (owner.exchange_order_id > 0 && update.exchange_order_id > 0 &&
+                owner.exchange_order_id != update.exchange_order_id)
+                throw std::runtime_error("Order identity changed during execution update");
+            const bool current_order = update.client_order_id == active_order_;
+            const auto delta = position_ledger_.on_order_update(update);
+            if (owner.exchange_order_id == 0 && update.exchange_order_id > 0)
+                owner.exchange_order_id = update.exchange_order_id;
+            if (delta.applied && (delta.executed_quantity != 0.0 || delta.quote_quantity != 0.0 || !delta.commissions.empty())) {
+                const double previous_quantity = confirmed_quantity_;
+                const auto position = position_ledger_.get(symbol_);
+                confirmed_quantity_ = position ? position->quantity : 0.0;
+                entry_price_ = position ? position->average_entry_price : 0.0;
+                if (previous_quantity == 0.0 && confirmed_quantity_ > 0.0)
+                    entry_time_ = update.updated_at;
+                exited = previous_quantity > 0.0 && confirmed_quantity_ == 0.0;
+                if (exited) {
+                    entry_time_ = {};
+                    last_exit_ = update.updated_at;
+                    strategy_->reset();
+                }
+                position_changed = true;
+                // A newly discovered execution/fee on an already released
+                // reservation is retained, but cannot silently change the
+                // assumptions of a later in-flight strategy order.
+                if (!current_order && !active_order_.empty()) reconcile_required = true;
+            }
+            const bool terminal = update.state == order::State::Filled || update.state == order::State::Cancelled ||
+                update.state == order::State::Rejected;
+            if (current_order && terminal) active_order_.clear();
+            if (reconcile_required) reconciliation_pending_ = true;
+            show_update = current_order || position_changed;
+            quantity = confirmed_quantity_;
+            entry_price = entry_price_;
+            exit_reason = exit_reason_;
+        } catch (const std::exception& error) {
+            kill();
+            try { set_status("last_execution_error", error.what()); } catch (...) {}
+            return;
         }
-        active_order_.clear();
+
+        if (show_update) {
+            set_status("last_order_state", order::to_string(update.state));
+            set_status("orders_pending", update.state == order::State::Pending || update.state == order::State::Acknowledged ||
+                update.state == order::State::Unknown ? 1 : 0);
+            set_status("orders_partially_filled", update.state == order::State::PartiallyFilled ? 1 : 0);
+            set_status("last_user_event_age_ms", 0);
+        }
+        if (position_changed) {
+            set_status("confirmed_position_quantity", quantity);
+            set_status("confirmed_entry_price", entry_price);
+            set_status("confirmed_commissions", position_ledger_.commission_totals(symbol_));
+            sentum::dashboard::DashboardState::global().set("active_position", quantity > 0.0
+                ? nlohmann::json{{"symbol", symbol_}, {"quantity", quantity}, {"entry_price", entry_price}}
+                : nlohmann::json(nullptr));
+            if (exited) set_status("last_exit_reason", exit_reason);
+        }
+        if (reconcile_required) kill();
     }
+
+    struct OwnedOrder {
+        order::Side side;
+        std::int64_t exchange_order_id = 0;
+    };
 
     std::string symbol_;
     RiskConfig risk_;
@@ -193,7 +255,10 @@ private:
     std::atomic<bool> kill_requested_{false};
     std::mutex mutex_;
     bool submission_in_progress_ = false;
+    bool reconciliation_pending_ = false;
     std::string active_order_;
+    std::unordered_map<std::string, OwnedOrder> owned_orders_;
+    order::ConfirmedPositionLedger position_ledger_;
     std::string exit_reason_;
     double confirmed_quantity_ = 0.0;
     double entry_price_ = 0.0;
