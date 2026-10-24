@@ -402,7 +402,8 @@ std::unique_ptr<sentum::order::LiveOrderSession> make_session(
     timing.supervisor_poll_interval = poll;
     timing.keepalive_interval = keepalive;
     return sentum::order::LiveOrderSession::from_dependencies(
-        std::move(client), streams.factory(), timing);
+        std::move(client), streams.factory(), timing,
+        sentum::order::LiveOrderSession::Persistence::ephemeral());
 }
 
 nlohmann::json scenario_user_stream_interruption() {
