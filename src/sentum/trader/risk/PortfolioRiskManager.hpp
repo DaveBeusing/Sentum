@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <deque>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -44,17 +45,50 @@ struct PortfolioDecision {
     bool approved = false;
     double size_multiplier = 0.0;
     std::string reason;
+    double approved_notional = 0.0;
 };
 
 class PortfolioRiskManager {
 public:
-    explicit PortfolioRiskManager(PortfolioRiskConfig config = {}) : config_(std::move(config)) {}
+    explicit PortfolioRiskManager(PortfolioRiskConfig config = {}) : config_(std::move(config)) {
+        for (const double value : {config_.max_gross_exposure, config_.max_asset_exposure,
+                                   config_.max_correlated_exposure, config_.max_daily_drawdown,
+                                   config_.target_volatility})
+            if (!std::isfinite(value) || value < 0.0)
+                throw std::invalid_argument("Portfolio risk limits must be finite and nonnegative");
+        if (!std::isfinite(config_.minimum_size_multiplier) || config_.minimum_size_multiplier <= 0.0 ||
+            !std::isfinite(config_.maximum_size_multiplier) ||
+            config_.maximum_size_multiplier < config_.minimum_size_multiplier ||
+            !std::isfinite(config_.correlation_threshold) || config_.correlation_threshold < 0.0 ||
+            config_.correlation_threshold > 1.0)
+            throw std::invalid_argument("Invalid portfolio sizing or correlation bounds");
+    }
 
     PortfolioDecision approve(const std::string& symbol, double proposed_notional,
                               const PortfolioRiskSnapshot& snapshot,
                               std::chrono::system_clock::time_point now) const {
-        if (!(snapshot.equity > 0.0) || !(proposed_notional > 0.0))
+        if (symbol.empty() || !std::isfinite(snapshot.equity) || !(snapshot.equity > 0.0) ||
+            !std::isfinite(proposed_notional) || !(proposed_notional > 0.0) ||
+            !std::isfinite(snapshot.day_start_equity) || snapshot.day_start_equity < 0.0)
             return {false, 0.0, "invalid portfolio equity or proposed notional"};
+
+        double multiplier = 1.0;
+        const auto vol = snapshot.annualized_volatility.find(symbol);
+        if (vol != snapshot.annualized_volatility.end()) {
+            if (!std::isfinite(vol->second) || vol->second < 0.0)
+                return {false, 0.0, "invalid portfolio volatility"};
+            if (vol->second > 0.0 && config_.target_volatility > 0.0) {
+                // Divide in extended precision so finite inputs cannot overflow before clamping.
+                const long double ratio = static_cast<long double>(config_.target_volatility) / vol->second;
+                multiplier = static_cast<double>(std::clamp(ratio,
+                    static_cast<long double>(config_.minimum_size_multiplier),
+                    static_cast<long double>(config_.maximum_size_multiplier)));
+            }
+        }
+        multiplier = std::clamp(multiplier, config_.minimum_size_multiplier, config_.maximum_size_multiplier);
+        const double final_notional = proposed_notional * multiplier;
+        if (!std::isfinite(final_notional) || !(final_notional > 0.0))
+            return {false, 0.0, "invalid scaled portfolio notional"};
 
         if (snapshot.day_start_equity > 0.0) {
             const double drawdown = std::max(0.0, (snapshot.day_start_equity - snapshot.equity) / snapshot.day_start_equity);
@@ -70,33 +104,41 @@ public:
         if (trades_last_hour >= config_.max_trades_per_hour)
             return {false, 0.0, "hourly trade-rate limit reached"};
 
-        double gross = 0.0, same_asset = 0.0, correlated = 0.0;
+        long double gross = 0.0, same_asset = 0.0, correlated = 0.0;
         for (const auto& position : snapshot.positions) {
-            const double normalized = std::abs(position.notional) / snapshot.equity;
-            gross += normalized;
-            if (position.symbol == symbol) same_asset += normalized;
+            if (position.symbol.empty() || !std::isfinite(position.notional))
+                return {false, 0.0, "invalid portfolio position"};
+            const long double notional = std::abs(static_cast<long double>(position.notional));
+            gross += notional;
+            if (position.symbol == symbol) same_asset += notional;
+            // Unknown correlation is not evidence of diversification. Same-asset exposure
+            // is always correlated, even before an estimator has enough observations.
+            bool is_correlated = true;
             const auto row = snapshot.correlations.find(symbol);
             if (row != snapshot.correlations.end()) {
                 const auto corr = row->second.find(position.symbol);
-                if (corr != row->second.end() && std::abs(corr->second) >= config_.correlation_threshold)
-                    correlated += normalized;
+                if (corr != row->second.end()) {
+                    if (!std::isfinite(corr->second) || std::abs(corr->second) > 1.0)
+                        return {false, 0.0, "invalid portfolio correlation"};
+                    is_correlated = position.symbol == symbol ||
+                                    std::abs(corr->second) >= config_.correlation_threshold;
+                }
             }
+            if (is_correlated) correlated += notional;
         }
 
-        const double proposed_fraction = proposed_notional / snapshot.equity;
-        if (gross + proposed_fraction > config_.max_gross_exposure)
+        const auto limit_notional = [&](double fraction) {
+            const double amount = snapshot.equity * fraction;
+            return std::isfinite(amount) ? static_cast<long double>(amount)
+                                        : static_cast<long double>(snapshot.equity) * fraction;
+        };
+        if (gross + final_notional > limit_notional(config_.max_gross_exposure))
             return {false, 0.0, "gross exposure limit exceeded"};
-        if (same_asset + proposed_fraction > config_.max_asset_exposure)
+        if (same_asset + final_notional > limit_notional(config_.max_asset_exposure))
             return {false, 0.0, "asset exposure limit exceeded"};
-        if (correlated + proposed_fraction > config_.max_correlated_exposure)
+        if (correlated + final_notional > limit_notional(config_.max_correlated_exposure))
             return {false, 0.0, "correlated exposure limit exceeded"};
-
-        double multiplier = 1.0;
-        const auto vol = snapshot.annualized_volatility.find(symbol);
-        if (vol != snapshot.annualized_volatility.end() && vol->second > 0.0 && config_.target_volatility > 0.0)
-            multiplier = config_.target_volatility / vol->second;
-        multiplier = std::clamp(multiplier, config_.minimum_size_multiplier, config_.maximum_size_multiplier);
-        return {true, multiplier, "portfolio risk approved"};
+        return {true, multiplier, "portfolio risk approved", final_notional};
     }
 
     const PortfolioRiskConfig& config() const noexcept { return config_; }

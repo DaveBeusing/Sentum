@@ -44,6 +44,7 @@ struct AssetResearchResult {
     BacktestMetrics raw_metrics;
     std::size_t candidate_trades = 0;
     double volatility = 0.0;
+    bool volatility_available = false;
 };
 
 struct PortfolioResearchSummary {
@@ -54,6 +55,149 @@ struct PortfolioResearchSummary {
     std::size_t accepted_trades = 0;
     std::size_t rejected_trades = 0;
     std::unordered_map<std::string, std::unordered_map<std::string, double>> correlations;
+    nlohmann::json decisions = nlohmann::json::array();
+    nlohmann::json descriptive_statistics;
+    std::size_t open_accepted_trades = 0;
+};
+
+struct PortfolioStatistics {
+    std::unordered_map<std::string, double> annualized_volatility;
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> correlations;
+    nlohmann::json evidence;
+};
+
+// Expanding estimates advance only through complete return intervals ending before
+// the decision. Each interval and matched pair is visited once across a run.
+class PortfolioReturnEstimator {
+public:
+    void add_history(const std::string& symbol, const std::vector<MarketEvent>& events) {
+        if (started_ || symbol.empty() || histories_.count(symbol))
+            throw std::invalid_argument("Portfolio histories require unique symbols before estimation");
+        History history;
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            if (!std::isfinite(events[i].price) || events[i].price <= 0.0)
+                throw std::invalid_argument("Portfolio history requires finite positive prices: " + symbol);
+            if (i == 0) continue;
+            if (events[i].timestamp <= events[i - 1].timestamp)
+                throw std::invalid_argument("Portfolio history requires strictly increasing timestamps: " + symbol);
+            const long double seconds = std::chrono::duration<long double>(events[i].timestamp - events[i - 1].timestamp).count();
+            const long double change = std::log(static_cast<long double>(events[i].price)) -
+                                       std::log(static_cast<long double>(events[i - 1].price));
+            history.returns.push_back({events[i - 1].timestamp, events[i].timestamp, seconds, change});
+        }
+        histories_.emplace(symbol, std::move(history));
+    }
+
+    PortfolioStatistics before(std::chrono::system_clock::time_point cutoff) {
+        if (started_ && cutoff < last_cutoff_)
+            throw std::invalid_argument("Portfolio estimator cutoffs must not move backwards");
+        started_ = true;
+        last_cutoff_ = cutoff;
+        PortfolioStatistics result;
+        result.evidence = {{"estimator", "expanding-time-aware-log-returns-v1"},
+                           {"cutoff_exclusive_ms", milliseconds(cutoff)},
+                           {"volatility", nlohmann::json::object()},
+                           {"correlation", nlohmann::json::object()}};
+        for (auto& [symbol, history] : histories_) {
+            while (history.used < history.returns.size() && history.returns[history.used].end < cutoff) {
+                const auto& interval = history.returns[history.used++];
+                history.volatility.add(interval);
+            }
+            const auto& v = history.volatility;
+            const bool available = v.count >= 2;
+            auto window = window_json(v.count, v.start, v.end);
+            window["available"] = available;
+            window["observed_seconds"] = static_cast<double>(v.seconds);
+            if (available) {
+                // Weighted residual variance of log-return rates. For equal intervals
+                // this is sample return variance multiplied by seconds/year / interval.
+                const double value = static_cast<double>(std::sqrt(std::max(0.0L, v.m2) /
+                    static_cast<long double>(v.count - 1) * seconds_per_year));
+                if (!std::isfinite(value)) throw std::runtime_error("Non-finite portfolio volatility estimate");
+                result.annualized_volatility.emplace(symbol, value);
+                window["annualized_volatility"] = value;
+            }
+            result.evidence["volatility"][symbol] = std::move(window);
+        }
+        for (auto a = histories_.begin(); a != histories_.end(); ++a) {
+            for (auto b = a; b != histories_.end(); ++b) {
+                auto& pair = pairs_[{a->first, b->first}];
+                while (pair.left < a->second.used && pair.right < b->second.used) {
+                    const auto& x = a->second.returns[pair.left];
+                    const auto& y = b->second.returns[pair.right];
+                    const auto x_interval = std::make_pair(x.start, x.end);
+                    const auto y_interval = std::make_pair(y.start, y.end);
+                    if (x_interval < y_interval) { ++pair.left; continue; }
+                    if (y_interval < x_interval) { ++pair.right; continue; }
+                    pair.add(x, y);
+                    ++pair.left;
+                    ++pair.right;
+                }
+                const bool available = pair.count >= 2 && pair.m2_x > 0.0L && pair.m2_y > 0.0L;
+                auto window = window_json(pair.count, pair.start, pair.end);
+                window["available"] = available;
+                if (available) {
+                    const double value = static_cast<double>(std::clamp(pair.covariance /
+                        std::sqrt(pair.m2_x * pair.m2_y), -1.0L, 1.0L));
+                    if (!std::isfinite(value)) throw std::runtime_error("Non-finite portfolio correlation estimate");
+                    result.correlations[a->first][b->first] = value;
+                    result.correlations[b->first][a->first] = value;
+                    window["correlation"] = value;
+                }
+                result.evidence["correlation"][a->first][b->first] = window;
+                result.evidence["correlation"][b->first][a->first] = std::move(window);
+            }
+        }
+        return result;
+    }
+
+    static std::int64_t milliseconds(std::chrono::system_clock::time_point value) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(value.time_since_epoch()).count();
+    }
+
+private:
+    using TimePoint = std::chrono::system_clock::time_point;
+    static constexpr long double seconds_per_year = 365.0L * 24.0L * 60.0L * 60.0L;
+    struct ReturnInterval { TimePoint start; TimePoint end; long double seconds; long double change; };
+    struct Volatility {
+        std::size_t count = 0;
+        long double seconds = 0.0L, mean_rate = 0.0L, m2 = 0.0L;
+        TimePoint start{}, end{};
+        void add(const ReturnInterval& value) {
+            if (count++ == 0) start = value.start;
+            end = value.end;
+            seconds += value.seconds;
+            const long double rate = value.change / value.seconds;
+            const long double delta = rate - mean_rate;
+            mean_rate += delta * value.seconds / seconds;
+            m2 += value.seconds * delta * (rate - mean_rate);
+        }
+    };
+    struct History { std::vector<ReturnInterval> returns; std::size_t used = 0; Volatility volatility; };
+    struct Correlation {
+        std::size_t left = 0, right = 0, count = 0;
+        long double mean_x = 0.0L, mean_y = 0.0L, m2_x = 0.0L, m2_y = 0.0L, covariance = 0.0L;
+        TimePoint start{}, end{};
+        void add(const ReturnInterval& x, const ReturnInterval& y) {
+            if (count++ == 0) start = x.start;
+            end = x.end;
+            const long double dx = x.change - mean_x, dy = y.change - mean_y;
+            mean_x += dx / count;
+            mean_y += dy / count;
+            m2_x += dx * (x.change - mean_x);
+            m2_y += dy * (y.change - mean_y);
+            covariance += dx * (y.change - mean_y);
+        }
+    };
+    static nlohmann::json window_json(std::size_t count, TimePoint start, TimePoint end) {
+        return {{"return_intervals", count},
+                {"window_start_ms", count ? nlohmann::json(milliseconds(start)) : nlohmann::json(nullptr)},
+                {"window_end_ms", count ? nlohmann::json(milliseconds(end)) : nlohmann::json(nullptr)}};
+    }
+    std::map<std::string, History> histories_;
+    std::map<std::pair<std::string, std::string>, Correlation> pairs_;
+    bool started_ = false;
+    TimePoint last_cutoff_{};
 };
 
 inline PortfolioResearchConfig load_portfolio_research_config(const std::string& path) {
@@ -63,12 +207,12 @@ inline PortfolioResearchConfig load_portfolio_research_config(const std::string&
     PortfolioResearchConfig c;
     c.strategy = json.value("strategy", c.strategy);
     c.starting_equity = json.value("starting_equity", c.starting_equity);
-    if (!(c.starting_equity > 0.0)) throw std::runtime_error("starting_equity must be positive");
+    if (!std::isfinite(c.starting_equity) || !(c.starting_equity > 0.0)) throw std::runtime_error("starting_equity must be finite and positive");
     if (!json.contains("datasets") || !json.at("datasets").is_array() || json.at("datasets").empty())
         throw std::runtime_error("portfolio research requires a non-empty datasets array");
     for (const auto& item : json.at("datasets")) {
         PortfolioDataset d{item.value("path", std::string{}), item.value("symbol", std::string{}), item.value("weight", 1.0)};
-        if (d.path.empty() || d.symbol.empty() || !(d.weight > 0.0)) throw std::runtime_error("invalid portfolio dataset");
+        if (d.path.empty() || d.symbol.empty() || !std::isfinite(d.weight) || !(d.weight > 0.0)) throw std::runtime_error("invalid portfolio dataset");
         c.datasets.push_back(std::move(d));
     }
     if (json.contains("portfolio_risk")) {
@@ -80,6 +224,8 @@ inline PortfolioResearchConfig load_portfolio_research_config(const std::string&
         c.portfolio_risk.max_consecutive_losses = r.value("max_consecutive_losses", c.portfolio_risk.max_consecutive_losses);
         c.portfolio_risk.max_trades_per_hour = r.value("max_trades_per_hour", c.portfolio_risk.max_trades_per_hour);
         c.portfolio_risk.target_volatility = r.value("target_volatility", c.portfolio_risk.target_volatility);
+        c.portfolio_risk.minimum_size_multiplier = r.value("minimum_size_multiplier", c.portfolio_risk.minimum_size_multiplier);
+        c.portfolio_risk.maximum_size_multiplier = r.value("maximum_size_multiplier", c.portfolio_risk.maximum_size_multiplier);
         c.portfolio_risk.correlation_threshold = r.value("correlation_threshold", c.portfolio_risk.correlation_threshold);
     }
     return c;
@@ -90,40 +236,54 @@ public:
     explicit PortfolioResearchRunner(RiskConfig risk) : risk_(std::move(risk)) {}
 
     PortfolioResearchSummary run(const PortfolioResearchConfig& config) const {
-        struct AssetData { PortfolioDataset cfg; std::vector<MarketEvent> events; std::vector<TradePosition> trades; double vol = 0.0; };
+        if (!std::isfinite(config.starting_equity) || config.starting_equity <= 0.0 || config.datasets.empty())
+            throw std::invalid_argument("Portfolio research requires finite positive equity and datasets");
+        sentum::risk::PortfolioRiskManager manager(config.portfolio_risk);
+        PortfolioReturnEstimator estimator;
+        struct AssetData { PortfolioDataset cfg; std::vector<TradePosition> trades; bool has_open_trade = false; };
         std::vector<AssetData> assets;
         assets.reserve(config.datasets.size());
         std::vector<TradePosition> raw_trades;
+        std::vector<TradePosition> candidates;
 
         for (const auto& dataset : config.datasets) {
-            AssetData a; a.cfg = dataset; a.events = HistoricalEventReader::read_csv(dataset.path, dataset.symbol);
-            if (a.events.size() < 3) throw std::runtime_error("portfolio dataset requires at least 3 events: " + dataset.symbol);
-            a.vol = realized_volatility(a.events);
+            if (!std::isfinite(dataset.weight) || dataset.weight <= 0.0)
+                throw std::invalid_argument("Portfolio dataset weight must be finite and positive");
+            AssetData a; a.cfg = dataset;
+            const auto events = HistoricalEventReader::read_csv(dataset.path, dataset.symbol);
+            if (events.size() < 3) throw std::runtime_error("portfolio dataset requires at least 3 events: " + dataset.symbol);
+            estimator.add_history(dataset.symbol, events);
             auto clock = std::make_shared<ReplayClock>();
             auto strategy = sentum::strategy::StrategyFactory::create(config.strategy);
             TradeEngine engine(dataset.symbol, risk_, clock, std::move(strategy), ":memory:");
-            for (const auto& event : a.events) { clock->advance_to(event.timestamp); engine.process_event(event); }
+            for (const auto& event : events) { clock->advance_to(event.timestamp); engine.process_event(event); }
             a.trades = engine.completed_trades();
             for (auto trade : a.trades) {
                 scale_trade(trade, dataset.weight);
-                raw_trades.push_back(std::move(trade));
+                raw_trades.push_back(trade);
+                candidates.push_back(std::move(trade));
+            }
+            // An entry's existence cannot depend on whether future data closes it.
+            auto outstanding = engine.get_current_position();
+            if (outstanding.open) {
+                a.has_open_trade = true;
+                scale_trade(outstanding, dataset.weight);
+                candidates.push_back(std::move(outstanding));
             }
             assets.push_back(std::move(a));
         }
 
         PortfolioResearchSummary out;
-        out.correlations = correlations(assets);
         out.raw_combined = MetricsCalculator::calculate(sorted_by_exit(raw_trades));
-        out.candidate_trades = raw_trades.size();
+        out.candidate_trades = candidates.size();
         for (const auto& a : assets)
-            out.assets.push_back({a.cfg.symbol, MetricsCalculator::calculate(a.trades), a.trades.size(), a.vol});
+            out.assets.push_back({a.cfg.symbol, MetricsCalculator::calculate(a.trades), a.trades.size() + a.has_open_trade});
 
-        std::sort(raw_trades.begin(), raw_trades.end(), [](const auto& a, const auto& b) {
+        std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
             if (a.entry_time != b.entry_time) return a.entry_time < b.entry_time;
             return a.symbol < b.symbol;
         });
 
-        sentum::risk::PortfolioRiskManager manager(config.portfolio_risk);
         double equity = config.starting_equity;
         const double day_start = equity;
         std::vector<TradePosition> open;
@@ -131,34 +291,68 @@ public:
         std::deque<std::chrono::system_clock::time_point> trade_times;
         std::size_t consecutive_losses = 0;
 
-        for (auto trade : raw_trades) {
+        for (auto trade : candidates) {
             close_until(trade.entry_time, open, accepted, equity, consecutive_losses);
             sentum::risk::PortfolioRiskSnapshot snapshot;
             snapshot.equity = equity;
             snapshot.day_start_equity = day_start;
-            snapshot.correlations = out.correlations;
+            const auto statistics = estimator.before(trade.entry_time);
+            snapshot.correlations = statistics.correlations;
             snapshot.consecutive_losses = consecutive_losses;
             snapshot.trade_times = trade_times;
-            for (const auto& a : assets) snapshot.annualized_volatility[a.cfg.symbol] = a.vol;
+            snapshot.annualized_volatility = statistics.annualized_volatility;
             for (const auto& p : open) snapshot.positions.push_back({p.symbol, p.entry_price * p.quantity});
             const double proposed = trade.entry_price * trade.quantity;
             const auto decision = manager.approve(trade.symbol, proposed, snapshot, trade.entry_time);
+            double approved_quantity = 0.0;
+            if (decision.approved) {
+                approved_quantity = decision.approved_notional / trade.entry_price;
+                if (!std::isfinite(approved_quantity) || approved_quantity <= 0.0)
+                    throw std::runtime_error("Invalid approved portfolio quantity");
+                if (trade.entry_price * approved_quantity > decision.approved_notional)
+                    approved_quantity = std::nextafter(approved_quantity, 0.0);
+            }
+            out.decisions.push_back({{"symbol", trade.symbol},
+                {"entry_time_ms", PortfolioReturnEstimator::milliseconds(trade.entry_time)},
+                {"equity", equity}, {"proposed_notional", proposed},
+                {"approved", decision.approved}, {"reason", decision.reason},
+                {"size_multiplier", decision.size_multiplier},
+                {"approved_notional", decision.approved_notional},
+                {"approved_quantity", approved_quantity},
+                {"accepted_notional", trade.entry_price * approved_quantity},
+                {"statistics", statistics.evidence}});
             if (!decision.approved) { ++out.rejected_trades; continue; }
-            scale_trade(trade, decision.size_multiplier);
+            scale_trade(trade, approved_quantity / trade.quantity);
+            // Consume the exact final amount approved by the portfolio boundary.
+            trade.quantity = approved_quantity;
             open.push_back(std::move(trade));
             trade_times.push_back(open.back().entry_time);
             while (!trade_times.empty() && trade_times.front() < open.back().entry_time - std::chrono::hours(1)) trade_times.pop_front();
             ++out.accepted_trades;
         }
         close_until(std::chrono::system_clock::time_point::max(), open, accepted, equity, consecutive_losses);
+        out.open_accepted_trades = open.size();
         out.portfolio_filtered = MetricsCalculator::calculate(sorted_by_exit(accepted));
+        const auto descriptive = estimator.before(std::chrono::system_clock::time_point::max());
+        out.correlations = descriptive.correlations;
+        out.descriptive_statistics = descriptive.evidence;
+        for (auto& asset : out.assets) {
+            const auto value = descriptive.annualized_volatility.find(asset.symbol);
+            if (value != descriptive.annualized_volatility.end()) {
+                asset.volatility = value->second;
+                asset.volatility_available = true;
+            }
+        }
         return out;
     }
 
     static nlohmann::json to_json(const PortfolioResearchSummary& s) {
         auto metrics = [](const BacktestMetrics& m) { return nlohmann::json{{"trades",m.trades},{"net_profit",m.net_profit},{"max_drawdown",m.max_drawdown},{"profit_factor",std::isfinite(m.profit_factor)?m.profit_factor:0.0},{"win_rate",m.win_rate},{"expectancy",m.expectancy},{"sharpe",m.sharpe},{"sortino",m.sortino},{"fee_share",m.fee_share}}; };
         nlohmann::json j{{"candidate_trades",s.candidate_trades},{"accepted_trades",s.accepted_trades},{"rejected_trades",s.rejected_trades},{"raw_combined",metrics(s.raw_combined)},{"portfolio_filtered",metrics(s.portfolio_filtered)},{"assets",nlohmann::json::array()},{"correlations",s.correlations}};
-        for (const auto& a : s.assets) j["assets"].push_back({{"symbol",a.symbol},{"candidate_trades",a.candidate_trades},{"volatility",a.volatility},{"metrics",metrics(a.raw_metrics)}});
+        j["decisions"] = s.decisions;
+        j["descriptive_statistics"] = s.descriptive_statistics;
+        j["open_accepted_trades"] = s.open_accepted_trades;
+        for (const auto& a : s.assets) j["assets"].push_back({{"symbol",a.symbol},{"candidate_trades",a.candidate_trades},{"volatility",a.volatility},{"volatility_available",a.volatility_available},{"metrics",metrics(a.raw_metrics)}});
         return j;
     }
 
@@ -169,24 +363,6 @@ public:
     }
 
 private:
-    template <typename AssetVector>
-    static std::unordered_map<std::string, std::unordered_map<std::string, double>> correlations(const AssetVector& assets) {
-        std::unordered_map<std::string, std::unordered_map<std::string, double>> out;
-        for (const auto& a : assets) for (const auto& b : assets) out[a.cfg.symbol][b.cfg.symbol] = correlation(a.events, b.events);
-        return out;
-    }
-
-    static double correlation(const std::vector<MarketEvent>& a, const std::vector<MarketEvent>& b) {
-        const std::size_t n = std::min(a.size(), b.size()); if (n < 3) return 0.0;
-        std::vector<double> x, y; x.reserve(n-1); y.reserve(n-1);
-        for (std::size_t i=1;i<n;++i) if (a[i-1].price>0&&a[i].price>0&&b[i-1].price>0&&b[i].price>0) { x.push_back(std::log(a[i].price/a[i-1].price)); y.push_back(std::log(b[i].price/b[i-1].price)); }
-        if (x.size()<2) return 0.0; const double mx=std::accumulate(x.begin(),x.end(),0.0)/x.size(), my=std::accumulate(y.begin(),y.end(),0.0)/y.size(); double cov=0,vx=0,vy=0; for(std::size_t i=0;i<x.size();++i){const double dx=x[i]-mx,dy=y[i]-my;cov+=dx*dy;vx+=dx*dx;vy+=dy*dy;} return vx>0&&vy>0?cov/std::sqrt(vx*vy):0.0;
-    }
-
-    static double realized_volatility(const std::vector<MarketEvent>& events) {
-        if (events.size()<3) return 0.0; std::vector<double> r; r.reserve(events.size()-1); for(std::size_t i=1;i<events.size();++i) if(events[i-1].price>0&&events[i].price>0) r.push_back(std::log(events[i].price/events[i-1].price)); if(r.size()<2)return 0.0; const double mean=std::accumulate(r.begin(),r.end(),0.0)/r.size();double var=0;for(double x:r)var+=(x-mean)*(x-mean);return std::sqrt(var/(r.size()-1))*std::sqrt(365.0*24.0*60.0*60.0);
-    }
-
     static void scale_trade(TradePosition& t, double multiplier) {
         t.quantity *= multiplier; t.gross_profit *= multiplier; t.net_profit *= multiplier; t.fee_entry *= multiplier; t.fee_exit *= multiplier; t.capital_at_risk *= multiplier;
     }
@@ -197,7 +373,7 @@ private:
 
     static void close_until(std::chrono::system_clock::time_point at, std::vector<TradePosition>& open,
                             std::vector<TradePosition>& accepted, double& equity, std::size_t& losses) {
-        auto it=open.begin();while(it!=open.end()){if(it->exit_time<=at){equity+=it->net_profit;losses=it->net_profit<0?losses+1:0;accepted.push_back(*it);it=open.erase(it);}else ++it;}
+        auto it=open.begin();while(it!=open.end()){if(!it->open && it->exit_time<=at){equity+=it->net_profit;losses=it->net_profit<0?losses+1:0;accepted.push_back(*it);it=open.erase(it);}else ++it;}
     }
 
     RiskConfig risk_;

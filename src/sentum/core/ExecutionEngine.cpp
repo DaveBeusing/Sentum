@@ -53,7 +53,8 @@ void ExecutionEngine::start() {
     paper_account_error_ = nullptr;
     trader_error_ = nullptr;
     collector_error_ = nullptr;
-    init();
+    try { init(); }
+    catch (...) { config.paperModelLease.reset(); throw; }
     running.store(true);
     sentum::dashboard::DashboardState::global().set("health", "healthy");
     main_thread = std::thread(&ExecutionEngine::run_main_loop, this);
@@ -71,7 +72,10 @@ void ExecutionEngine::stop(ShutdownProgressCallback progress) {
     };
 
     const bool was_running = request_stop();
-    if (!was_running && !main_thread.joinable() && !scanner_thread.joinable() && !trader_thread.joinable()) return;
+    if (!was_running && !main_thread.joinable() && !scanner_thread.joinable() && !trader_thread.joinable()) {
+        config.paperModelLease.reset();
+        return;
+    }
 
     report(1, "Stopping strategy and paper trader");
     try {
@@ -137,6 +141,7 @@ void ExecutionEngine::stop(ShutdownProgressCallback progress) {
         logger.log("[ERROR] Shutdown finalization: " + finalization_diagnostic);
     }
     report(6, finalization_error ? "Shutdown complete; " + finalization_diagnostic : "Shutdown complete");
+    config.paperModelLease.reset();
     if (finalization_error) std::rethrow_exception(finalization_error);
 }
 
@@ -163,7 +168,7 @@ void ExecutionEngine::init_components() {
     quote_balance = paper_account->equity();
     db = std::make_unique<Database>(db_path);
     market_store = std::make_unique<MarketDataStore>(600);
-    const auto collection_risk = load_risk_config(config.paperRiskConfigPath);
+    const auto collection_risk = load_paper_risk_config(config);
     collector = std::make_unique<Collector>(*db, *market_store, markets,
         std::chrono::milliseconds(collection_risk.max_data_age_ms));
     scanner = std::make_unique<SymbolScanner>(*market_store, config.minCumulativeReturn);
@@ -198,7 +203,8 @@ void ExecutionEngine::init() {
         {"entries_blocked_by_persistence", !collector->persistence_healthy()},
         {"db_path", db_path}, {"strategy_config", strategy_json}, {"strategy_name", strategy_json.value("type", std::string("momentum"))},
         {"symbol_mode", config.paperAutoSymbol ? "auto" : "manual"}, {"manual_symbol", config.paperSymbol}, {"entries_paused", false},
-        {"paper_model_id", config.paperModelId}, {"paper_risk_config_path", config.paperRiskConfigPath},
+        {"paper_model_id", config.paperModelId}, {"paper_model_revision", config.paperModelRevision},
+        {"paper_model_definition_revision", config.paperModelDefinitionRevision}, {"paper_risk_config_path", config.paperRiskConfigPath},
         {"started_at_ms", std::chrono::duration_cast<std::chrono::milliseconds>(start_time.time_since_epoch()).count()}
     });
 }
@@ -378,9 +384,14 @@ void ExecutionEngine::start_trader_for_locked(const std::string& symbol) {
     // before its instance is replaced. Never join a worker without cancellation.
     if (trader || trader_thread.joinable()) stop_trader_locked();
     if (!running.load(std::memory_order_acquire)) return;
-    auto risk = load_risk_config(config.paperRiskConfigPath);
-    if (paper_account) risk.max_total_capital = paper_account->equity();
-    auto strategy = sentum::strategy::StrategyFactory::create(sentum::runtime::RuntimeControl::global().strategy());
+    const auto strategy_configuration = sentum::runtime::RuntimeControl::global().strategy();
+    validate_paper_model_selection(config, symbol, strategy_configuration);
+    auto risk = load_paper_risk_config(config);
+    if (paper_account) {
+        const auto equity = paper_account->equity();
+        risk.max_total_capital = config.paperModelDefinition.empty() ? equity : std::min(risk.max_total_capital, equity);
+    }
+    auto strategy = sentum::strategy::StrategyFactory::create(strategy_configuration);
     trader = std::make_unique<TradeEngine>(symbol, *binance, risk, std::move(strategy), db_path);
     trader->set_entry_readiness([this] {
         return collector && collector->persistence_healthy() && collector->stream_health().fresh;

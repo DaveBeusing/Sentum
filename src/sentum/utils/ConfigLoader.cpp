@@ -43,8 +43,9 @@ Config load_config(const std::string& path) {
     if (!config.paperModelDefinition.empty()) {
         const auto model = sentum::promotion::load_model_definition(config.paperModelDefinition);
         sentum::promotion::ModelRegistry registry;
-        if (registry.stage(model.model_id) != "paper")
-            throw std::runtime_error("paper.modelDefinition requires a model promoted to the paper stage: " + model.model_id);
+        config.paperModelLease = registry.acquire_runtime_lease(model, "paper");
+        config.paperModelRevision = registry.require_stage(model, "paper");
+        config.paperModelDefinitionRevision = sentum::promotion::model_definition_revision(model);
         config.paperModelId = model.model_id;
         config.strategy = model.strategy;
         config.paperSymbol = model.symbol;
@@ -55,4 +56,21 @@ Config load_config(const std::string& path) {
     if (!config.paperAutoSymbol && config.paperSymbol.empty())
         throw std::runtime_error("paper.symbol is required when paper.autoSymbol=false");
     return config;
+}
+
+RiskConfig load_paper_risk_config(const Config& config) {
+    if (config.paperModelDefinition.empty()) return load_risk_config(config.paperRiskConfigPath);
+    if (!config.paperModelLease) throw std::runtime_error("Paper model revision lease is not held");
+    const auto model = sentum::promotion::load_model_definition(config.paperModelDefinition);
+    if (model.model_id != config.paperModelId || model.symbol != config.paperSymbol ||
+        model.strategy != config.strategy || model.risk_config != config.paperRiskConfigPath)
+        throw std::runtime_error("Paper model definition changed after configuration was loaded");
+    sentum::promotion::ModelRegistry registry;
+    return registry.approved_risk(model, "paper", config.paperModelRevision);
+}
+
+void validate_paper_model_selection(const Config& config, const std::string& symbol,
+                                    const nlohmann::json& strategy) {
+    if (!config.paperModelDefinition.empty() && (symbol != config.paperSymbol || strategy != config.strategy))
+        throw std::runtime_error("Paper model strategy and symbol are fixed by its approved revision");
 }
