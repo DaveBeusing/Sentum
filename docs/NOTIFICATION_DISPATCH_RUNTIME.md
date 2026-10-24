@@ -86,6 +86,10 @@ credential_environment is the name of an environment variable, not a secret. The
 
 If notification_dispatch.json is absent, notification dispatch remains disabled and the runtime metrics expose the reason.
 
+The enabled runtime validates the complete routing policy before starting its scheduler or provider workers. The policy requires integer schema version 1, `NOTIFICATION_ROUTING_ONLY` authority and a `BLOCK` default. Every route supplies a supported severity (`INFO`, `ATTENTION`, `WARNING` or `CRITICAL`), an integer minimum escalation level in 0..3, and nonempty channel and audience arrays. Floating-point, boolean, negative or overflowing escalation values are rejected without numeric coercion.
+
+Channel and audience identifiers must be nonempty and cannot contain whitespace, ASCII control characters or `:`, the delivery-key delimiter. Lists cannot repeat identifiers, and each route channel must appear in `allowed_channels`. Audiences remain policy-defined and channel identifiers remain extensible. An empty route list is a valid block-all policy. Routes retain their configured first-match order. A malformed field anywhere in the policy blocks the complete policy; it cannot leave a partially enabled route or terminate the process through a `noexcept` lookup.
+
 ## Operational metrics
 
 The existing notification operations projection exposes a dispatch_runtime object containing runtime status, queued work, active dispatch count, delivered count, retriable and terminal failure counts, provider latency, timeout count, queue rejection count and execution_authorized = false.
@@ -109,3 +113,5 @@ Every dispatch request, provider result, durable evidence row and operations pro
 notification_dispatch_runtime_tests covers delivery success, provider rejection, timeout, retry, maximum attempts, duplicate suppression, restart recovery, delivered-state suppression, queue saturation, unknown providers, configuration validation, cancellation, provider exceptions, authority isolation and final evidence propagation into the existing notification operations and governed incident-candidate projections.
 
 The target is registered in CTest and attached to the existing ASan, UBSan and TSan build dependency graph.
+
+`notification_routing_policy_tests` covers nested route types, missing fields, numeric boundaries, channel/audience identity validation, direct lookup, controlled runtime construction failure before provider work, the shipped policy and a valid scheduler delivery. It is also part of the sanitizer build graph.

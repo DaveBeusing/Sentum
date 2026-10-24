@@ -281,6 +281,11 @@ if(BUILD_TESTING)
 	add_test(NAME notification_delivery_state_machine COMMAND sentum_notification_delivery_state_machine_tests)
 	set_tests_properties(notification_delivery_state_machine PROPERTIES TIMEOUT 60)
 
+	add_executable(sentum_notification_routing_policy_tests tests/notification_routing_policy_tests.cpp)
+	target_link_libraries(sentum_notification_routing_policy_tests PRIVATE sentum_core)
+	add_test(NAME notification_routing_policy COMMAND sentum_notification_routing_policy_tests)
+	set_tests_properties(notification_routing_policy PROPERTIES TIMEOUT 60)
+
 	add_executable(sentum_notification_provider_boundary_tests tests/notification_provider_boundary_tests.cpp)
 	target_link_libraries(sentum_notification_provider_boundary_tests PRIVATE sentum_core)
 	add_test(NAME notification_provider_boundary COMMAND sentum_notification_provider_boundary_tests)
@@ -340,6 +345,7 @@ if(BUILD_TESTING)
 		sentum_operator_alert_attention_policy_tests
 		sentum_operator_alert_escalation_timeline_tests
 		sentum_notification_delivery_state_machine_tests
+		sentum_notification_routing_policy_tests
 		sentum_notification_provider_boundary_tests
 		sentum_notification_delivery_evidence_repository_tests
 		sentum_notification_dispatch_runtime_tests
