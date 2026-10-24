@@ -12,7 +12,13 @@ Paper trading uses a persistent simulated account rather than the authenticated 
 
 Binance Spot Testnet uses exchange-confirmed order state. A local signal or REST acknowledgement is never treated as an executed position without a confirmed fill or successful reconciliation.
 
-New Testnet submissions remain blocked until startup reconciliation and the User Data Stream are healthy. Stream failures, unresolved orders or balance mismatches keep trading blocked and can latch the kill switch.
+The durable order boundary blocks unresolved outcomes and preserves its kill-switch
+latch across restart. Exchange-confirmed partial executions and commissions apply
+once, and cancellation retains executed inventory. Complete readiness additionally
+requires authenticated stream health and integrated account/strategy reconciliation;
+those outstanding contracts are identified in [TESTNET_RUNTIME.md](TESTNET_RUNTIME.md).
+The current stream fixtures and isolated balance checks do not establish those
+end-to-end guarantees.
 
 ## Model promotion
 

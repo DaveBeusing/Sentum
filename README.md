@@ -49,13 +49,18 @@ Candidates can be registered from completed research experiments, validated agai
 ### Testnet execution
 
 - Binance Spot Testnet only
-- exchange-confirmed order-state machine
-- partial-fill handling
+- durable exchange-confirmed order-state machine and unknown-outcome recovery
+- idempotent partial-fill and commission accounting
 - Binance User Data Stream
-- startup and recovery reconciliation
+- persisted order replay and explicit reconciled resume
 - dynamic exchange filters and precision rules
 - persistent order/runtime/reconciliation audit history
 - fail-closed kill switch
+
+The order boundary has deterministic fixture qualification. Complete Testnet
+operation still requires the subscription, authenticated-health, account/strategy
+reconciliation and market-feed corrections listed in
+[Testnet runtime](docs/TESTNET_RUNTIME.md#outstanding-end-to-end-requirements).
 
 ## Build
 
