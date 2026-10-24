@@ -84,6 +84,17 @@ void test_valid_policy_and_boundaries() {
 	require(notification_route_for(valid, "WARNING", 1) == nullptr, "route matched below minimum escalation");
 	require(notification_route_for(valid, "WARNING", 2) != nullptr, "route failed at minimum escalation");
 	require(notification_route_for(valid, "CRITICAL", 3) == nullptr, "route matched wrong severity");
+	auto overlapping = valid;
+	auto alternative = valid["routes"][0];
+	alternative["channels"] = {"EMAIL"};
+	alternative["audiences"] = {"ON_CALL"};
+	overlapping["routes"].push_back(alternative);
+	require(derive_notification_routing_plan(disconnected_snapshot(), overlapping).intents.front().channel == "PAGER",
+		"overlapping routes did not retain first-match precedence");
+	std::swap(overlapping["routes"][0], overlapping["routes"][1]);
+	const auto reordered = derive_notification_routing_plan(disconnected_snapshot(), overlapping);
+	require(reordered.eligible == 1 && reordered.intents.front().channel == "EMAIL" &&
+		reordered.intents.front().audience == "ON_CALL", "configured route order was ignored");
 	for (const auto* severity : {"INFO", "ATTENTION", "WARNING", "CRITICAL"}) {
 		for (int level : {0, 3}) {
 			auto boundary = valid;
@@ -133,6 +144,12 @@ std::vector<std::pair<std::string, json>> invalid_policies() {
 			json::array({"PAGER", "PAGER"}), json::array({"PAGER", nullptr})}) route_field(field, values);
 	}
 	route_field("channels", json::array({"UNLISTED"}));
+	auto malformed_later_route = policy();
+	auto later_route = malformed_later_route["routes"][0];
+	later_route["severity"] = "CRITICAL";
+	later_route["minimum_escalation_level"] = "invalid";
+	malformed_later_route["routes"].push_back(std::move(later_route));
+	result.emplace_back("valid matching route followed by malformed route", std::move(malformed_later_route));
 	for (const auto& entry : std::vector<json>{nullptr, 2, "route", json::array()}) {
 		auto invalid = policy();
 		invalid["routes"] = json::array({entry});

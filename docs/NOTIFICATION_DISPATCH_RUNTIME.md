@@ -100,7 +100,7 @@ If notification_dispatch.json is absent, notification dispatch remains disabled 
 
 The enabled runtime validates the complete routing policy before starting its scheduler or provider workers. The policy requires integer schema version 1, `NOTIFICATION_ROUTING_ONLY` authority and a `BLOCK` default. Every route supplies a supported severity (`INFO`, `ATTENTION`, `WARNING` or `CRITICAL`), an integer minimum escalation level in 0..3, and nonempty channel and audience arrays. Floating-point, boolean, negative or overflowing escalation values are rejected without numeric coercion.
 
-Channel and audience identifiers must be nonempty and cannot contain whitespace, ASCII control characters or `:`, the delivery-key delimiter. Lists cannot repeat identifiers, and each route channel must appear in `allowed_channels`. Audiences remain policy-defined and channel identifiers remain extensible. An empty route list is a valid block-all policy. Routes retain their configured first-match order. A malformed field anywhere in the policy blocks the complete policy; it cannot leave a partially enabled route or terminate the process through a `noexcept` lookup.
+Channel and audience identifiers must be nonempty and cannot contain ASCII whitespace, control characters or `:`, the delivery-key delimiter. Lists cannot repeat identifiers, and each route channel must appear in `allowed_channels`. Audiences remain policy-defined and channel identifiers remain extensible. An empty route list is a valid block-all policy. Routes retain their configured first-match order. A malformed field anywhere in the policy blocks the complete policy; it cannot leave a partially enabled route or terminate the process through a `noexcept` lookup.
 
 ## Operational metrics
 
