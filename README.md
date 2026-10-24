@@ -51,16 +51,18 @@ Candidates can be registered from completed research experiments, validated agai
 - Binance Spot Testnet only
 - durable exchange-confirmed order-state machine and unknown-outcome recovery
 - idempotent partial-fill and commission accounting
-- Binance User Data Stream
+- authenticated WebSocket API User Data Stream with explicit subscription health
 - persisted order replay and explicit reconciled resume
 - dynamic exchange filters and precision rules
 - persistent order/runtime/reconciliation audit history
 - fail-closed kill switch
 
-The order boundary has deterministic fixture qualification. Complete Testnet
-operation still requires the subscription, authenticated-health, account/strategy
-reconciliation and market-feed corrections listed in
-[Testnet runtime](docs/TESTNET_RUNTIME.md#outstanding-end-to-end-requirements).
+Testnet startup restores verified owned executions, account inventory and position
+protection before admission. Testnet strategies consume the Testnet market feed;
+current exchange rules and account permissions constrain every submission.
+Deterministic recovery fixtures and local TLS subscription tests qualify these
+boundaries. Credentialed exchange acceptance remains a separate environment check;
+see [Testnet runtime](docs/TESTNET_RUNTIME.md#qualification-boundaries).
 
 ## Build
 

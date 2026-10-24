@@ -1,9 +1,11 @@
 # Trailing-stop risk policy
 
-Paper, replay and research use the same long-position stop policy in `TradeEngine`.
-The initial stop is calculated from the confirmed simulated entry fill, including
-the configured spread and slippage. A favorable price can tighten that stop, but
-can never lower it:
+Paper, replay, research and Testnet use the same long-position exit policy.
+The shared evaluator applies fixed stop, trailing stop, take profit and maximum
+holding time in the same order. The initial stop uses the confirmed entry fill;
+simulated entries include configured spread and slippage, while Testnet entries
+use confirmed exchange execution and commission accounting. A favorable price can
+tighten the stop, but can never lower it:
 
 ```text
 new_stop = max(previous_stop, new_high * (1 - trailing_sl_percent))
@@ -37,9 +39,25 @@ manager. Directly constructed replay configurations and research overrides must
 satisfy the same policy before entry decisions or simulated fills are possible.
 JSON flags must be booleans and percentage fields must be numbers.
 
-These guarantees cover the shared simulated TradeEngine path. Testnet trailing
-policy parity is a separate execution-runtime contract; this change does not
-implement Testnet trailing exits or qualify exchange order recovery.
+Non-finite prices, quantities, costs and overflowing derived risk values are
+rejected before they can create a position or produce a usable approval. CSV replay
+also requires complete, finite numeric tokens with valid timestamp bounds.
+
+## Durable Testnet protection
+
+The Testnet runtime persists an account-scoped checkpoint containing the symbol,
+owned opening client/exchange order identity, complete risk configuration, entry
+time, quantity/cost, price extrema and protective levels. It commits a changed
+checkpoint before publishing the new in-memory policy. Failed persistence blocks
+admission without publishing weaker replacement protection.
+
+Account trade reconstruction establishes current inventory but cannot infer an
+earlier observed market peak. Restoring positive inventory therefore also requires
+a compatible checkpoint. Reconnect and process restart preserve the strongest
+recorded stop and the original holding interval. Missing, corrupt, mismatched or
+stale-position checkpoints keep recovery blocked. A genuinely new owned opening
+order receives its own protection; it does not inherit a closed trade's extrema.
+Price extremes during an outage that were never observed remain unknown.
 
 ## Regression evidence
 
@@ -48,4 +66,7 @@ and lower highs, the original stop after a favorable move, exact-stop and gap
 exits, confirmed entry costs, disabled trailing, unchanged approval fields,
 malformed JSON and direct nonfinite/out-of-range configurations. The tests use
 the actual TradeEngine with a deterministic ReplayClock and local in-memory
-trade history. They run with the normal Release and sanitizer CTest suites.
+trade history. `testnet_market_policy_tests` compares actual replay/Testnet exits
+and validates restored protection; `testnet_position_policy_tests` exercises
+checkpoint persistence failure and position lineage. All groups run with the
+normal Release and sanitizer CTest suites.

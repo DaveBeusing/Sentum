@@ -119,20 +119,19 @@ history. Databases with unbound historical evidence and credential replacements
 within an existing journal therefore require verified recovery before order entry
 can resume.
 
-## Remaining qualification boundaries
+## Account recovery and qualification boundaries
 
-These order-state guarantees are prerequisites for complete Testnet recovery.
-They do not establish full account-balance reconciliation or restore a strategy's
-open position after restart. Recovered inventory that cannot be restored safely
-keeps the session blocked; the remaining account/runtime work is tracked in
-[#68](https://github.com/DaveBeusing/Sentum/issues/68).
+The session combines these order-state guarantees with a bounded account/trade
+proof and a subscribed event barrier. It commits canonical recovered executions
+and reconciliation evidence atomically, restores the ledger and strategy, and
+validates durable position protection before exposing readiness. Unknown activity,
+incomplete history or missing protection keeps the session blocked. The complete
+scope and limits are documented in [Account reconciliation](ACCOUNT_RECONCILIATION.md).
 
-The subscription migration and authenticated stream-health contracts remain
-tracked in [#66](https://github.com/DaveBeusing/Sentum/issues/66) and
-[#67](https://github.com/DaveBeusing/Sentum/issues/67). Market-feed environment
-selection remains tracked in [#80](https://github.com/DaveBeusing/Sentum/issues/80).
-Fixture qualification of the order boundary does not constitute a credentialed
-Testnet acceptance run.
+The authenticated WebSocket API subscription, immediate disconnect admission
+barrier and explicit Testnet market feed are described in
+[Testnet runtime](TESTNET_RUNTIME.md). Fixture and loopback TLS qualification
+does not constitute a credentialed Testnet acceptance run.
 
 ## Protocol references
 

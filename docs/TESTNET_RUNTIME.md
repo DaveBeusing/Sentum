@@ -1,6 +1,6 @@
 # Binance Spot Testnet runtime
 
-Sentum provides a Binance Spot Testnet order boundary with exchange-confirmed cumulative execution, durable order identity and a persistent kill switch. REST order routing is restricted to the Testnet endpoint. Complete Testnet operation still depends on the outstanding subscription, authenticated-health, account-reconciliation and market-feed corrections described below.
+Sentum provides a Binance Spot Testnet order boundary with authenticated user-data subscriptions, exchange-confirmed cumulative execution, durable order identity and a persistent kill switch. REST order routing and strategy market prices use explicit Testnet endpoints. Admission requires a complete account/execution proof and successful restoration of the strategy's confirmed position and protective policy.
 
 ## Start
 
@@ -56,27 +56,34 @@ local SQLite failure triggers and synchronous fixture venues. It covers entries,
 exits, competing ticks, reentrant observers, persistence failures and bounded
 shutdown without exchange credentials. The order-state, durability and execution-delta
 regressions additionally qualify monotonic state, cancellation identity, unknown
-outcomes, partial inventory and restart-safe latches. Subscription migration,
-authenticated readiness and complete account/runtime reconciliation remain separate
-requirements.
+outcomes, partial inventory and restart-safe latches. Session recovery tests exercise
+the authenticated stream barrier, account proof and durable adoption together.
 
 ## Startup and recovery
 
-The session loads its durable latch and canonical order history before order reconciliation. Persisted unresolved requests are queried using the original identity. Unknown outcomes, unresolved orders, incomplete historical evidence and recovered inventory that the strategy cannot safely restore keep submissions blocked. This is the order-recovery foundation; full account-balance and strategy-position reconciliation remains open in [#68](https://github.com/DaveBeusing/Sentum/issues/68).
+The session loads its durable latch and canonical order ownership before subscribing. A correlated successful acknowledgement of `userDataStream.subscribe.signature` is required before the stream is healthy. Worker existence alone grants no readiness. The subscribed stream remains active while REST evidence is collected, and received-event and connection generations protect final publication from concurrent changes.
+
+Persisted unresolved requests are queried using the original identity. Bounded, paginated account trades provide the execution and commission evidence for reconstructing inventory, entry time and cooldown history. Complete account and open-order schemas are required; missing fields never imply a flat account. Verified replacements and replay commit atomically before the runtime restores its owned position. Unowned events or holdings, unknown outcomes, unresolved orders and incomplete or changing evidence keep submissions blocked.
+
+The runtime shares fixed stop, trailing stop, take profit and maximum-holding decisions with Paper/replay. It persists protective policy checkpoints before publishing tighter protection. A compatible checkpoint is required when restoring positive inventory; missing, corrupt or mismatched protection blocks admission. A reconnect or restart cannot lower a previously saved trailing stop. See [Trailing-stop risk policy](TRAILING_STOP_RISK.md).
 
 Ambiguous recovery remains blocked rather than guessing local state. A rebuilt User Data Stream does not clear a kill switch automatically; explicit reconciled resume is required, and unresolved open orders continue to block that transition.
 
 See [ACCOUNT_RECONCILIATION.md](ACCOUNT_RECONCILIATION.md) for the complete recovery model.
 
-### Outstanding end-to-end requirements
+## Market data and submission rules
 
-The current listen-key subscription transport requires migration in [#66](https://github.com/DaveBeusing/Sentum/issues/66). Worker lifecycle is not yet a sufficient authenticated-subscription health signal; [#67](https://github.com/DaveBeusing/Sentum/issues/67) tracks that readiness correction. Testnet strategy prices still need explicit Testnet market-feed selection in [#80](https://github.com/DaveBeusing/Sentum/issues/80). Passing local order fixtures does not establish complete Testnet readiness.
+The Testnet strategy receives trades from `wss://stream.testnet.binance.vision/ws/<symbol>@trade`. Its environment and endpoint appear in runtime status. The Paper/public feed retains its public-market endpoint. A Testnet runtime rejects a venue with incompatible market provenance.
+
+Current symbol rules are loaded before admission and refreshed before each submission. Symbol status, Spot availability, MARKET support and the account's actual permission set must agree. Quantity normalization intersects active `LOT_SIZE`, `MARKET_LOT_SIZE`, base precision and local step constraints using exact decimal grids. Disabled zero fields do not erase another active filter. Normalization never increases approved size. The canonical decimal quantity is sent unchanged to REST.
+
+Notional checks use current Testnet reference-price evidence when available, otherwise the filter's exact average-price window or last-price fallback. Stale, missing or inconsistent evidence blocks submission. Local capital, risk, quantity and notional limits still apply after normalization; exchange metadata never grants extra risk budget. See [Exchange order validation](EXCHANGE_ORDER_VALIDATION.md).
 
 ## Persistence and observability
 
-Order transitions retain their `order_events` audit history. The execution boundary additionally stores canonical accepted order snapshots, replay history and kill-switch state under its credential namespace before publishing state to observers. The durable session guard and exclusive execution lease preserve fail-closed behavior through process interruption and storage failure. See [TESTNET_ORDER_STATE.md](TESTNET_ORDER_STATE.md) for migration and resume requirements.
+Order transitions retain their `order_events` audit history. The execution boundary additionally stores canonical accepted order snapshots, replay history, reconciliation proof, position-policy checkpoints and kill-switch state under its credential namespace before publishing state to observers. Execution schema version 2 adds tables without discarding existing audit data or changing the shared SQLite `user_version`. The durable session guard and exclusive execution lease preserve fail-closed behavior through process interruption and storage failure. See [TESTNET_ORDER_STATE.md](TESTNET_ORDER_STATE.md) for migration and resume requirements.
 
-`log/status.json` provides machine-readable Testnet state including symbol, stream health, reconciliation status, kill-switch state, latest price, signal/risk information, order state and confirmed position quantity.
+`log/status.json` provides machine-readable Testnet state including symbol, market environment and endpoint, authenticated user-stream health, reconciliation status, kill-switch state, latest price, signal/risk information, order state and confirmed position quantity. A disconnect, subscription termination or authentication failure immediately closes admission and latches the kill switch. Rebuilding a healthy subscription initiates recovery but never clears that latch automatically.
 
 The terminal console and web dashboard consume this operational state for read-only visibility.
 
@@ -88,4 +95,8 @@ Replay writes deterministic trade history and metrics that can be checked with t
 python3 tools/verify_metrics.py log/replay.sqlite3 log/replay_metrics.json
 ```
 
-Order and recovery boundaries are qualified without live credentials through the deterministic scenarios in [RUNTIME_QUALIFICATION.md](RUNTIME_QUALIFICATION.md). Stream-interruption fixtures exercise injected stream state; the balance-mismatch scenario exercises `AccountReconciler` independently. These tests do not substitute for the outstanding real subscription and integrated account-recovery work.
+## Qualification boundaries
+
+Order and recovery boundaries are qualified without live credentials through the deterministic scenarios in [RUNTIME_QUALIFICATION.md](RUNTIME_QUALIFICATION.md). The authenticated subscription regression uses actual loopback TLS/WebSocket connections, acknowledgement/error frames, timeouts, disconnects, ping/pong and restart. Integrated session fixtures cover fills during outages, account/schema failures, ownership, atomic SQLite adoption, changing stream generations and explicit resume. Policy tests compare the real replay and Testnet runtime decisions and verify preserved protection across recovery.
+
+These tests establish repository behavior against controlled evidence. They do not constitute a credentialed Binance acceptance run, predict unobserved prices during downtime, or authorize production order routing. Existing unexplained Testnet seed inventory, legacy unbound history, unsupported history volume or missing position protection remains blocked. See [Authenticated User Data Stream](TESTNET_USER_DATA_STREAM.md) for the subscription contract and official protocol references.

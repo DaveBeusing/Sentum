@@ -27,6 +27,8 @@ This directory contains the current functional documentation for Sentum. Documen
 
 - [Shadow trading and model promotion](SHADOW_TRADING_MODEL_PROMOTION.md) — research-to-Testnet model lifecycle and promotion gates.
 - [Binance Spot Testnet runtime](TESTNET_RUNTIME.md) — exchange-confirmed order state and Testnet operation.
+- [Authenticated Testnet User Data Stream](TESTNET_USER_DATA_STREAM.md) — signed WebSocket API subscriptions, health and cancellation.
+- [Exchange order validation](EXCHANGE_ORDER_VALIDATION.md) — current permissions, exact quantity grids and market notional constraints.
 - [Durable Testnet order state](TESTNET_ORDER_STATE.md) — order identity, ambiguous outcomes, cumulative execution and durable kill-switch recovery.
 - [Account reconciliation and recovery](ACCOUNT_RECONCILIATION.md) — startup reconciliation, recovery and audit state.
 
