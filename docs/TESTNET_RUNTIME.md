@@ -29,6 +29,32 @@ rejected
 
 A strategy signal or REST placement acknowledgement does not create an executed local position. Confirmed position state changes only after exchange-confirmed fills or reconciliation against exchange state.
 
+### Callback and submission safety
+
+The strategy reserves an order identity while holding its state mutex, then releases
+that mutex before calling the venue. Synchronous Pending, ACK, rejection and fill
+callbacks can therefore update the same strategy without deadlocking the price
+worker. A separate submission reservation lasts until the venue call returns,
+including when a terminal callback has already cleared the active order. Competing
+price ticks cannot submit during that interval. Only matching symbol/order callbacks
+change that reservation; a returned ACK is not processed as a second fill event.
+
+`OrderManager` copies order updates under its own mutex and invokes observers after
+releasing it. Observers may inspect orders or trigger cancellation and the kill
+switch. An observer exception is propagated as an observer failure, rather than
+being recorded as an exchange rejection. A kill triggered by a failed Pending
+audit write prevents the reserved order from subsequently reaching the exchange.
+Evidence-write failure latches one kill request even when cancellation itself emits
+another callback. A submission exception that escapes the venue blocks further
+strategy submissions while retaining the unresolved order identity.
+
+The `testnet_callback_safety` regression uses the real runtime, real order manager,
+local SQLite failure triggers and synchronous fixture venues. It covers entries,
+exits, competing ticks, reentrant observers, persistence failures and bounded
+shutdown without exchange credentials. This qualifies the callback boundary;
+subscription migration, authenticated readiness, inventory reconciliation and the
+remaining cumulative-fill/order-state contracts require their separate corrections.
+
 ## Startup and recovery
 
 The runtime reconciles open orders and balances before enabling submissions, then starts the Binance User Data Stream. Stream interruption or listen-key keepalive failure disables new submissions, activates recovery controls, rebuilds the stream and requires reconciliation again.

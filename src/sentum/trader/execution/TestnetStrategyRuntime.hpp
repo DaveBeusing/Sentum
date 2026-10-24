@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -67,12 +68,18 @@ public:
 
     bool running() const noexcept { return running_.load(); }
     void kill() noexcept {
-        if (venue_) venue_->kill();
-        set_status("kill_switch_active", true);
-        sentum::dashboard::DashboardState::global().set("health", "blocked");
+        // Cancelling an order may synchronously report another update. Latch
+        // first so a failed evidence write cannot recursively request a kill.
+        if (!kill_requested_.exchange(true) && venue_) venue_->kill();
+        try {
+            set_status("kill_switch_active", true);
+            sentum::dashboard::DashboardState::global().set("health", "blocked");
+        } catch (...) {}
     }
 
 private:
+    friend struct TestnetStrategyRuntimeTestAccess;
+
     template <typename T>
     void set_status(const std::string& key, T&& value) {
         nlohmann::json json_value = std::forward<T>(value);
@@ -87,48 +94,67 @@ private:
     }
 
     void on_price(double price) {
-        if (!running_.load() || !venue_->ready() || price <= 0.0) return;
+        if (!running_.load() || kill_requested_.load() || !venue_->ready() || !std::isfinite(price) || price <= 0.0) return;
         const auto now = std::chrono::system_clock::now();
         set_status("last_market_event_age_ms", 0);
         set_status("last_price", price);
 
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!active_order_.empty()) return;
+        std::optional<order::Request> request;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!running_.load() || kill_requested_.load() || submission_in_progress_ || !active_order_.empty()) return;
 
-        if (confirmed_quantity_ <= 0.0) {
-            const auto signal = strategy_->on_price(price, now);
-            if (signal.action != TradeAction::BUY) return;
-            const auto decision = risk_manager_.approve_entry(signal, price, now, last_exit_);
-            set_status("last_signal", signal.reason);
-            set_status("last_risk_decision", decision.reason);
-            if (!decision.approved) return;
-            order::Request request{symbol_, order::Side::Buy, decision.quantity, id(symbol_, "buy")};
-            active_order_ = request.client_order_id;
-            venue_->submit(request);
-            return;
+            if (confirmed_quantity_ <= 0.0) {
+                const auto signal = strategy_->on_price(price, now);
+                if (signal.action != TradeAction::BUY) return;
+                const auto decision = risk_manager_.approve_entry(signal, price, now, last_exit_);
+                set_status("last_signal", signal.reason);
+                set_status("last_risk_decision", decision.reason);
+                if (!decision.approved) return;
+                request = order::Request{symbol_, order::Side::Buy, decision.quantity, id(symbol_, "buy")};
+            } else {
+                if (entry_price_ <= 0.0) return;
+                const bool stop = price <= entry_price_ * (1.0 - risk_.stop_loss_percent);
+                const bool target = price >= entry_price_ * (1.0 + risk_.take_profit_percent);
+                const bool timeout = entry_time_ != std::chrono::system_clock::time_point{} &&
+                    now - entry_time_ >= std::chrono::seconds(risk_.max_holding_seconds);
+                if (!stop && !target && !timeout) return;
+                exit_reason_ = stop ? "stop_loss" : (target ? "take_profit" : "maximum_holding_time");
+                request = order::Request{symbol_, order::Side::Sell, confirmed_quantity_, id(symbol_, "sell")};
+            }
+            active_order_ = request->client_order_id;
+            submission_in_progress_ = true;
         }
 
-        if (entry_price_ <= 0.0) return;
-        const bool stop = price <= entry_price_ * (1.0 - risk_.stop_loss_percent);
-        const bool target = price >= entry_price_ * (1.0 + risk_.take_profit_percent);
-        const bool timeout = entry_time_ != std::chrono::system_clock::time_point{} &&
-            now - entry_time_ >= std::chrono::seconds(risk_.max_holding_seconds);
-        if (!stop && !target && !timeout) return;
-        exit_reason_ = stop ? "stop_loss" : (target ? "take_profit" : "maximum_holding_time");
-        order::Request request{symbol_, order::Side::Sell, confirmed_quantity_, id(symbol_, "sell")};
-        active_order_ = request.client_order_id;
-        venue_->submit(request);
+        // Ownership is reserved, but neither this mutex nor the venue's order
+        // mutex may be held while synchronous callbacks are delivered. A
+        // terminal callback can release active_order_ before submit returns;
+        // submission_in_progress_ still prevents a competing price tick.
+        try {
+            (void)venue_->submit(*request);
+        } catch (const std::exception& error) {
+            kill();
+            try { set_status("last_submission_error", error.what()); } catch (...) {}
+        } catch (...) {
+            kill();
+            try { set_status("last_submission_error", "Unknown order submission failure"); } catch (...) {}
+        }
+        std::lock_guard<std::mutex> lock(mutex_);
+        submission_in_progress_ = false;
+        // The return value is not a second order event. In particular a late
+        // ACK must not overwrite a terminal callback or recreate ownership.
     }
 
     void on_order_update(const order::Snapshot& update) {
         try { events_.save(update, "exchange"); }
-        catch (...) { venue_->kill(); set_status("kill_switch_active", true); }
+        catch (...) { kill(); }
         set_status("last_order_state", order::to_string(update.state));
         set_status("orders_pending", update.state == order::State::Pending || update.state == order::State::Acknowledged ? 1 : 0);
         set_status("orders_partially_filled", update.state == order::State::PartiallyFilled ? 1 : 0);
         set_status("last_user_event_age_ms", 0);
 
         std::lock_guard<std::mutex> lock(mutex_);
+        if (update.symbol != symbol_ || update.client_order_id != active_order_) return;
         if (update.state == order::State::Rejected || update.state == order::State::Cancelled) {
             active_order_.clear();
             return;
@@ -164,7 +190,9 @@ private:
     observability::StatusReporter status_;
     std::unique_ptr<BinanceWebsocketClient> price_stream_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> kill_requested_{false};
     std::mutex mutex_;
+    bool submission_in_progress_ = false;
     std::string active_order_;
     std::string exit_reason_;
     double confirmed_quantity_ = 0.0;
