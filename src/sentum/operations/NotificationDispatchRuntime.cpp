@@ -416,18 +416,40 @@ void NotificationDispatchRuntime::process_work(NotificationDeliveryAttempt attem
 void NotificationDispatchRuntime::scheduler_loop() {
 	std::uint64_t last_generation = 0;
 	while (!stop_requested_.load(std::memory_order_acquire)) {
+		bool lifecycle_observed = false;
 		try {
 			const auto snapshot = snapshot_source_();
 			if (snapshot.generation != 0 && snapshot.generation != last_generation) {
-				const auto plan = derive_notification_routing_plan(snapshot.state, routing_policy_);
+				const auto lifecycle = evidence_.observe_alert_lifecycle(snapshot.state, configuration_.recovery_limit);
+				const auto lifecycle_json = sentum::ui::operator_alert_lifecycle_json(lifecycle);
+				lifecycle_observed = true;
+				{
+					std::lock_guard<std::mutex> lock(state_mutex_);
+					alert_lifecycle_ = lifecycle_json;
+					alert_lifecycle_available_ = true;
+				}
+				auto routed_snapshot = snapshot.state;
+				auto& control_plane = routed_snapshot["operations_control_plane"];
+				if (!control_plane.is_object()) control_plane = nlohmann::json::object();
+				control_plane["alert_lifecycle"] = lifecycle_json;
+				control_plane["alert_lifecycle_status"] = "AVAILABLE";
+				const auto plan = derive_notification_routing_plan(routed_snapshot, routing_policy_);
 				(void)submit(plan);
 				last_generation = snapshot.generation;
 			}
 		} catch (const std::exception& error) {
+			if (!lifecycle_observed) {
+				std::lock_guard<std::mutex> lock(state_mutex_);
+				alert_lifecycle_available_ = false;
+			}
 			snapshot_errors_.fetch_add(1, std::memory_order_relaxed);
 			set_status("DEGRADED", error.what());
 			publish_metrics();
 		} catch (...) {
+			if (!lifecycle_observed) {
+				std::lock_guard<std::mutex> lock(state_mutex_);
+				alert_lifecycle_available_ = false;
+			}
 			snapshot_errors_.fetch_add(1, std::memory_order_relaxed);
 			set_status("DEGRADED", "notification snapshot processing failed");
 			publish_metrics();
@@ -444,10 +466,14 @@ void NotificationDispatchRuntime::scheduler_loop() {
 nlohmann::json NotificationDispatchRuntime::metrics_json() const {
 	std::string status;
 	std::string error;
+	nlohmann::json lifecycle;
+	bool lifecycle_available;
 	{
 		std::lock_guard<std::mutex> lock(state_mutex_);
 		status = status_;
 		error = last_error_;
+		lifecycle = alert_lifecycle_;
+		lifecycle_available = alert_lifecycle_available_;
 	}
 	const auto calls = provider_calls_.load(std::memory_order_relaxed);
 	const auto latency_total = provider_latency_us_total_.load(std::memory_order_relaxed);
@@ -474,6 +500,8 @@ nlohmann::json NotificationDispatchRuntime::metrics_json() const {
 		{"persistence_errors", persistence_errors_.load(std::memory_order_relaxed)},
 		{"worker_errors", worker_errors_.load(std::memory_order_relaxed)},
 		{"last_error", error},
+		{"alert_lifecycle", lifecycle_available ? std::move(lifecycle) : nlohmann::json::array()},
+		{"alert_lifecycle_status", lifecycle_available ? "AVAILABLE" : "UNAVAILABLE"},
 		{"execution_authorized", false}
 	};
 }

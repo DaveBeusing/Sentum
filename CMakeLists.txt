@@ -306,6 +306,11 @@ if(BUILD_TESTING)
 	add_test(NAME notification_persistence_failure COMMAND sentum_notification_persistence_failure_tests)
 	set_tests_properties(notification_persistence_failure PROPERTIES TIMEOUT 60)
 
+	add_executable(sentum_notification_alert_generation_tests tests/notification_alert_generation_tests.cpp)
+	target_link_libraries(sentum_notification_alert_generation_tests PRIVATE sentum_core)
+	add_test(NAME notification_alert_generation COMMAND sentum_notification_alert_generation_tests)
+	set_tests_properties(notification_alert_generation PROPERTIES TIMEOUT 60)
+
 	add_executable(sentum_notification_operations_observability_tests tests/notification_operations_observability_tests.cpp)
 	target_link_libraries(sentum_notification_operations_observability_tests PRIVATE sentum_core)
 	add_test(NAME notification_operations_observability COMMAND sentum_notification_operations_observability_tests)
@@ -355,6 +360,7 @@ if(BUILD_TESTING)
 		sentum_notification_delivery_evidence_repository_tests
 		sentum_notification_dispatch_runtime_tests
 		sentum_notification_persistence_failure_tests
+		sentum_notification_alert_generation_tests
 		sentum_notification_operations_observability_tests
 		sentum_notification_incident_workflow_bridge_tests
 		sentum_governed_incident_lifecycle_tests

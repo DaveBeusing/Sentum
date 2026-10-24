@@ -1,11 +1,14 @@
 #include <sentum/operations/NotificationDeliveryEvidenceRepository.hpp>
 
 #include <algorithm>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include <sqlite3.h>
+#include <sentum/ui/OperatorAlertCenterView.hpp>
 
 namespace sentum::operations {
 namespace {
@@ -18,6 +21,23 @@ std::string sqlite_message(sqlite3* db, const char* context) {
 std::string column_text(sqlite3_stmt* statement, int column) {
 	const auto* text = sqlite3_column_text(statement, column);
 	return text ? reinterpret_cast<const char*>(text) : std::string{};
+}
+
+using Statement = std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)>;
+
+Statement prepare_statement(sqlite3* db, const char* sql) {
+	sqlite3_stmt* statement = nullptr;
+	if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK)
+		throw std::runtime_error(sqlite_message(db, "failed to prepare operator alert lifecycle query"));
+	return Statement(statement, sqlite3_finalize);
+}
+
+std::size_t positive_identity(sqlite3_stmt* statement, int column) {
+	const auto value = sqlite3_column_int64(statement, column);
+	if (sqlite3_column_type(statement, column) != SQLITE_INTEGER || value <= 0 ||
+		static_cast<std::uint64_t>(value) > sentum::ui::kMaximumOperatorAlertGeneration)
+		throw std::runtime_error("Invalid durable operator alert generation or observation count");
+	return static_cast<std::size_t>(value);
 }
 
 NotificationDeliveryEvidenceRecord read_record(sqlite3_stmt* statement) {
@@ -125,6 +145,22 @@ NotificationDeliveryEvidenceRepository::NotificationDeliveryEvidenceRepository(
 		exec_or_throw(
 			"CREATE INDEX IF NOT EXISTS idx_notification_delivery_terminal_sequence "
 			"ON notification_delivery_evidence(terminal,sequence DESC);");
+		exec_or_throw(
+			"CREATE INDEX IF NOT EXISTS idx_notification_delivery_alert_generation "
+			"ON notification_delivery_evidence(alert_id,generation);");
+		exec_or_throw(
+			"CREATE TABLE IF NOT EXISTS notification_alert_lifecycle ("
+			"alert_id TEXT PRIMARY KEY NOT NULL CHECK(length(alert_id)>0),"
+			"generation INTEGER NOT NULL CHECK(typeof(generation)='integer' AND generation>0),"
+			"state TEXT NOT NULL CHECK(state IN ('NEW','ACTIVE','ACKNOWLEDGED','CLEARED')),"
+			"observations INTEGER NOT NULL CHECK(typeof(observations)='integer' AND observations>0),"
+			"item_json TEXT NOT NULL,"
+			"execution_authorized INTEGER NOT NULL DEFAULT 0 CHECK(execution_authorized=0));");
+		exec_or_throw(
+			"CREATE TABLE IF NOT EXISTS notification_alert_lifecycle_checkpoint ("
+			"singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
+			"observed INTEGER NOT NULL CHECK(observed IN (0,1)));"
+			"INSERT OR IGNORE INTO notification_alert_lifecycle_checkpoint(singleton,observed) VALUES(1,0);");
 	} catch (...) {
 		sqlite3_close(db_);
 		db_ = nullptr;
@@ -286,6 +322,123 @@ std::vector<NotificationDeliveryAttempt> NotificationDeliveryEvidenceRepository:
 		restored.push_back(restore_attempt(record));
 	}
 	return restored;
+}
+
+std::vector<sentum::ui::OperatorAlertLifecycleItem> NotificationDeliveryEvidenceRepository::load_alert_lifecycle_rows(
+	std::size_t limit) const {
+	using namespace sentum::ui;
+	const auto count = scalar_count("SELECT COUNT(*) FROM notification_alert_lifecycle;");
+	if (count > bounded_limit(limit)) throw std::runtime_error("Operator alert lifecycle exceeds bounded query limit");
+	auto statement = prepare_statement(db_,
+		"SELECT alert_id,generation,state,observations,item_json,execution_authorized "
+		"FROM notification_alert_lifecycle ORDER BY alert_id LIMIT ?;");
+	sqlite3_bind_int64(statement.get(), 1, static_cast<sqlite3_int64>(bounded_limit(limit) + 1));
+	std::vector<OperatorAlertLifecycleItem> result;
+	result.reserve(count);
+	int code;
+	while ((code = sqlite3_step(statement.get())) == SQLITE_ROW) {
+		if (result.size() == bounded_limit(limit)) throw std::runtime_error("Operator alert lifecycle exceeds bounded query limit");
+		const auto id = column_text(statement.get(), 0);
+		const auto generation = positive_identity(statement.get(), 1);
+		const auto state = column_text(statement.get(), 2);
+		const auto observations = positive_identity(statement.get(), 3);
+		const auto json = nlohmann::json::parse(column_text(statement.get(), 4));
+		if (id.empty() || json.at("id") != id || !json.at("generation").is_number_integer() ||
+			!json.at("observations").is_number_integer() || json.at("generation").get<std::uint64_t>() != generation ||
+			json.at("state") != state || json.at("observations").get<std::uint64_t>() != observations ||
+			json.at("execution_authorized") != false || sqlite3_column_int(statement.get(), 5) != 0 ||
+			(state != "NEW" && state != "ACTIVE" && state != "ACKNOWLEDGED" && state != "CLEARED"))
+			throw std::runtime_error("Invalid durable operator alert lifecycle identity");
+		const auto parsed = operator_alert_lifecycle_evidence({{"operations_control_plane", {
+			{"alert_lifecycle", nlohmann::json::array({json})}}}});
+		if (parsed.size() != 1) throw std::runtime_error("Invalid durable operator alert metadata");
+		auto item = parsed.front();
+		item.generation = generation;
+		item.observations = observations;
+		if (json.at("active") != item.active) throw std::runtime_error("Invalid durable operator alert active state");
+		result.push_back(std::move(item));
+	}
+	if (code != SQLITE_DONE) throw std::runtime_error(sqlite_message(db_, "failed to read operator alert lifecycle"));
+	return result;
+}
+
+PersistedOperatorAlertLifecycle NotificationDeliveryEvidenceRepository::load_alert_lifecycle(std::size_t limit) const {
+	std::lock_guard<std::mutex> lock(mutex_);
+	PersistedOperatorAlertLifecycle result;
+	const auto observed = scalar_count("SELECT observed FROM notification_alert_lifecycle_checkpoint WHERE singleton=1;");
+	if (observed > 1) throw std::runtime_error("Invalid operator alert lifecycle checkpoint");
+	result.initialized = observed == 1;
+	result.items = load_alert_lifecycle_rows(limit);
+	return result;
+}
+
+std::vector<sentum::ui::OperatorAlertLifecycleItem> NotificationDeliveryEvidenceRepository::observe_alert_lifecycle(
+	const nlohmann::json& snapshot, std::size_t limit) {
+	using namespace sentum::ui;
+	if (read_only()) throw std::logic_error("notification delivery evidence repository is read-only");
+	std::lock_guard<std::mutex> lock(mutex_);
+	exec_or_throw("BEGIN IMMEDIATE;");
+	try {
+		if (scalar_count("SELECT observed FROM notification_alert_lifecycle_checkpoint WHERE singleton=1;") > 1)
+			throw std::runtime_error("Invalid operator alert lifecycle checkpoint");
+		auto previous = load_alert_lifecycle_rows(limit);
+		std::unordered_map<std::string, std::size_t> by_id;
+		for (std::size_t index = 0; index < previous.size(); ++index) by_id.emplace(previous[index].alert.id, index);
+
+		// Legacy delivery rows prove a generation was already used. They do not
+		// prove that its condition cleared: preserve it as active until observed.
+		auto legacy = prepare_statement(db_,
+			"SELECT alert_id,MAX(generation) FROM notification_delivery_evidence GROUP BY alert_id LIMIT ?;");
+		sqlite3_bind_int64(legacy.get(), 1, static_cast<sqlite3_int64>(bounded_limit(limit) + 1));
+		int code;
+		std::size_t legacy_count = 0;
+		while ((code = sqlite3_step(legacy.get())) == SQLITE_ROW) {
+			if (++legacy_count > bounded_limit(limit)) throw std::runtime_error("Legacy operator alert identities exceed bounded query limit");
+			const auto id = column_text(legacy.get(), 0);
+			const auto generation = positive_identity(legacy.get(), 1);
+			if (id.empty()) throw std::runtime_error("Invalid legacy operator alert identity");
+			const auto found = by_id.find(id);
+			if (found != by_id.end() && previous[found->second].generation >= generation) continue;
+			OperatorAlertLifecycleItem seed;
+			seed.alert.id = id;
+			seed.alert.source = "NOTIFICATION_HISTORY";
+			seed.alert.title = "Recovered notification episode";
+			seed.state = OperatorAlertLifecycleState::Active;
+			seed.generation = generation;
+			if (found != by_id.end()) previous[found->second] = std::move(seed);
+			else { by_id.emplace(id, previous.size()); previous.push_back(std::move(seed)); }
+		}
+		if (code != SQLITE_DONE) throw std::runtime_error(sqlite_message(db_, "failed to read legacy alert generations"));
+		legacy.reset();
+
+		auto next = derive_operator_alert_lifecycle(snapshot, previous);
+		if (next.size() > bounded_limit(limit)) throw std::runtime_error("Operator alert lifecycle exceeds bounded query limit");
+		auto write = prepare_statement(db_,
+			"INSERT INTO notification_alert_lifecycle(alert_id,generation,state,observations,item_json) VALUES(?,?,?,?,?) "
+			"ON CONFLICT(alert_id) DO UPDATE SET generation=excluded.generation,state=excluded.state,"
+			"observations=excluded.observations,item_json=excluded.item_json "
+			"WHERE notification_alert_lifecycle.item_json<>excluded.item_json;");
+		for (const auto& item : next) {
+			const auto json = operator_alert_lifecycle_json(item).dump();
+			sqlite3_bind_text(write.get(), 1, item.alert.id.c_str(), -1, SQLITE_TRANSIENT);
+			sqlite3_bind_int64(write.get(), 2, static_cast<sqlite3_int64>(item.generation));
+			sqlite3_bind_text(write.get(), 3, operator_alert_lifecycle_name(item.state), -1, SQLITE_STATIC);
+			sqlite3_bind_int64(write.get(), 4, static_cast<sqlite3_int64>(item.observations));
+			sqlite3_bind_text(write.get(), 5, json.c_str(), -1, SQLITE_TRANSIENT);
+			if (sqlite3_step(write.get()) != SQLITE_DONE)
+				throw std::runtime_error(sqlite_message(db_, "failed to persist operator alert lifecycle"));
+			sqlite3_reset(write.get());
+			sqlite3_clear_bindings(write.get());
+		}
+		write.reset();
+		exec_or_throw("UPDATE notification_alert_lifecycle_checkpoint SET observed=1 WHERE singleton=1;");
+		if (sqlite3_changes(db_) != 1) throw std::runtime_error("Missing operator alert lifecycle checkpoint");
+		exec_or_throw("COMMIT;");
+		return next;
+	} catch (...) {
+		(void)sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+		throw;
+	}
 }
 
 } // namespace sentum::operations

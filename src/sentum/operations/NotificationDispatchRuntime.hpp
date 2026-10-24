@@ -83,6 +83,8 @@ private:
 	std::unordered_set<std::string> known_keys_;
 	std::string status_ = "STOPPED";
 	std::string last_error_;
+	nlohmann::json alert_lifecycle_ = nlohmann::json::array();
+	bool alert_lifecycle_available_ = false;
 
 	std::mutex control_mutex_;
 	std::condition_variable control_cv_;

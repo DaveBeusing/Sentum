@@ -205,6 +205,19 @@ inline nlohmann::json notification_delivery_snapshot_from_repository(
 	auto& control_plane = durable_snapshot["operations_control_plane"];
 	control_plane.erase("notification_delivery_evidence");
 	try {
+		const auto lifecycle = repository.load_alert_lifecycle(evidence_limit);
+		if (lifecycle.initialized) {
+			control_plane["alert_lifecycle"] = sentum::ui::operator_alert_lifecycle_json(lifecycle.items);
+			control_plane["alert_lifecycle_status"] = "AVAILABLE";
+		} else {
+			control_plane.erase("alert_lifecycle");
+			control_plane["alert_lifecycle_status"] = "UNAVAILABLE";
+		}
+	} catch (...) {
+		control_plane.erase("alert_lifecycle");
+		control_plane["alert_lifecycle_status"] = "UNAVAILABLE";
+	}
+	try {
 		const auto batch = repository.load_latest_per_dedup_key(evidence_limit);
 		if (batch.truncated) return durable_snapshot;
 

@@ -74,7 +74,11 @@ inline std::vector<OperatorAlertLifecycleItem> operator_alert_lifecycle_evidence
 	const nlohmann::json& snapshot) {
 	std::vector<OperatorAlertLifecycleItem> lifecycle;
 	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
-	const auto evidence = control_plane.value("alert_lifecycle", nlohmann::json::array());
+	const auto runtime = snapshot.value("notification_dispatch_runtime", nlohmann::json::object());
+	const auto& source = control_plane.contains("alert_lifecycle_status") || !runtime.contains("alert_lifecycle_status")
+		? control_plane : runtime;
+	if (source.contains("alert_lifecycle_status") && json_text(source, "alert_lifecycle_status") != "AVAILABLE") return lifecycle;
+	const auto evidence = source.value("alert_lifecycle", nlohmann::json::array());
 	if (!evidence.is_array()) return lifecycle;
 
 	for (const auto& value : evidence) {
@@ -97,6 +101,7 @@ inline std::vector<OperatorAlertLifecycleItem> operator_alert_lifecycle_evidence
 		item.state = operator_alert_lifecycle_state_from_text(json_text(value, "state", "ACTIVE"));
 		try { item.generation = value.value("generation", static_cast<std::size_t>(1)); } catch (...) { item.generation = 1; }
 		if (item.generation == 0) item.generation = 1;
+		try { item.observations = value.value("observations", static_cast<std::size_t>(1)); } catch (...) { item.observations = 1; }
 		item.acknowledged_by = json_text(value, "acknowledged_by");
 		item.acknowledgement_reason = json_text(value, "acknowledgement_reason");
 		item.active = item.state != OperatorAlertLifecycleState::Cleared;
@@ -109,6 +114,40 @@ inline std::vector<OperatorAlertLifecycleItem> operator_alert_lifecycle_evidence
 inline std::vector<OperatorAlertLifecycleItem> current_operator_alert_lifecycle_view(
 	const nlohmann::json& snapshot) {
 	const auto persisted = operator_alert_lifecycle_evidence(snapshot);
+	const auto control_plane = snapshot.value("operations_control_plane", nlohmann::json::object());
+	const auto runtime = snapshot.value("notification_dispatch_runtime", nlohmann::json::object());
+	if (control_plane.contains("alert_lifecycle_status") || runtime.contains("alert_lifecycle_status")) {
+		// Current conditions remain visible when episode storage is unavailable
+		// or has not yet observed a new condition. Presentation cannot allocate
+		// a generation, inherit an acknowledgement or authorize its delivery.
+		const auto current = derive_operator_alerts(snapshot);
+		std::vector<OperatorAlertLifecycleItem> visible;
+		for (const auto& alert : current) {
+			const auto prior = std::find_if(persisted.begin(), persisted.end(), [&](const auto& item) {
+				return item.alert.id == alert.id && item.active;
+			});
+			OperatorAlertLifecycleItem item;
+			if (prior != persisted.end()) {
+				item = *prior;
+				item.alert = alert;
+			} else {
+				item.alert = alert;
+				item.alert.notification_candidate = false;
+				item.alert.guidance += " Alert episode identity is not yet available; acknowledgement and delivery are blocked.";
+				item.generation = 0;
+				item.state = OperatorAlertLifecycleState::Active;
+			}
+			visible.push_back(std::move(item));
+		}
+		for (const auto& prior : persisted) {
+			if (std::any_of(current.begin(), current.end(), [&](const auto& alert) { return alert.id == prior.alert.id; })) continue;
+			auto cleared = prior;
+			cleared.state = OperatorAlertLifecycleState::Cleared;
+			cleared.active = false;
+			visible.push_back(std::move(cleared));
+		}
+		return visible;
+	}
 	if (!persisted.empty()) return persisted;
 
 	const auto current = derive_operator_alerts(snapshot);
@@ -170,7 +209,7 @@ inline OperatorAlertCenterView derive_operator_alert_center_view(
 			item.alert.id,
 			item.alert.source,
 			operator_alert_severity_name(item.alert.severity),
-			operator_alert_lifecycle_name(item.state),
+			item.generation == 0 ? "UNTRACKED" : operator_alert_lifecycle_name(item.state),
 			item.generation,
 			item.alert.title,
 			item.alert.message,

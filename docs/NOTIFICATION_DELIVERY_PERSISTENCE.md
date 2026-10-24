@@ -4,13 +4,13 @@
 
 Notification delivery evidence is persisted in the configured runtime SQLite database so delivery state, idempotency and operational observability survive process restarts.
 
-The persistence boundary is append-only. Historical delivery transitions are immutable during normal runtime operation, and current state is derived from the latest persistent sequence for each generation-safe delivery dedup key.
+Delivery history is append-only. Historical transitions are immutable during normal runtime operation, and current delivery state is derived from the latest persistent sequence for each generation-safe dedup key. A separate latest-episode table retains the alert generations and cleared tombstones that make those keys meaningful across recurrences and restarts.
 
 ## Ownership
 
 `NotificationDeliveryEvidenceRepository` is the single persistence boundary for notification delivery evidence.
 
-The governed notification dispatch runtime, when enabled, is the only component permitted to open this repository in read-write mode and append delivery transitions. Operations, dashboard and incident-workflow consumers open the same database read-only.
+The governed notification dispatch runtime, when enabled, is the only component permitted to open this repository in read-write mode, reconcile alert episodes and append delivery transitions. Operations, dashboard and incident-workflow consumers open the same database read-only.
 
 Read-only consumers never create the database, create the schema or append delivery evidence. Missing or unreadable persistence therefore remains distinguishable from a valid empty evidence store.
 
@@ -55,6 +55,28 @@ Each row contains:
 
 Valid delivery states are `PENDING`, `DISPATCHED`, `DELIVERED` and `FAILED`.
 
+## Durable alert episode identity
+
+`notification_alert_lifecycle` stores one latest row per stable alert id:
+
+- `alert_id` primary key;
+- positive integer `generation` and `observations`;
+- `state`: `NEW`, `ACTIVE`, `ACKNOWLEDGED` or `CLEARED`;
+- `item_json`: matching presentation and acknowledgement metadata;
+- `execution_authorized`, constrained to zero.
+
+`notification_alert_lifecycle_checkpoint` distinguishes a newly created schema from
+an authoritative observation, including a valid empty current alert set. The scheduler
+updates both tables in one transaction before creating delivery intents. Cleared rows
+remain present; a read-only projection never advances or clears them in storage.
+
+Reconciliation uses the maximum prior delivery generation per alert as a migration
+floor. It preserves an active episode through restart and increments only after a
+committed clear. JSON identity values must be exact integers matching the SQLite
+columns; corrupt, out-of-range and exhausted identities fail closed. See
+[Operator alert episodes](OPERATOR_ALERT_LIFECYCLE.md) for the downtime ambiguity,
+acknowledgement and current-condition visibility rules.
+
 ## Ordering
 
 Persistent `sequence` is the authoritative ordering for delivery evidence.
@@ -87,7 +109,7 @@ A result reports its total logical row count and whether the requested result wa
 
 Current-state observability and restart recovery never accept a truncated latest-state set as complete truth. Truncation causes a fail-closed result instead of silently deriving health or retry behavior from incomplete evidence.
 
-The dashboard reads only the bounded latest state per dedup key. It does not reload the full historical table on each refresh.
+The dashboard reads bounded latest delivery state and bounded latest alert identities. It does not reload the full historical table on each refresh. Missing or uninitialized episode storage removes cached lifecycle authority; raw current conditions remain visible as untracked alerts without acknowledgement or delivery authority.
 
 ## Restart recovery
 
@@ -136,7 +158,7 @@ Archival must obey all of the following rules:
 7. validate the archive before any hot-store deletion;
 8. leave notification health fail-closed if archival cannot prove that required current evidence remains available.
 
-No automatic destructive retention job is introduced by this persistence boundary.
+Cleared lifecycle tombstones and their generation high-water marks must also remain in the hot database. Deleting a cleared row can erase the only proof that a later activation is a new episode; delivery history alone cannot reconstruct that observation. No automatic destructive retention job is introduced by this persistence boundary.
 
 ## Authority isolation
 
@@ -173,3 +195,5 @@ Regression coverage verifies:
 - `execution_authorized = false` after persistence and restoration;
 - unchanged notification-health semantics;
 - unchanged governed incident-candidate and approval/audit/recovery correlation semantics.
+
+The scheduler regression suite also verifies repeated outages, durable clear tombstones, legacy generation migration, restart-safe acknowledgements, lifecycle transaction rollback, exact integer identities and read-only alert visibility when lifecycle evidence is unavailable.

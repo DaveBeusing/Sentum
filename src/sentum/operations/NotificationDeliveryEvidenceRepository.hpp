@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <sentum/operations/NotificationDeliveryEvidence.hpp>
+#include <sentum/ui/OperatorAlertLifecycle.hpp>
 
 struct sqlite3;
 
@@ -21,6 +22,11 @@ struct NotificationDeliveryEvidenceBatch {
 	std::vector<PersistedNotificationDeliveryEvidence> records;
 	std::size_t total = 0;
 	bool truncated = false;
+};
+
+struct PersistedOperatorAlertLifecycle {
+	bool initialized = false;
+	std::vector<sentum::ui::OperatorAlertLifecycleItem> items;
 };
 
 enum class NotificationDeliveryEvidenceOpenMode {
@@ -44,6 +50,9 @@ public:
 	NotificationDeliveryEvidenceBatch load_recent(std::size_t limit = 128) const;
 	NotificationDeliveryEvidenceBatch load_latest_per_dedup_key(std::size_t limit = 1024) const;
 	std::vector<NotificationDeliveryAttempt> restore_active_delivery_state(std::size_t limit = 1024) const;
+	PersistedOperatorAlertLifecycle load_alert_lifecycle(std::size_t limit = 1024) const;
+	std::vector<sentum::ui::OperatorAlertLifecycleItem> observe_alert_lifecycle(
+		const nlohmann::json& snapshot, std::size_t limit = 1024);
 
 	const std::string& path() const noexcept { return path_; }
 	bool read_only() const noexcept { return mode_ == NotificationDeliveryEvidenceOpenMode::ReadOnly; }
@@ -53,6 +62,7 @@ private:
 	void exec_or_throw(const char* sql);
 	std::size_t scalar_count(const char* sql) const;
 	NotificationDeliveryEvidenceBatch load_batch(const char* sql, std::size_t limit, std::size_t total) const;
+	std::vector<sentum::ui::OperatorAlertLifecycleItem> load_alert_lifecycle_rows(std::size_t limit) const;
 
 	std::string path_;
 	NotificationDeliveryEvidenceOpenMode mode_ = NotificationDeliveryEvidenceOpenMode::ReadWriteCreate;
