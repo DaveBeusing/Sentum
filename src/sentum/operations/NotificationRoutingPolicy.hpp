@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -34,14 +35,60 @@ struct NotificationRoutingPlan {
 	bool execution_authorized = false;
 };
 
+inline bool notification_routing_identifier_valid(const nlohmann::json& value) noexcept {
+	if (!value.is_string()) return false;
+	const auto& text = value.get_ref<const std::string&>();
+	if (text.empty()) return false;
+	// Identifiers are embedded in a colon-delimited delivery identity. Whitespace,
+	// control characters and the delimiter cannot identify a route component.
+	return std::all_of(text.begin(), text.end(), [](unsigned char character) {
+		return character > 0x20 && character != 0x7f && character != ':';
+	});
+}
+
+inline bool notification_routing_identifiers_valid(const nlohmann::json& values) {
+	if (!values.is_array() || values.empty()) return false;
+	std::unordered_set<std::string> seen;
+	for (const auto& value : values) {
+		if (!notification_routing_identifier_valid(value) ||
+			!seen.insert(value.get_ref<const std::string&>()).second) return false;
+	}
+	return true;
+}
+
 inline bool notification_policy_valid(const nlohmann::json& policy) noexcept {
 	try {
 		if (!policy.is_object()) return false;
-		if (policy.value("schema_version", 0) != 1) return false;
+		if (!policy.contains("schema_version") || !policy.at("schema_version").is_number_integer() ||
+			policy.at("schema_version") != 1) return false;
 		if (policy.value("authority", std::string{}) != "NOTIFICATION_ROUTING_ONLY") return false;
 		if (policy.value("default_action", std::string{}) != "BLOCK") return false;
-		return policy.contains("allowed_channels") && policy.at("allowed_channels").is_array() &&
-			policy.contains("routes") && policy.at("routes").is_array();
+		if (!policy.contains("allowed_channels") || !policy.at("allowed_channels").is_array() ||
+			!policy.contains("routes") || !policy.at("routes").is_array()) return false;
+
+		const auto& channels = policy.at("allowed_channels");
+		// An empty allow-list and route list are a valid block-all policy.
+		if (!channels.empty() && !notification_routing_identifiers_valid(channels)) return false;
+		for (const auto& route : policy.at("routes")) {
+			if (!route.is_object() || !route.contains("severity") || !route.at("severity").is_string() ||
+				!route.contains("minimum_escalation_level") ||
+				!route.at("minimum_escalation_level").is_number_integer() ||
+				!route.contains("channels") || !notification_routing_identifiers_valid(route.at("channels")) ||
+				!route.contains("audiences") || !notification_routing_identifiers_valid(route.at("audiences"))) return false;
+			const auto& severity = route.at("severity").get_ref<const std::string&>();
+			if (severity != "INFO" && severity != "ATTENTION" && severity != "WARNING" && severity != "CRITICAL") return false;
+			const auto& level = route.at("minimum_escalation_level");
+			if (level.is_number_unsigned()) {
+				if (level.get<std::uint64_t>() > 3) return false;
+			} else {
+				const auto number = level.get<std::int64_t>();
+				if (number < 0 || number > 3) return false;
+			}
+			for (const auto& channel : route.at("channels")) {
+				if (std::find(channels.begin(), channels.end(), channel) == channels.end()) return false;
+			}
+		}
+		return true;
 	} catch (...) {
 		return false;
 	}
@@ -69,12 +116,11 @@ inline std::string notification_dedup_key(
 inline const nlohmann::json* notification_route_for(
 	const nlohmann::json& policy,
 	const std::string& severity,
-	int escalation_level) noexcept {
+	int escalation_level) {
 	if (!notification_policy_valid(policy)) return nullptr;
 	for (const auto& route : policy.at("routes")) {
-		if (!route.is_object()) continue;
-		if (route.value("severity", std::string{}) != severity) continue;
-		if (escalation_level < route.value("minimum_escalation_level", 0)) continue;
+		if (route.at("severity").get_ref<const std::string&>() != severity) continue;
+		if (escalation_level < route.at("minimum_escalation_level").get<int>()) continue;
 		return &route;
 	}
 	return nullptr;
