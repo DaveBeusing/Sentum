@@ -12,6 +12,7 @@
 
 #include <sentum/market/MarketEvent.hpp>
 #include <sentum/trader/types/TradePosition.hpp>
+#include <sentum/trader/utils/StrictNumeric.hpp>
 
 struct BacktestMetrics {
     double net_profit = 0.0;
@@ -34,24 +35,50 @@ public:
         std::vector<MarketEvent> events;
         std::string line;
         bool first = true;
+        std::size_t line_number = 0;
         while (std::getline(file, line)) {
+            ++line_number;
+            if (!line.empty() && line.back() == '\r') line.pop_back();
             if (line.empty()) continue;
-            if (first && line.find("timestamp") != std::string::npos) { first = false; continue; }
+            if (first && (line == "timestamp_ms,price" || line == "timestamp_ms,price,volume" ||
+                          line == "timestamp,price" || line == "timestamp,price,volume")) {
+                first = false;
+                continue;
+            }
             first = false;
-            std::stringstream ss(line);
-            std::string field;
-            std::vector<std::string> cols;
-            while (std::getline(ss, field, ',')) cols.push_back(field);
-            if (cols.size() < 2) throw std::runtime_error("Replay CSV requires timestamp_ms,price[,volume]");
-            MarketEvent e;
-            e.type = MarketEvent::Type::Trade;
-            e.symbol = symbol;
-            e.timestamp = std::chrono::system_clock::time_point(std::chrono::milliseconds(std::stoll(cols[0])));
-            e.price = std::stod(cols[1]);
-            e.close = e.price;
-            e.volume = cols.size() > 2 ? std::stod(cols[2]) : 0.0;
-            events.push_back(e);
+            try {
+                std::vector<std::string> cols;
+                std::size_t start = 0;
+                for (;;) {
+                    const auto comma = line.find(',', start);
+                    cols.push_back(line.substr(start, comma == std::string::npos ? comma : comma - start));
+                    if (comma == std::string::npos) break;
+                    start = comma + 1;
+                }
+                if (cols.size() < 2 || cols.size() > 3)
+                    throw std::invalid_argument("Replay CSV requires timestamp_ms,price[,volume]");
+                const auto timestamp = sentum::numeric::integer(cols[0], "timestamp_ms");
+                const auto minimum = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::duration::min()).count();
+                const auto maximum = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::duration::max()).count();
+                if (timestamp < minimum || timestamp > maximum)
+                    throw std::invalid_argument("timestamp_ms is outside the execution clock range");
+                MarketEvent e;
+                e.type = MarketEvent::Type::Trade;
+                e.symbol = symbol;
+                e.timestamp = std::chrono::system_clock::time_point(std::chrono::milliseconds(timestamp));
+                e.price = sentum::numeric::finite_number(cols[1], "price");
+                e.close = e.price;
+                e.volume = cols.size() > 2 ? sentum::numeric::finite_number(cols[2], "volume") : 0.0;
+                if (e.price <= 0.0 || e.volume < 0.0)
+                    throw std::invalid_argument("price must be positive and volume must be nonnegative");
+                events.push_back(e);
+            } catch (const std::exception& error) {
+                throw std::runtime_error(path + ":" + std::to_string(line_number) + ": " + error.what());
+            }
         }
+        if (file.bad()) throw std::runtime_error("Cannot read replay file: " + path);
         std::stable_sort(events.begin(), events.end(), [](const auto& a, const auto& b) { return a.timestamp < b.timestamp; });
         return events;
     }
