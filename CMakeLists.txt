@@ -102,10 +102,22 @@ add_executable(sentum_model tools/model_promotion_main.cpp)
 target_link_libraries(sentum_model PRIVATE sentum_core)
 
 if(BUILD_TESTING)
+	add_executable(sentum_model_revision_tests tests/model_revision_tests.cpp)
+	target_link_libraries(sentum_model_revision_tests PRIVATE sentum_core)
+	add_test(NAME model_revision COMMAND sentum_model_revision_tests)
+	set_tests_properties(model_revision PROPERTIES TIMEOUT 60)
+
+	add_executable(sentum_model_source_validation_tests tests/model_source_validation_tests.cpp)
+	target_link_libraries(sentum_model_source_validation_tests PRIVATE sentum_core)
+	add_test(NAME model_source_validation COMMAND sentum_model_source_validation_tests)
+	set_tests_properties(model_source_validation PROPERTIES TIMEOUT 60)
+
 	add_executable(sentum_runtime_lifecycle_tests tests/runtime_lifecycle_tests.cpp)
 	target_link_libraries(sentum_runtime_lifecycle_tests PRIVATE sentum_core)
 	add_test(NAME runtime_lifecycle COMMAND sentum_runtime_lifecycle_tests)
 	set_tests_properties(runtime_lifecycle PROPERTIES TIMEOUT 60)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_model_source_validation_tests)
+	add_dependencies(sentum_runtime_lifecycle_tests sentum_model_revision_tests)
 
 	add_executable(sentum_websocket_lifecycle_tests tests/websocket_lifecycle_tests.cpp)
 	target_link_libraries(sentum_websocket_lifecycle_tests PRIVATE sentum_core)
