@@ -15,7 +15,7 @@ from pathlib import Path
 FAULT_SCENARIOS = (
     "market-data-reconnect",
     "user-stream-interruption",
-    "listen-key-keepalive",
+    "subscription-termination",
     "partial-fill",
     "unresolved-order-restart",
     "balance-mismatch",

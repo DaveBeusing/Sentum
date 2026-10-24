@@ -300,6 +300,8 @@ public:
 
 class ManualVenue final : public sentum::execution::IExecutionVenue {
 public:
+    std::optional<nlohmann::json> load_position_policy(const std::string&) const override { return policy_; }
+    void save_position_policy(const std::string&, const nlohmann::json& policy) override { policy_ = policy; }
     void start(UpdateHandler callback) override { callback_ = std::move(callback); ready_ = true; }
     void stop() noexcept override { ready_ = false; }
     Snapshot submit(const Request& request) override {
@@ -328,6 +330,7 @@ public:
     std::int64_t latest_exchange_id = 0;
 private:
     UpdateHandler callback_;
+    std::optional<nlohmann::json> policy_;
     bool ready_ = false, killed_ = false;
 };
 

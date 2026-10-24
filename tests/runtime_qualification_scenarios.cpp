@@ -139,34 +139,39 @@ public:
         return {
             {"symbols", nlohmann::json::array({{
                 {"symbol", symbol},
+                {"status", "TRADING"}, {"isSpotTradingAllowed", true},
+                {"orderTypes", nlohmann::json::array({"MARKET"})},
+                {"permissions", nlohmann::json::array({"SPOT"})},
                 {"baseAsset", "BTC"},
+                {"baseAssetPrecision", 8},
                 {"quoteAsset", "USDT"},
+                {"quoteAssetPrecision", 8},
                 {"filters", nlohmann::json::array({
                     {{"filterType", "LOT_SIZE"}, {"minQty", "0.000001"}, {"maxQty", "1000"}, {"stepSize", "0.000001"}},
-                    {{"filterType", "MIN_NOTIONAL"}, {"minNotional", "1"}}
+                    {{"filterType", "MIN_NOTIONAL"}, {"minNotional", "1"},
+                        {"applyToMarket", true}, {"avgPriceMins", 0}}
                 })}
             }})}
         };
     }
 
-    std::string create_listen_key() const override {
-        const auto value = listen_key_creations.fetch_add(1, std::memory_order_relaxed) + 1;
-        return "qualification-listen-" + std::to_string(value);
+    nlohmann::json user_data_subscription(const std::string& id) const override {
+        subscription_requests.fetch_add(1, std::memory_order_relaxed);
+        return BinanceSpotExecutionClient::user_data_subscription(id);
     }
 
-    void keepalive_listen_key(const std::string&) const override {
-        keepalive_calls.fetch_add(1, std::memory_order_relaxed);
-        int remaining = keepalive_failures_remaining.load(std::memory_order_acquire);
-        while (remaining > 0) {
-            if (keepalive_failures_remaining.compare_exchange_weak(
-                    remaining, remaining - 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
-                throw std::runtime_error("injected listen-key keepalive failure");
-            }
-        }
+    nlohmann::json account_trades(const std::string&, std::int64_t, int) const override {
+        return nlohmann::json::array();
     }
-
-    void close_listen_key(const std::string&) const override {
-        closed_listen_keys.fetch_add(1, std::memory_order_relaxed);
+    nlohmann::json ticker_price(const std::string& symbol) const override {
+        return {{"symbol", symbol}, {"price", "100"}};
+    }
+    nlohmann::json reference_price(const std::string& symbol) const override {
+        return {{"symbol", symbol}, {"referencePrice", "100"},
+                {"timestamp", sentum::test::unix_milliseconds()}};
+    }
+    nlohmann::json average_price(const std::string&) const override {
+        return {{"mins", 5}, {"price", "100"}, {"closeTime", sentum::test::unix_milliseconds()}};
     }
 
     void set_open_orders(nlohmann::json value) {
@@ -183,10 +188,7 @@ public:
     mutable std::atomic<int> cancelled{0};
     mutable std::atomic<int> open_order_reads{0};
     mutable std::atomic<int> account_reads{0};
-    mutable std::atomic<int> listen_key_creations{0};
-    mutable std::atomic<int> keepalive_calls{0};
-    mutable std::atomic<int> closed_listen_keys{0};
-    mutable std::atomic<int> keepalive_failures_remaining{0};
+    mutable std::atomic<int> subscription_requests{0};
     mutable std::atomic<std::int64_t> next_order_id{0};
     std::atomic<bool> fail_open_orders{false};
     std::atomic<bool> fail_account{false};
@@ -196,6 +198,8 @@ private:
     mutable std::mutex data_mutex;
     nlohmann::json open_orders_response = nlohmann::json::array();
     nlohmann::json account_response = {
+        {"canTrade", true}, {"accountType", "SPOT"}, {"updateTime", 1700000000000LL},
+        {"permissions", nlohmann::json::array({"SPOT"})},
         {"balances", nlohmann::json::array({
             {{"asset", "BTC"}, {"free", "0"}, {"locked", "0"}},
             {{"asset", "USDT"}, {"free", "10000"}, {"locked", "0"}}
@@ -205,36 +209,62 @@ private:
 
 struct MockStreamState {
     std::atomic<bool> running{false};
+    std::atomic<bool> healthy{false};
     IUserDataStream::Handler handler;
+    IUserDataStream::HealthHandler health_handler;
+
+    bool invalidate(bool stop_worker) {
+        healthy.store(false, std::memory_order_release);
+        if (stop_worker) running.store(false, std::memory_order_release);
+        const bool worker_running = running.load(std::memory_order_acquire);
+        if (health_handler) health_handler(false);
+        return worker_running;
+    }
 };
 
 class MockUserDataStream final : public IUserDataStream {
 public:
-    MockUserDataStream(std::shared_ptr<MockStreamState> state, IUserDataStream::Handler handler)
-        : state_(std::move(state)) {
+    MockUserDataStream(std::shared_ptr<MockStreamState> state, SubscriptionRequest signing,
+                       Handler handler, HealthHandler health)
+        : state_(std::move(state)), signing_(std::move(signing)) {
         state_->handler = std::move(handler);
+        state_->health_handler = std::move(health);
     }
 
     ~MockUserDataStream() override { stop(); }
 
-    void start() override { state_->running.store(true, std::memory_order_release); }
-    void stop() override { state_->running.store(false, std::memory_order_release); }
+    void start() override {
+        const auto request = signing_("qualification-subscription");
+        require(request.at("method") == "userDataStream.subscribe.signature", "Unexpected user subscription method");
+        state_->running.store(true, std::memory_order_release);
+        state_->healthy.store(true, std::memory_order_release);
+        if (state_->health_handler) state_->health_handler(true);
+    }
+    void stop() override {
+        state_->healthy.store(false, std::memory_order_release);
+        state_->running.store(false, std::memory_order_release);
+    }
     bool running() const noexcept override { return state_->running.load(std::memory_order_acquire); }
+    bool healthy() const noexcept override { return state_->healthy.load(std::memory_order_acquire); }
+    bool wait_until_healthy(std::chrono::milliseconds) override { return running() && healthy(); }
 
 private:
     std::shared_ptr<MockStreamState> state_;
+    SubscriptionRequest signing_;
 };
 
 class MockStreamRegistry {
 public:
     sentum::order::LiveOrderSession::StreamFactory factory() {
-        return [this](std::string, IUserDataStream::Handler handler) {
+        return [this](IUserDataStream::SubscriptionRequest signing, IUserDataStream::Handler handler,
+                      IUserDataStream::HealthHandler health) {
             auto state = std::make_shared<MockStreamState>();
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 states_.push_back(state);
             }
-            return std::make_unique<MockUserDataStream>(std::move(state), std::move(handler));
+            return std::make_unique<MockUserDataStream>(std::move(state), std::move(signing),
+                                                       std::move(handler), std::move(health));
         };
     }
 
@@ -367,6 +397,8 @@ nlohmann::json scenario_balance_mismatch() {
         {
             MockSpotExecutionClient client;
             client.set_account({
+                {"canTrade", true}, {"accountType", "SPOT"}, {"updateTime", 1700000000000LL},
+                {"permissions", nlohmann::json::array({"SPOT"})},
                 {"balances", nlohmann::json::array({
                     {{"asset", "BTC"}, {"free", "0.25"}, {"locked", "0.10"}},
                     {{"asset", "USDT"}, {"free", "10000"}, {"locked", "0"}}
@@ -397,13 +429,15 @@ std::unique_ptr<sentum::order::LiveOrderSession> make_session(
     std::unique_ptr<MockSpotExecutionClient> client,
     MockStreamRegistry& streams,
     std::chrono::milliseconds poll = 5ms,
-    std::chrono::milliseconds keepalive = 5s) {
+    std::chrono::milliseconds subscription_timeout = 5s) {
     sentum::order::LiveOrderSession::Timing timing;
     timing.supervisor_poll_interval = poll;
-    timing.keepalive_interval = keepalive;
-    return sentum::order::LiveOrderSession::from_dependencies(
+    timing.subscription_timeout = subscription_timeout;
+    auto session = sentum::order::LiveOrderSession::from_dependencies(
         std::move(client), streams.factory(), timing,
         sentum::order::LiveOrderSession::Persistence::ephemeral());
+    session->configure_market("BTCUSDT", RiskConfig{});
+    return session;
 }
 
 nlohmann::json scenario_user_stream_interruption() {
@@ -419,12 +453,13 @@ nlohmann::json scenario_user_stream_interruption() {
         auto stream = streams.latest();
         require(static_cast<bool>(stream), "mock user stream was not created");
         const auto expected_creations = streams.creations() + 1;
-        stream->running.store(false, std::memory_order_release);
+        stream->invalidate(true);
+        require(!session->ready() && session->killed(), "User stream health callback did not immediately block entry admission");
         require_eventually([&] {
             const auto replacement = streams.latest();
             return session->killed() && !session->ready() &&
                    streams.creations() >= expected_creations &&
-                   replacement && replacement->running.load(std::memory_order_acquire);
+                   replacement && replacement->healthy.load(std::memory_order_acquire);
         }, 500ms, "User Data Stream interruption did not fail closed and reconnect");
     }
 
@@ -442,31 +477,37 @@ nlohmann::json scenario_user_stream_interruption() {
 
     return {
         {"reconnect_count", reconnects},
-        {"listen_key_creations", client_ptr->listen_key_creations.load()},
+        {"subscription_requests", client_ptr->subscription_requests.load()},
         {"reconciliation_outcome", "recovered_but_operator_resume_required"},
         {"kill_switch_transitions", 1},
         {"submission_blocked", submission_blocked}
     };
 }
 
-nlohmann::json scenario_listen_key_keepalive() {
+nlohmann::json scenario_subscription_termination() {
     auto client = std::make_unique<MockSpotExecutionClient>();
     auto* client_ptr = client.get();
-    client_ptr->keepalive_failures_remaining.store(1, std::memory_order_release);
     MockStreamRegistry streams;
-    auto session = make_session(std::move(client), streams, 5ms, 10ms);
+    auto session = make_session(std::move(client), streams, 5s);
     session->start();
+    require(session->ready(), "Subscription termination fixture was not initially ready");
+    auto original = streams.latest();
+    require(original && original->invalidate(false), "Subscription termination fixture did not retain a running worker");
+    require(session->killed() && !session->ready(), "Terminated subscription did not immediately latch admission");
 
     require_eventually([&] {
-        return client_ptr->keepalive_calls.load(std::memory_order_acquire) >= 1 &&
-               session->killed() && !session->ready() && streams.creations() >= 2;
-    }, 750ms, "listen-key keepalive failure did not fail closed and rebuild the stream");
+        const auto replacement = streams.latest();
+        return session->killed() && !session->ready() && streams.creations() >= 2 &&
+               replacement && replacement->healthy.load(std::memory_order_acquire);
+    }, 750ms, "Subscription termination did not promptly wake recovery and rebuild the stream");
 
     const auto reconnects = streams.creations() - 1;
     session->stop();
     return {
         {"reconnect_count", reconnects},
-        {"keepalive_calls", client_ptr->keepalive_calls.load()},
+        {"subscription_requests", client_ptr->subscription_requests.load()},
+        {"worker_running_at_health_loss", true},
+        {"immediate_admission_latch", true},
         {"reconciliation_outcome", "recovered_but_operator_resume_required"},
         {"kill_switch_transitions", 1},
         {"submission_blocked", true}
@@ -480,7 +521,7 @@ nlohmann::json scenario_kill_switch_recovery() {
     session->start();
     auto stream = streams.latest();
     require(static_cast<bool>(stream), "mock stream missing before recovery test");
-    stream->running.store(false, std::memory_order_release);
+    stream->invalidate(true);
 
     require_eventually([&] { return session->killed() && streams.creations() >= 2; },
                        500ms, "fault did not latch kill switch");
@@ -700,7 +741,7 @@ nlohmann::json run_named(const std::string& scenario, double duration_seconds, s
     if (scenario == "unresolved-order-restart") return scenario_unresolved_order_restart();
     if (scenario == "balance-mismatch") return scenario_balance_mismatch();
     if (scenario == "user-stream-interruption") return scenario_user_stream_interruption();
-    if (scenario == "listen-key-keepalive") return scenario_listen_key_keepalive();
+    if (scenario == "subscription-termination") return scenario_subscription_termination();
     if (scenario == "kill-switch-recovery") return scenario_kill_switch_recovery();
     if (scenario == "market-data-reconnect") return scenario_market_data_reconnect();
     if (scenario == "persistence-pressure") return scenario_persistence_pressure();
@@ -712,7 +753,7 @@ std::vector<std::string> fault_scenarios() {
     return {
         "market-data-reconnect",
         "user-stream-interruption",
-        "listen-key-keepalive",
+        "subscription-termination",
         "partial-fill",
         "unresolved-order-restart",
         "balance-mismatch",

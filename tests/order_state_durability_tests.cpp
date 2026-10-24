@@ -123,8 +123,19 @@ struct FakeClient final : BinanceSpotExecutionClient {
         return nlohmann::json::array();
     }
     nlohmann::json exchange_info(const std::string& symbol) const override {
-        return {{"symbols", nlohmann::json::array({{{"symbol", symbol}, {"baseAsset", "BTC"}, {"quoteAsset", "USDT"}}})}};
+        return {{"symbols", nlohmann::json::array({{{"symbol", symbol}, {"baseAsset", "BTC"}, {"quoteAsset", "USDT"},
+            {"status", "TRADING"}, {"isSpotTradingAllowed", true}, {"baseAssetPrecision", 8}, {"quoteAssetPrecision", 8},
+            {"orderTypes", {"MARKET"}}, {"permissionSets", {{"SPOT"}}},
+            {"filters", nlohmann::json::array({{{"filterType", "LOT_SIZE"}, {"minQty", "0.000001"},
+                {"maxQty", "1000"}, {"stepSize", "0.000001"}}})}}})}};
     }
+    nlohmann::json account() const override {
+        return {{"canTrade", true}, {"accountType", "SPOT"}, {"updateTime", 1000}, {"permissions", {"SPOT"}},
+            {"balances", nlohmann::json::array({{{"asset", "BTC"}, {"free", "0"}, {"locked", "0"}},
+                {{"asset", "USDT"}, {"free", "10000"}, {"locked", "0"}}})}};
+    }
+    nlohmann::json account_trades(const std::string&, std::int64_t, int = 1000) const override { return nlohmann::json::array(); }
+    nlohmann::json ticker_price(const std::string& symbol) const override { return {{"symbol", symbol}, {"price", "100"}}; }
     nlohmann::json place_market_order(const Request& request) const override {
         ++placements;
         { std::lock_guard<std::mutex> lock(mutex); last_id = request.client_order_id; }
@@ -145,9 +156,6 @@ struct FakeClient final : BinanceSpotExecutionClient {
             {"cummulativeQuoteQty", outcome == 2 ? "100" : "0"},
             {"status", outcome == 2 ? "FILLED" : "CANCELED"}, {"updateTime", 1001}};
     }
-    std::string create_listen_key() const override { return "fixture-stream"; }
-    void keepalive_listen_key(const std::string&) const override {}
-    void close_listen_key(const std::string&) const override {}
     bool all_queries_are(const std::string& id) const {
         std::lock_guard<std::mutex> lock(mutex);
         return !query_ids.empty() && std::all_of(query_ids.begin(), query_ids.end(), [&](const auto& value) { return value == id; });
@@ -165,28 +173,34 @@ struct FakeClient final : BinanceSpotExecutionClient {
 struct StreamState { std::atomic<bool> running{false}; };
 class FakeStream final : public IUserDataStream {
 public:
-    explicit FakeStream(std::shared_ptr<StreamState> state) : state_(std::move(state)) {}
-    void start() override { state_->running.store(true); }
-    void stop() override { state_->running.store(false); }
+    explicit FakeStream(std::shared_ptr<StreamState> state, HealthHandler health)
+        : state_(std::move(state)), health_(std::move(health)) {}
+    void start() override { state_->running.store(true); health_(true); }
+    void stop() override { state_->running.store(false); health_(false); }
     bool running() const noexcept override { return state_->running.load(); }
+    bool healthy() const noexcept override { return state_->running.load(); }
+    bool wait_until_healthy(std::chrono::milliseconds) override { return healthy(); }
 private:
     std::shared_ptr<StreamState> state_;
+    HealthHandler health_;
 };
 struct Streams {
     std::atomic<int> starts{0};
     LiveOrderSession::StreamFactory factory() {
-        return [this](std::string, IUserDataStream::Handler) {
+        return [this](IUserDataStream::SubscriptionRequest, IUserDataStream::Handler, IUserDataStream::HealthHandler health) {
             ++starts;
-            return std::make_unique<FakeStream>(std::make_shared<StreamState>());
+            return std::make_unique<FakeStream>(std::make_shared<StreamState>(), std::move(health));
         };
     }
 };
 std::unique_ptr<LiveOrderSession> session(Workspace& workspace, std::unique_ptr<FakeClient> client, Streams& streams) {
     LiveOrderSession::Timing timing;
     timing.supervisor_poll_interval = 2ms;
-    timing.keepalive_interval = 1h;
-    return LiveOrderSession::from_dependencies(std::move(client), streams.factory(), timing,
+    timing.subscription_timeout = 1s;
+    auto result = LiveOrderSession::from_dependencies(std::move(client), streams.factory(), timing,
         LiveOrderSession::Persistence::durable(workspace.database(), workspace.identity()));
+    result->configure_market("BTCUSDT", RiskConfig{});
+    return result;
 }
 
 void roundtrip_replay_and_schema_isolation() {

@@ -24,8 +24,10 @@ struct BinanceWebsocketClient::Impl {
         : stream(std::move(url), std::move(hostname), settings, std::move(message), std::move(health)) {}
 };
 
-BinanceWebsocketClient::BinanceWebsocketClient(const std::string& sym, std::chrono::milliseconds maximum_event_age)
-    : symbol(sym), running(false) {
+BinanceWebsocketClient::BinanceWebsocketClient(const std::string& sym, std::chrono::milliseconds maximum_event_age,
+    sentum::api::BinanceEnvironment environment)
+    : symbol(sym), environment_(environment), running(false) {
+    (void)sentum::api::market_trade_url(environment_, symbol);
     if (maximum_event_age.count() <= 0 || maximum_event_age > std::chrono::hours(24)) {
         throw std::invalid_argument("Market event age must be positive and no greater than 24 hours");
     }
@@ -66,11 +68,8 @@ void BinanceWebsocketClient::start() {
 	lifecycle_cv.wait(lock, [this] { return !joining; });
 	if (running.load()) return;
 	join_worker(lock);
-	std::string lower = symbol;
-    std::transform(lower.begin(), lower.end(), lower.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    const std::string hostname = test_hostname.empty() ? "stream.binance.com" : test_hostname;
-    const std::string url = test_url.empty() ? "wss://" + hostname + ":9443/ws/" + lower + "@trade" : test_url;
+    const std::string hostname = test_hostname.empty() ? sentum::api::market_stream_host(environment_) : test_hostname;
+    const std::string url = test_url.empty() ? endpoint() : test_url;
     stopped_health = {};
     impl = std::make_unique<Impl>(url, hostname, stream_settings,
         [this](const std::string& payload) { handle_message(payload); },

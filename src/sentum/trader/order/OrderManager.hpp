@@ -6,6 +6,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -37,10 +38,71 @@ public:
         handler_ = std::move(handler);
     }
 
-    void reconcile_startup() {
-        reconciled_.store(false);
+    void set_admission_guard(std::function<bool()> guard) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        admission_guard_ = std::move(guard);
+    }
+
+    // Stream callbacks latch admission without synchronously issuing network
+    // cancellations. The supervisor owns cancellation and transport replacement.
+    void block_submissions(const std::string& reason) noexcept { latch(reason); }
+
+    std::vector<Snapshot> snapshots() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<Snapshot> result;
+        result.reserve(orders_.size());
+        for (const auto& item : orders_) result.push_back(item.second);
+        std::sort(result.begin(), result.end(), [](const Snapshot& a, const Snapshot& b) {
+            return a.client_order_id < b.client_order_id;
+        });
+        return result;
+    }
+
+    void accept_account_reconciliation(const std::vector<Snapshot>& orders,
+                                       const std::vector<Snapshot>& replay,
+                                       const std::string& symbol, const nlohmann::json& proof) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (storage_failed_.load()) throw std::logic_error("Execution storage is unhealthy");
+        std::unordered_map<std::string, Snapshot> next;
+        std::set<std::string> exchange_ids;
+        std::map<std::string, std::string> aliases;
+        for (const auto& order : orders) {
+            validate_snapshot(order);
+            const auto old = orders_.find(order.client_order_id);
+            if (!order.locally_owned || order.requires_reconciliation || !terminal(order.state) ||
+                order.symbol != symbol || old == orders_.end() || !old->second.locally_owned ||
+                old->second.symbol != order.symbol || old->second.side != order.side ||
+                !near(old->second.requested_quantity, order.requested_quantity) ||
+                (old->second.exchange_order_id > 0 && old->second.exchange_order_id != order.exchange_order_id) ||
+                order.executed_quantity < old->second.executed_quantity ||
+                order.cumulative_quote_quantity < old->second.cumulative_quote_quantity ||
+                !next.emplace(order.client_order_id, order).second ||
+                (order.exchange_order_id > 0 && !exchange_ids.insert(exchange_key(order)).second))
+                throw std::logic_error("Account reconciliation changed order ownership or lost execution");
+            const auto reserve_alias = [&](const std::string& alias) {
+                const auto inserted = aliases.emplace(alias_key(order.symbol, alias), order.client_order_id);
+                if (!valid_identifier(alias) || (!inserted.second && inserted.first->second != order.client_order_id))
+                    throw std::logic_error("Account reconciliation contains conflicting order aliases");
+            };
+            reserve_alias(order.client_order_id);
+            for (const auto& alias : order.client_order_aliases) reserve_alias(alias);
+            for (const auto& alias : old->second.client_order_aliases)
+                if (std::find(order.client_order_aliases.begin(), order.client_order_aliases.end(), alias) == order.client_order_aliases.end())
+                    throw std::logic_error("Account reconciliation discarded a durable order alias");
+        }
+        if (next.size() != orders_.size()) throw std::logic_error("Account reconciliation omitted an order");
         try {
-            {
+            if (repository_) repository_->save_reconciled_orders(orders, replay, symbol, proof);
+            orders_.swap(next);
+            rebuild_indexes_locked();
+            reconciled_.store(true);
+        } catch (...) {
+            latch_locked("Account reconciliation could not be committed");
+            throw;
+        }
+    }
+
+    void restore_persisted_state() {
                 std::lock_guard<std::mutex> lock(mutex_);
                 if (!restored_ && repository_) {
                     for (auto order : repository_->load_latest()) {
@@ -57,7 +119,12 @@ public:
                     kill_switch_.store(kill_switch_.load() || repository_->load_kill_switch());
                 }
                 restored_ = true;
-            }
+    }
+
+    void reconcile_startup() {
+        reconciled_.store(false);
+        try {
+            restore_persisted_state();
             const auto open = exchange_.open_orders();
             if (!open.is_array()) throw std::runtime_error("Invalid open-orders reconciliation response");
             for (const auto& value : open) {
@@ -74,7 +141,7 @@ public:
                 std::lock_guard<std::mutex> lock(mutex_);
                 for (const auto& item : orders_) {
                     if (!terminal(item.second.state) || item.second.requires_reconciliation) {
-                        latch_locked("Startup reconciliation contains unresolved orders");
+                        if (!kill_switch_.load()) latch_locked("Startup reconciliation contains unresolved orders");
                         break;
                     }
                 }
@@ -118,6 +185,7 @@ public:
             std::lock_guard<std::mutex> lock(mutex_);
             if (!reconciled_.load()) throw std::logic_error("Orders cannot be submitted before startup reconciliation");
             if (kill_switch_.load() || storage_failed_.load()) throw std::logic_error("Kill switch is active");
+            if (admission_guard_ && !admission_guard_()) throw std::logic_error("Execution stream or account proof is unavailable");
             if (orders_.count(request.client_order_id) || aliases_.count(alias_key(request.symbol, request.client_order_id)))
                 throw std::logic_error("Duplicate client order id");
             commit_locked(pending, "intent");
@@ -154,7 +222,7 @@ public:
         }
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (!kill_switch_.load() && !storage_failed_.load() &&
+            if (!kill_switch_.load() && !storage_failed_.load() && (!admission_guard_ || admission_guard_()) &&
                 orders_.at(request.client_order_id).state == State::Pending)
                 dispatched_.insert(request.client_order_id);
         }
@@ -753,6 +821,7 @@ private:
     // records are converted to Unknown before any recovery callback can cancel.
     std::set<std::string> dispatched_;
     UpdateHandler handler_;
+    std::function<bool()> admission_guard_;
     bool restored_ = false;
     std::uint64_t kill_generation_ = 0;
     std::atomic<bool> reconciled_{false}, kill_switch_{false}, storage_failed_{false};

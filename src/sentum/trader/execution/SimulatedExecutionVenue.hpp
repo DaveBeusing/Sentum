@@ -26,7 +26,10 @@ public:
 
     order::Snapshot submit(const order::Request& request) override {
         if (!ready() || killed()) throw std::logic_error("Simulated venue is not ready");
-        if (request.quantity <= 0.0 || market_price_ <= 0.0) throw std::invalid_argument("Invalid simulated order");
+        if (!std::isfinite(request.quantity) || request.quantity <= 0.0 ||
+            !std::isfinite(market_price_) || market_price_ <= 0.0 ||
+            (request.side != order::Side::Buy && request.side != order::Side::Sell))
+            throw std::invalid_argument("Invalid simulated order");
 
         const double half_spread = spread_percent_ * 0.5;
         const bool buy = request.side == order::Side::Buy;
@@ -34,6 +37,10 @@ public:
                                  : market_price_ * (1.0 - half_spread);
         const double fill = buy ? touch * (1.0 + slippage_percent_)
                                 : touch * (1.0 - slippage_percent_);
+        const double quote_quantity = request.quantity * fill;
+        if (!std::isfinite(fill) || fill <= 0.0 ||
+            !std::isfinite(quote_quantity) || quote_quantity <= 0.0)
+            throw std::invalid_argument("Simulated fill price and notional must be finite and positive");
 
         order::Snapshot s;
         s.symbol = request.symbol;
@@ -47,7 +54,7 @@ public:
         s.quote_asset = request.quote_asset;
         s.executed_quantity = request.quantity;
         s.average_fill_price = fill;
-        s.cumulative_quote_quantity = request.quantity * fill;
+        s.cumulative_quote_quantity = quote_quantity;
         s.updated_at = market_time_;
         if (handler_) handler_(s);
         return s;
@@ -66,14 +73,19 @@ public:
     bool killed() const noexcept override { return killed_.load(std::memory_order_acquire); }
     const char* name() const noexcept override { return name_.c_str(); }
 
-    void set_market(double price, std::chrono::system_clock::time_point timestamp) noexcept {
+    void set_market(double price, std::chrono::system_clock::time_point timestamp) {
+        if (!std::isfinite(price) || price <= 0.0)
+            throw std::invalid_argument("Simulated market price must be finite and positive");
         market_price_ = price;
         market_time_ = timestamp;
     }
 
-    void set_fill_model(double spread_percent, double slippage_percent) noexcept {
-        spread_percent_ = std::max(0.0, spread_percent);
-        slippage_percent_ = std::max(0.0, slippage_percent);
+    void set_fill_model(double spread_percent, double slippage_percent) {
+        if (!std::isfinite(spread_percent) || spread_percent < 0.0 || spread_percent >= 2.0 ||
+            !std::isfinite(slippage_percent) || slippage_percent < 0.0 || slippage_percent >= 1.0)
+            throw std::invalid_argument("Invalid simulated spread or slippage");
+        spread_percent_ = spread_percent;
+        slippage_percent_ = slippage_percent;
     }
 
 private:

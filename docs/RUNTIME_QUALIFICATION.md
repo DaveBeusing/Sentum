@@ -75,7 +75,7 @@ The seed is recorded in every report and controls deterministic Paper input. The
 | `paper-soak` | Real `TradeEngine` Strategy/Risk/simulated-execution path driven by deterministic seeded market input for a bounded duration. |
 | `market-data-reconnect` | Collector lifecycle and persistence continuity across a controlled producer disconnect/restart boundary without network dependency. |
 | `user-stream-interruption` | `LiveOrderSession` User Data Stream health loss, fail-closed kill switch and stream rebuild through an injected stream boundary. |
-| `listen-key-keepalive` | Keepalive failure, submission blocking, stream rebuild and required explicit recovery. |
+| `subscription-termination` | Authenticated subscription termination while the worker remains running; immediate submission blocking, stream rebuild and required explicit recovery. |
 | `partial-fill` | `OrderManager` and `ConfirmedPositionLedger` exchange-event path; partial execution contributes inventory, remains non-final, and duplicate complete fills do not double inventory. |
 | `unresolved-order-restart` | Startup reconciliation with an unresolved exchange order latches the kill switch and blocks new submissions. |
 | `balance-mismatch` | `AccountReconciler` detects authoritative account/local quantity divergence and emits unsuccessful reconciliation evidence. |
@@ -93,7 +93,7 @@ The mock Testnet boundaries provide exchange responses and User Data Stream life
 `LiveOrderSession` now treats both of these conditions as runtime faults:
 
 - an unhealthy/stopped User Data Stream;
-- a listen-key keepalive failure.
+- a terminated authenticated subscription, including one whose transport worker remains running.
 
 Either condition immediately marks the session not ready and activates the kill switch before attempting to rebuild the stream.
 

@@ -10,6 +10,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -23,7 +24,9 @@
 #include <openssl/evp.h>
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
+#include <sentum/trader/order/ConfirmedPositionLedger.hpp>
 #include <sentum/trader/order/OrderTypes.hpp>
+#include <sentum/trader/risk/PositionPolicyCheckpoint.hpp>
 
 namespace sentum::order {
 
@@ -86,16 +89,7 @@ public:
             prior.text(1, account_); prior.text(2, snapshot.client_order_id);
             if (prior.row() && decode(prior.string(0)).requires_reconciliation && !snapshot.requires_reconciliation)
                 throw std::logic_error("Execution reconciliation requirement cannot be cleared by an order update");
-            Statement history(db_, "INSERT INTO execution_order_history(account,client_order_id,payload,source,local_ts) VALUES(?,?,?,?,?);");
-            history.text(1, account_); history.text(2, snapshot.client_order_id);
-            history.text(3, payload); history.text(4, source); history.integer(5, now_ms()); history.done();
-            const auto history_id = sqlite3_last_insert_rowid(db_);
-            Statement current(db_, "INSERT INTO execution_order_snapshots(account,client_order_id,symbol,exchange_order_id,history_id,payload) VALUES(?,?,?,?,?,?) ON CONFLICT(account,client_order_id) DO UPDATE SET symbol=excluded.symbol,exchange_order_id=excluded.exchange_order_id,history_id=excluded.history_id,payload=excluded.payload;");
-            current.text(1, account_); current.text(2, snapshot.client_order_id); current.text(3, snapshot.symbol);
-            current.integer(4, snapshot.exchange_order_id); current.integer(5, history_id);
-            current.text(6, payload); current.done();
-            Statement count(db_, "UPDATE execution_accounts SET history_count=history_count+1 WHERE account=?;");
-            count.text(1, account_); count.done();
+            append_order_locked(snapshot, payload, source);
         });
     }
 
@@ -106,6 +100,150 @@ public:
         Statement s(db_, "SELECT client_order_id,payload,symbol,exchange_order_id FROM execution_order_snapshots WHERE account=? ORDER BY history_id;");
         s.text(1, account_); return read_snapshots(s, true);
     }
+
+    // Full account/trade proof is the only path allowed to clear an incomplete
+    // order marker. Keep the original history and commit every replacement and
+    // its chronological replay in one transaction before publication.
+    void save_reconciled_orders(const std::vector<Snapshot>& orders,
+                                const std::vector<Snapshot>& replay,
+                                const std::string& symbol,
+                                const nlohmann::json& proof) {
+        require_durable();
+        if (symbol.empty()) throw std::invalid_argument("Reconciliation symbol is empty");
+        validate_reconciliation_proof(proof);
+        std::map<std::string, Snapshot> replacements;
+        std::map<std::string, std::string> aliases;
+        std::set<std::int64_t> exchange_ids;
+        for (const auto& order : orders) {
+            validate(order);
+            if (!order.locally_owned || order.requires_reconciliation || unresolved(order.state) ||
+                order.symbol != symbol || !replacements.emplace(order.client_order_id, order).second ||
+                (order.exchange_order_id > 0 && !exchange_ids.insert(order.exchange_order_id).second))
+                throw std::invalid_argument("Reconciled order proof is incomplete");
+            const auto remember = [&](const std::string& alias) {
+                const auto added = aliases.emplace(alias, order.client_order_id);
+                if (!added.second && added.first->second != order.client_order_id)
+                    throw std::invalid_argument("Reconciled order aliases conflict");
+            };
+            remember(order.client_order_id);
+            for (const auto& alias : order.client_order_aliases) remember(alias);
+        }
+        nlohmann::json replay_json = nlohmann::json::array();
+        std::map<std::string, Snapshot> watermarks;
+        std::int64_t previous_trade = -1, previous_time = 0;
+        ConfirmedPositionLedger verified;
+        for (const auto& snapshot : replay) {
+            validate(snapshot);
+            if (!snapshot.locally_owned || snapshot.requires_reconciliation || snapshot.symbol != symbol ||
+                snapshot.executed_quantity <= 0.0 || !replacements.count(snapshot.client_order_id))
+                throw std::invalid_argument("Reconciliation replay has unknown ownership");
+            const auto& final = replacements.at(snapshot.client_order_id);
+            if (snapshot.exchange_order_id != final.exchange_order_id || snapshot.side != final.side ||
+                snapshot.requested_quantity != final.requested_quantity || snapshot.base_asset != final.base_asset ||
+                snapshot.quote_asset != final.quote_asset || snapshot.executed_quantity > final.executed_quantity ||
+                snapshot.cumulative_quote_quantity > final.cumulative_quote_quantity ||
+                snapshot.last_event_time_ms <= 0 || snapshot.last_event_time_ms < previous_time ||
+                snapshot.last_event_time_ms > final.last_event_time_ms ||
+                milliseconds(snapshot.updated_at) != snapshot.last_event_time_ms)
+                throw std::invalid_argument("Reconciliation replay contradicts canonical execution identity or chronology");
+            const auto prior = watermarks.find(snapshot.client_order_id);
+            const auto prior_count = prior == watermarks.end() ? 0 : prior->second.execution_trade_quantities.size();
+            if (snapshot.execution_trade_quantities.size() != prior_count + 1)
+                throw std::invalid_argument("Reconciliation replay must advance one verified trade at a time");
+            std::int64_t new_trade = -1;
+            double new_quantity = 0.0;
+            for (const auto& [trade, quantity] : snapshot.execution_trade_quantities) {
+                const auto expected = final.execution_trade_quantities.find(trade);
+                if (expected == final.execution_trade_quantities.end() || expected->second != quantity)
+                    throw std::invalid_argument("Reconciliation replay changed a verified trade quantity");
+                if (prior == watermarks.end() || !prior->second.execution_trade_quantities.count(trade)) {
+                    if (new_trade >= 0) throw std::invalid_argument("Reconciliation replay skipped trade chronology");
+                    new_trade = trade;
+                    new_quantity = quantity;
+                }
+            }
+            if (new_trade <= previous_trade)
+                throw std::invalid_argument("Reconciliation replay duplicated or reordered a trade identity");
+            const auto old_quantity = prior == watermarks.end() ? 0.0 : prior->second.executed_quantity;
+            const auto old_quote = prior == watermarks.end() ? 0.0 : prior->second.cumulative_quote_quantity;
+            const auto tolerance = 64 * std::numeric_limits<double>::epsilon() *
+                std::max(snapshot.executed_quantity, new_quantity);
+            if (snapshot.executed_quantity <= old_quantity || snapshot.cumulative_quote_quantity <= old_quote ||
+                std::abs(snapshot.executed_quantity - old_quantity - new_quantity) > tolerance)
+                throw std::invalid_argument("Reconciliation replay quantity does not match its new execution");
+            for (const auto& [trade, fee] : snapshot.commissions) {
+                const auto expected = final.commissions.find(trade);
+                if (expected == final.commissions.end() || expected->second.asset != fee.asset || expected->second.amount != fee.amount)
+                    throw std::invalid_argument("Reconciliation replay changed a verified commission");
+            }
+            if (prior != watermarks.end()) {
+                for (const auto& [trade, quantity] : prior->second.execution_trade_quantities)
+                    if (!snapshot.execution_trade_quantities.count(trade) || snapshot.execution_trade_quantities.at(trade) != quantity)
+                        throw std::invalid_argument("Reconciliation replay discarded an earlier trade");
+            }
+            verified.on_order_update(snapshot);
+            previous_trade = new_trade;
+            previous_time = snapshot.last_event_time_ms;
+            watermarks.insert_or_assign(snapshot.client_order_id, snapshot);
+            replay_json.push_back(encode(snapshot));
+        }
+        for (const auto& [client, final] : replacements) {
+            const auto found = watermarks.find(client);
+            if (final.executed_quantity == 0.0) {
+                if (found != watermarks.end()) throw std::invalid_argument("Zero execution order has a fill replay");
+                continue;
+            }
+            if (found == watermarks.end() || found->second.executed_quantity != final.executed_quantity ||
+                found->second.cumulative_quote_quantity != final.cumulative_quote_quantity ||
+                found->second.average_fill_price != final.average_fill_price ||
+                found->second.execution_trade_quantities != final.execution_trade_quantities ||
+                found->second.commissions.size() != final.commissions.size())
+                throw std::invalid_argument("Reconciliation replay does not completely reconstruct canonical execution");
+        }
+        std::lock_guard<std::mutex> lock(mutex_);
+        transaction([&] {
+            require_active_session();
+            validate_journal();
+            if (read_account().unbound_history)
+                throw std::logic_error("Unbound credential history requires a verified migration");
+            Statement previous(db_, "SELECT client_order_id,payload,symbol,exchange_order_id FROM execution_order_snapshots WHERE account=? ORDER BY history_id;");
+            previous.text(1, account_);
+            const auto old = read_snapshots(previous, true);
+            if (old.size() != replacements.size())
+                throw std::logic_error("Reconciliation cannot add or discard local order ownership");
+            for (const auto& prior : old) {
+                const auto replacement = replacements.find(prior.client_order_id);
+                if (replacement == replacements.end()) throw std::logic_error("Reconciliation lost a local order");
+                const auto& next = replacement->second;
+                if (!prior.locally_owned || prior.symbol != next.symbol || prior.side != next.side ||
+                    prior.requested_quantity != next.requested_quantity ||
+                    (prior.exchange_order_id > 0 && prior.exchange_order_id != next.exchange_order_id) ||
+                    (!prior.base_asset.empty() && prior.base_asset != next.base_asset) ||
+                    (!prior.quote_asset.empty() && prior.quote_asset != next.quote_asset) ||
+                    next.last_event_time_ms < prior.last_event_time_ms ||
+                    next.executed_quantity < prior.executed_quantity ||
+                    next.cumulative_quote_quantity < prior.cumulative_quote_quantity)
+                    throw std::logic_error("Reconciliation contradicts durable order identity or execution");
+                for (const auto& [trade, quantity] : prior.execution_trade_quantities)
+                    if (!next.execution_trade_quantities.count(trade) || next.execution_trade_quantities.at(trade) != quantity)
+                        throw std::logic_error("Reconciliation contradicts a durable execution trade");
+                for (const auto& [trade, fee] : prior.commissions) {
+                    const auto it = next.commissions.find(trade);
+                    if (it == next.commissions.end() || it->second.amount != fee.amount ||
+                        (it->second.asset != fee.asset && !(fee.amount == 0.0 && fee.asset.empty())))
+                        throw std::logic_error("Reconciliation contradicts a durable commission");
+                }
+                for (const auto& alias : prior.client_order_aliases)
+                    if (alias != next.client_order_id &&
+                        std::find(next.client_order_aliases.begin(), next.client_order_aliases.end(), alias) == next.client_order_aliases.end())
+                        throw std::logic_error("Reconciliation discarded a durable order alias");
+            }
+            for (const auto& next : orders) append_order_locked(next, encode(next).dump(), "account_reconciliation");
+            Statement audit(db_, "INSERT INTO execution_reconciliations(account,symbol,replay,proof,local_ts) VALUES(?,?,?,?,?);");
+            audit.text(1, account_); audit.text(2, symbol); audit.text(3, replay_json.dump());
+            audit.text(4, proof.dump()); audit.integer(5, now_ms()); audit.done();
+        });
+    }
     std::vector<Snapshot> load_accepted_history() const {
         require_durable();
         std::lock_guard<std::mutex> lock(mutex_);
@@ -115,6 +253,62 @@ public:
     }
     bool load_kill_switch() const {
         require_durable(); std::lock_guard<std::mutex> lock(mutex_); return read_account().killed;
+    }
+
+    std::optional<nlohmann::json> load_position_policy(const std::string& symbol) const {
+        require_durable();
+        if (symbol.empty()) throw std::invalid_argument("Position-policy symbol is empty");
+        std::lock_guard<std::mutex> lock(mutex_);
+        Statement saved(db_, "SELECT payload FROM execution_position_policies WHERE account=? AND symbol=?;");
+        saved.text(1, account_); saved.text(2, symbol);
+        if (!saved.row()) return std::nullopt;
+        const auto payload = nlohmann::json::parse(saved.string(0));
+        const auto checkpoint = risk::PositionPolicyCheckpoint::from_json(payload);
+        const auto canonical = checkpoint.to_json();
+        if (canonical.at("symbol") != symbol) throw std::runtime_error("Position-policy symbol identity changed");
+        return canonical;
+    }
+
+    // Confirmed order evidence is written before its policy checkpoint. A
+    // failed checkpoint cannot publish a weaker in-memory trailing stop.
+    void save_position_policy(const std::string& symbol, const nlohmann::json& payload) {
+        require_durable();
+        const auto checkpoint = risk::PositionPolicyCheckpoint::from_json(payload);
+        const auto canonical = checkpoint.to_json();
+        if (symbol.empty() || canonical.at("symbol") != symbol)
+            throw std::invalid_argument("Position-policy symbol does not match its journal key");
+        const auto client_id = canonical.at("entry_client_order_id").get<std::string>();
+        const auto exchange_id = canonical.at("entry_exchange_order_id").get<std::int64_t>();
+        std::lock_guard<std::mutex> lock(mutex_);
+        transaction([&] {
+            require_active_session();
+            Statement opening(db_, "SELECT payload FROM execution_order_snapshots WHERE account=? AND client_order_id=?;");
+            opening.text(1, account_); opening.text(2, client_id);
+            if (!opening.row()) throw std::logic_error("Position-policy checkpoint has no owned opening order");
+            const auto order = decode(opening.string(0));
+            if (!order.locally_owned || order.symbol != symbol || order.side != Side::Buy ||
+                order.exchange_order_id != exchange_id || !order.exchange_confirmed_execution() || order.requires_reconciliation)
+                throw std::logic_error("Position-policy checkpoint does not identify a verified owned entry");
+            Statement previous(db_, "SELECT payload FROM execution_position_policies WHERE account=? AND symbol=?;");
+            previous.text(1, account_); previous.text(2, symbol);
+            if (previous.row()) {
+                const auto prior = risk::PositionPolicyCheckpoint::from_json(nlohmann::json::parse(previous.string(0))).to_json();
+                if (prior.at("symbol") != symbol)
+                    throw std::logic_error("Stored position-policy symbol does not match its journal key");
+                const bool same_lineage = prior.at("entry_client_order_id") == client_id &&
+                    prior.at("entry_exchange_order_id") == exchange_id;
+                if (same_lineage &&
+                    (prior.at("risk_policy") != canonical.at("risk_policy") ||
+                     canonical.at("stop_loss_price").get<double>() < prior.at("stop_loss_price").get<double>() ||
+                     canonical.at("highest_price").get<double>() < prior.at("highest_price").get<double>() ||
+                     canonical.at("lowest_price").get<double>() > prior.at("lowest_price").get<double>() ||
+                     canonical.at("entry_time_ms").get<std::int64_t>() > prior.at("entry_time_ms").get<std::int64_t>() ||
+                     canonical.at("updated_at_ms").get<std::int64_t>() < prior.at("updated_at_ms").get<std::int64_t>()))
+                    throw std::logic_error("Position-policy checkpoint weakens or changes an established exit policy");
+            }
+            Statement save(db_, "INSERT INTO execution_position_policies(account,symbol,payload,local_ts) VALUES(?,?,?,?) ON CONFLICT(account,symbol) DO UPDATE SET payload=excluded.payload,local_ts=excluded.local_ts;");
+            save.text(1, account_); save.text(2, symbol); save.text(3, canonical.dump()); save.integer(4, now_ms()); save.done();
+        });
     }
     std::string kill_switch_reason() const {
         require_durable(); std::lock_guard<std::mutex> lock(mutex_); return read_account().reason;
@@ -195,6 +389,18 @@ private:
         sqlite3_stmt* statement_ = nullptr;
     };
     struct AccountState { bool killed; bool active; std::string reason; std::int64_t count; bool unbound_history; };
+    void append_order_locked(const Snapshot& snapshot, const std::string& payload, const std::string& source) {
+        Statement history(db_, "INSERT INTO execution_order_history(account,client_order_id,payload,source,local_ts) VALUES(?,?,?,?,?);");
+        history.text(1, account_); history.text(2, snapshot.client_order_id);
+        history.text(3, payload); history.text(4, source); history.integer(5, now_ms()); history.done();
+        const auto history_id = sqlite3_last_insert_rowid(db_);
+        Statement current(db_, "INSERT INTO execution_order_snapshots(account,client_order_id,symbol,exchange_order_id,history_id,payload) VALUES(?,?,?,?,?,?) ON CONFLICT(account,client_order_id) DO UPDATE SET symbol=excluded.symbol,exchange_order_id=excluded.exchange_order_id,history_id=excluded.history_id,payload=excluded.payload;");
+        current.text(1, account_); current.text(2, snapshot.client_order_id); current.text(3, snapshot.symbol);
+        current.integer(4, snapshot.exchange_order_id); current.integer(5, history_id);
+        current.text(6, payload); current.done();
+        Statement count(db_, "UPDATE execution_accounts SET history_count=history_count+1 WHERE account=?;");
+        count.text(1, account_); count.done();
+    }
     static std::int64_t milliseconds(std::chrono::system_clock::time_point t) {
         return std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
     }
@@ -247,11 +453,39 @@ private:
         try { operation(); exec("COMMIT;"); }
         catch (...) { sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr); throw; }
     }
+    static void validate_reconciliation_proof(const nlohmann::json& proof) {
+        if (!proof.is_object() || !proof.at("format").is_number_integer() || proof.at("format") != 1 ||
+            !proof.at("details").is_string() || proof.at("details").get<std::string>().empty() ||
+            !proof.at("account_permissions").is_array() || proof.at("account_permissions").empty())
+            throw std::invalid_argument("Missing complete account reconciliation proof");
+        const auto positive_integer = [&](const char* field) {
+            const auto& value = proof.at(field);
+            if (!value.is_number_integer() ||
+                (value.is_number_unsigned() && value.get<std::uint64_t>() > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())))
+                throw std::invalid_argument("Reconciliation proof integer is out of range");
+            const auto result = value.get<std::int64_t>();
+            if (result <= 0) throw std::invalid_argument("Reconciliation proof integer must be positive");
+            return result;
+        };
+        const auto started = positive_integer("started_ms");
+        const auto finished = positive_integer("finished_ms");
+        if (finished < started || finished > std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::duration::max()).count())
+            throw std::invalid_argument("Reconciliation proof timestamps are invalid");
+        if (!proof.at("account_uid").is_null()) (void)positive_integer("account_uid");
+        std::set<std::string> permissions;
+        for (const auto& permission : proof.at("account_permissions")) {
+            if (!permission.is_string() || permission.get<std::string>().empty() ||
+                !permissions.insert(permission.get<std::string>()).second)
+                throw std::invalid_argument("Reconciliation proof permissions are invalid");
+        }
+        if (!permissions.count("SPOT")) throw std::invalid_argument("Reconciliation proof has no Spot permission");
+    }
     void initialize_schema() {
         exec("CREATE TABLE IF NOT EXISTS execution_schema(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL);");
         exec("INSERT OR IGNORE INTO execution_schema(id,version) VALUES(1,1);");
         Statement version(db_, "SELECT version FROM execution_schema WHERE id=1;");
-        if (!version.row() || version.number(0) != 1 || version.row())
+        if (!version.row() || (version.number(0) != 1 && version.number(0) != 2) || version.row())
             throw std::runtime_error("Unsupported execution journal schema");
         exec("CREATE TABLE IF NOT EXISTS execution_accounts(account TEXT PRIMARY KEY,killed INTEGER NOT NULL CHECK(killed IN (0,1)),reason TEXT NOT NULL,active_session INTEGER NOT NULL CHECK(active_session IN (0,1)),history_count INTEGER NOT NULL CHECK(history_count>=0),legacy_unbound INTEGER NOT NULL CHECK(legacy_unbound IN (0,1)));"
              "CREATE TABLE IF NOT EXISTS execution_order_history(id INTEGER PRIMARY KEY AUTOINCREMENT,account TEXT NOT NULL,client_order_id TEXT NOT NULL,payload TEXT NOT NULL,source TEXT NOT NULL,local_ts INTEGER NOT NULL,FOREIGN KEY(account) REFERENCES execution_accounts(account));"
@@ -259,7 +493,16 @@ private:
              "CREATE INDEX IF NOT EXISTS execution_history_order ON execution_order_history(account,client_order_id,id);"
              "CREATE TABLE IF NOT EXISTS execution_order_snapshots(account TEXT NOT NULL,client_order_id TEXT NOT NULL,symbol TEXT NOT NULL,exchange_order_id INTEGER NOT NULL,history_id INTEGER NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(account,client_order_id),FOREIGN KEY(account) REFERENCES execution_accounts(account),FOREIGN KEY(history_id) REFERENCES execution_order_history(id));"
              "CREATE UNIQUE INDEX IF NOT EXISTS execution_exchange_identity ON execution_order_snapshots(account,symbol,exchange_order_id) WHERE exchange_order_id>0;"
-             "CREATE TABLE IF NOT EXISTS execution_kill_switch_events(id INTEGER PRIMARY KEY AUTOINCREMENT,account TEXT NOT NULL,active INTEGER NOT NULL CHECK(active IN (0,1)),reason TEXT NOT NULL,local_ts INTEGER NOT NULL,FOREIGN KEY(account) REFERENCES execution_accounts(account));");
+             "CREATE TABLE IF NOT EXISTS execution_kill_switch_events(id INTEGER PRIMARY KEY AUTOINCREMENT,account TEXT NOT NULL,active INTEGER NOT NULL CHECK(active IN (0,1)),reason TEXT NOT NULL,local_ts INTEGER NOT NULL,FOREIGN KEY(account) REFERENCES execution_accounts(account));"
+             "CREATE TABLE IF NOT EXISTS execution_reconciliations(id INTEGER PRIMARY KEY AUTOINCREMENT,account TEXT NOT NULL,symbol TEXT NOT NULL,replay TEXT NOT NULL,proof TEXT NOT NULL,local_ts INTEGER NOT NULL,FOREIGN KEY(account) REFERENCES execution_accounts(account));"
+             "CREATE TABLE IF NOT EXISTS execution_position_policies(account TEXT NOT NULL,symbol TEXT NOT NULL,payload TEXT NOT NULL,local_ts INTEGER NOT NULL,PRIMARY KEY(account,symbol),FOREIGN KEY(account) REFERENCES execution_accounts(account));"
+             "UPDATE execution_schema SET version=2 WHERE id=1;");
+        bool has_proof = false;
+        {
+            Statement columns(db_, "PRAGMA table_info(execution_reconciliations);");
+            while (columns.row()) if (columns.string(1) == "proof") has_proof = true;
+        }
+        if (!has_proof) exec("ALTER TABLE execution_reconciliations ADD COLUMN proof TEXT NOT NULL DEFAULT '{}';");
     }
     void begin_session() {
         transaction([&] {
