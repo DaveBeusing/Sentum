@@ -2,7 +2,7 @@
 build/
 
 # Executable
-sentum
+/sentum
 
 # Logfiles & SQLite3 Database
 log/
