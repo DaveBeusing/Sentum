@@ -70,7 +70,7 @@ see [Testnet runtime](docs/TESTNET_RUNTIME.md#qualification-boundaries).
 
 - Linux
 - C++17 compiler
-- CMake 3.10+
+- CMake 3.13+
 - libcurl
 - OpenSSL
 - Boost.System / Boost.Beast headers
