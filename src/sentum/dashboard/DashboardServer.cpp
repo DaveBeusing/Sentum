@@ -87,13 +87,29 @@ nlohmann::json merged_runtime_state(const std::string& host, std::uint16_t port)
     return state;
 }
 
-nlohmann::json operations_view_from_durable_notification_evidence(const nlohmann::json& state) {
-    auto unavailable_state = state;
-    if (unavailable_state.contains("operations_control_plane") &&
-        unavailable_state["operations_control_plane"].is_object()) {
-        unavailable_state["operations_control_plane"].erase("notification_delivery_evidence");
+nlohmann::json unavailable_operations_evidence(const nlohmann::json& state) {
+    auto unavailable = state;
+    if (!unavailable.contains("operations_control_plane") ||
+        !unavailable["operations_control_plane"].is_object()) {
+        unavailable["operations_control_plane"] = nlohmann::json::object();
     }
+    auto& control_plane = unavailable["operations_control_plane"];
+    control_plane.erase("notification_delivery_evidence");
+    control_plane["evidence_status"] = "STALE";
+    control_plane["evidence_stale"] = true;
+    control_plane["incident_state"] = "UNAVAILABLE";
+    control_plane["recovery_state"] = "UNAVAILABLE";
+    control_plane["pending_approvals"] = 0;
+    control_plane["approval_queue"] = nlohmann::json::array();
+    control_plane["approval_queue_total"] = 0;
+    control_plane["audit_timeline"] = nlohmann::json::array();
+    control_plane["audit_timeline_total"] = 0;
+    control_plane["incident_workflow"] = nlohmann::json::object();
+    control_plane["recovery_workflow"] = nlohmann::json::object();
+    return unavailable;
+}
 
+nlohmann::json operations_view_from_durable_notification_evidence(const nlohmann::json& state) {
     const auto database_path = state.value("db_path", std::string("log/klines.sqlite3"));
     try {
         sentum::operations::NotificationDeliveryEvidenceRepository notification_evidence(
@@ -108,20 +124,12 @@ nlohmann::json operations_view_from_durable_notification_evidence(const nlohmann
         } catch (...) {
             auto stale_state = sentum::operations::notification_delivery_snapshot_from_repository(
                 state, notification_evidence);
-            auto& control_plane = stale_state["operations_control_plane"];
-            control_plane["evidence_status"] = "STALE";
-            control_plane["evidence_stale"] = true;
-            control_plane["incident_state"] = "UNAVAILABLE";
-            control_plane["recovery_state"] = "UNAVAILABLE";
-            control_plane["pending_approvals"] = 0;
-            control_plane["approval_queue"] = nlohmann::json::array();
-            control_plane["audit_timeline"] = nlohmann::json::array();
-            control_plane["incident_workflow"] = nlohmann::json::object();
-            control_plane["recovery_workflow"] = nlohmann::json::object();
-            return sentum::ui::derive_cross_surface_operations_view(stale_state);
+            return sentum::ui::derive_cross_surface_operations_view(
+                unavailable_operations_evidence(stale_state));
         }
     } catch (...) {
-        return sentum::ui::derive_cross_surface_operations_view(unavailable_state);
+        return sentum::ui::derive_cross_surface_operations_view(
+            unavailable_operations_evidence(state));
     }
 }
 
