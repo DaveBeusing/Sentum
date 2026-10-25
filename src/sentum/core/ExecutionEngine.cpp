@@ -148,12 +148,15 @@ void ExecutionEngine::stop(ShutdownProgressCallback progress) {
 void ExecutionEngine::init_config() {
     if (!std::filesystem::exists("config") || !std::filesystem::is_directory("config")) throw std::runtime_error("Required config/ directory is missing");
     if (!std::filesystem::exists("config/config.json")) throw std::runtime_error("Required config/config.json is missing");
-    if (!std::filesystem::exists("config/secrets.json")) throw std::runtime_error("Required config/secrets.json is missing");
     if (!std::filesystem::exists("config/risk.json")) throw std::runtime_error("Required config/risk.json is missing");
     try { config = load_config("config/config.json"); }
     catch (const std::exception& e) { logger.log("[ERROR] Failed to load config/config.json: " + std::string(e.what())); throw; }
-    try { secrets = load_secrets("config/secrets.json"); }
-    catch (const std::exception& e) { logger.log("[ERROR] Failed to load config/secrets.json: " + std::string(e.what())); throw; }
+    // Public-data Paper mode does not require exchange credentials.
+    secrets = {};
+    if (std::filesystem::exists("config/secrets.json")) {
+        try { secrets = load_secrets("config/secrets.json"); }
+        catch (const std::exception& e) { logger.log("[ERROR] Failed to load config/secrets.json: " + std::string(e.what())); throw; }
+    }
     if (!config.paperTrading) throw std::runtime_error("Live trading is disabled. Set paperTrading=true in config/config.json");
     (void)sentum::strategy::StrategyFactory::create(config.strategy);
     sentum::runtime::RuntimeControl::global().configure(config.strategy, config.paperAutoSymbol, config.paperSymbol);
