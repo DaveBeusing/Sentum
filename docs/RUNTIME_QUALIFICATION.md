@@ -68,6 +68,29 @@ python3 tools/ci/runtime_qualification.py \
 
 The seed is recorded in every report and controls deterministic Paper input. The same seed and scenario selection can therefore be reused when reproducing a qualification failure.
 
+The Linux runner drains stdout and stderr concurrently with process-status
+sampling. A diagnostic stream larger than an operating-system pipe buffer cannot
+block an otherwise successful scenario. Output capture is limited to **16 MiB per
+stream**, configurable with `--max-output-bytes`; complete scenario JSON is retained
+within that limit. Exceeding either limit terminates the command, records return
+code `125` and `output_limit_exceeded = true`, and makes the evidence incomplete.
+Truncated output can never qualify a run as passing. Command records include the
+limit, bytes read per stream, and the last 4,000 decoded characters retained from
+each stream for diagnostics. Scenario-native JSON is preserved separately.
+
+Each command owns a process group. At the timeout the runner sends termination to
+the group, allows the direct child up to two seconds to exit, then kills any
+remaining group members. Reaping and final pipe draining are bounded; descendants
+holding inherited pipes cannot indefinitely extend a timeout. Timed-out commands
+retain return code `124`. Captured bytes use UTF-8 with replacement for invalid or
+incomplete sequences, so damaged diagnostics cannot prevent JSON report creation.
+
+Capture, overflow, timeout and descendant-cleanup regressions run with:
+
+```bash
+python3 tests/subprocess_evidence_tests.py
+```
+
 ## Supported scenarios
 
 | Scenario | Contract exercised |
@@ -157,6 +180,7 @@ FAIL is produced when any of the following occurs:
 
 - a required qualification binary is missing;
 - a child process times out;
+- a child exceeds the configured per-stream output capture limit;
 - a child process exits non-zero;
 - a scenario returns `pass=false`;
 - expected machine-readable scenario output is absent;

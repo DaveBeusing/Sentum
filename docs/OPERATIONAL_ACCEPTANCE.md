@@ -31,6 +31,22 @@ Current CI defaults:
 
 The JSON report records each command, return code, elapsed time, stdout and stderr. The Markdown report is added to the GitHub Actions job summary.
 
+Timeouts produce a structured `FAIL` report with return code `124`,
+`timed_out = true`, actual elapsed time and all output captured before the deadline.
+Both successful output and timeout byte buffers are decoded as UTF-8; invalid or
+incomplete sequences use the Unicode replacement character. Empty stdout/stderr
+remain empty strings, while the separate `failure` field explains the timeout.
+The Markdown failure section includes the command, duration, timeout state and
+captured output, so both artifact formats remain available when acceptance fails.
+Each command owns a separate process group; timeout cleanup kills that group,
+including descendants retaining output pipes, before the runner continues.
+
+The runner's timeout/report regressions can be run without C++ build artifacts:
+
+```bash
+python3 tests/subprocess_evidence_tests.py
+```
+
 ## Evidence semantics
 
 `PASS` means all requested cycles completed and every invoked regression binary returned success within its timeout.
