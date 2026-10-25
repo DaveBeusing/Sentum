@@ -11,6 +11,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from release_evidence_contract import load_json_object, validate_rc_provenance
+
 
 REQUIRED_SECTIONS = [
     "## Production promotion prerequisites",
@@ -77,14 +79,14 @@ def main() -> int:
         violations.append(f"missing RC package report: {rc_report_path}")
     else:
         try:
-            rc_report = json.loads(rc_report_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as error:
-            violations.append(f"invalid RC package report JSON: {error}")
-        if isinstance(rc_report, dict):
-            if rc_report.get("status") != "PASS":
-                violations.append("RC package report is not PASS")
-            if rc_report.get("git_sha") != args.expected_sha:
-                violations.append("RC package report Git SHA does not match the evaluated commit")
+            rc_report = load_json_object(rc_report_path)
+        except (OSError, ValueError, UnicodeError) as error:
+            violations.append(f"invalid RC package report: {error}")
+        else:
+            source_run = os.environ.get("SOURCE_WORKFLOW_RUN_ID")
+            violations.extend(validate_rc_provenance(
+                rc_report, args.expected_sha, datetime.now(timezone.utc), expected_run_id=source_run
+            ))
 
     runbook_text = paths["runbook"].read_text(encoding="utf-8") if paths["runbook"].is_file() else ""
     for section in REQUIRED_SECTIONS:
@@ -110,8 +112,8 @@ def main() -> int:
         "rc_package": {
             "path": str(rc_report_path),
             "sha256": sha256(rc_report_path) if rc_report_path.is_file() else None,
-            "status": rc_report.get("status") if isinstance(rc_report, dict) else None,
-            "git_sha": rc_report.get("git_sha") if isinstance(rc_report, dict) else None,
+            "status": rc_report.get("status") if isinstance(rc_report, dict) and isinstance(rc_report.get("status"), str) else None,
+            "git_sha": rc_report.get("git_sha") if isinstance(rc_report, dict) and isinstance(rc_report.get("git_sha"), str) else None,
         },
         "documents": {
             name: {
@@ -129,7 +131,7 @@ def main() -> int:
     summary_path = Path(args.summary)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
 
     lines = [
         "# Production operations gate",
