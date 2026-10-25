@@ -9,8 +9,14 @@ import hashlib
 import json
 import os
 import sys
+import tarfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from release_evidence_contract import (
+    decode_json_object, release_provenance, validate_rc_provenance, validate_readiness,
+)
 
 
 class HandoffValidationFailure(RuntimeError):
@@ -29,8 +35,8 @@ def load_report(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise HandoffValidationFailure(f"missing RC package report: {path}")
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        value = decode_json_object(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
         raise HandoffValidationFailure(f"invalid RC package report: {error}") from error
     if not isinstance(value, dict):
         raise HandoffValidationFailure("RC package report root must be an object")
@@ -66,16 +72,11 @@ def main() -> int:
         require_file(checksum_path, "RC archive checksum")
         report = load_report(report_path)
 
-        if report.get("schema_version") != 1:
-            raise HandoffValidationFailure(
-                f"unsupported RC package report schema: {report.get('schema_version')}"
-            )
-        if report.get("status") != "PASS":
-            raise HandoffValidationFailure("RC package report is not PASS")
-        if report.get("git_sha") != expected_sha:
-            raise HandoffValidationFailure(
-                f"RC package report Git SHA mismatch: expected {expected_sha}, got {report.get('git_sha')}"
-            )
+        now = datetime.now(timezone.utc)
+        source_run_id = os.environ.get("SOURCE_WORKFLOW_RUN_ID", os.environ.get("GITHUB_RUN_ID"))
+        violations = validate_rc_provenance(report, expected_sha, now, source_run_id)
+        if violations:
+            raise HandoffValidationFailure("; ".join(violations))
 
         reported_archive = report.get("archive")
         if reported_archive != archive_relative.as_posix():
@@ -97,14 +98,37 @@ def main() -> int:
                 f"RC checksum evidence mismatch: expected '{expected_checksum_line}', got '{checksum_line}'"
             )
 
-        source_run_id = os.environ.get("SOURCE_WORKFLOW_RUN_ID", os.environ.get("GITHUB_RUN_ID", "unknown"))
+        # Read the immutable readiness record without extracting untrusted paths.
+        root_name = f"sentum-rc-{expected_sha[:12]}"
+        with tarfile.open(archive_path, "r:gz") as archive:
+            def embedded(name: str) -> bytes:
+                members = [member for member in archive.getmembers() if member.name == f"{root_name}/{name}"]
+                if len(members) != 1 or not members[0].isfile() or members[0].size > 2 * 1024 * 1024:
+                    raise HandoffValidationFailure(f"missing, duplicated or oversized embedded {name}")
+                stream = archive.extractfile(members[0])
+                if stream is None:
+                    raise HandoffValidationFailure(f"cannot read embedded {name}")
+                return stream.read()
+
+            readiness_bytes = embedded("evidence/release_readiness.json")
+            readiness = decode_json_object(readiness_bytes)
+            manifest = decode_json_object(embedded("MANIFEST.json"))
+        readiness_digest = hashlib.sha256(readiness_bytes).hexdigest()
+        if manifest != report.get("manifest") or manifest.get("git_sha") != expected_sha:
+            raise HandoffValidationFailure("embedded manifest does not match the RC report")
+        violations = validate_readiness(readiness, expected_sha, now, report.get("workflow_run_id"))
+        if violations:
+            raise HandoffValidationFailure("embedded readiness: " + "; ".join(violations))
+        if release_provenance(readiness, readiness_digest) != report.get("release_evidence"):
+            raise HandoffValidationFailure("RC provenance does not match the original embedded readiness")
+
         print(
             "RC handoff validation PASS: "
-            f"git_sha={expected_sha} source_workflow_run_id={source_run_id} "
+            f"git_sha={expected_sha} source_workflow_run_id={source_run_id or report.get('workflow_run_id')} "
             f"report={report_path} archive={archive_path}"
         )
         return 0
-    except (HandoffValidationFailure, OSError) as error:
+    except (HandoffValidationFailure, OSError, ValueError, TypeError, tarfile.TarError) as error:
         print(f"RC handoff validation failure: {error}", file=sys.stderr)
         return 1
 

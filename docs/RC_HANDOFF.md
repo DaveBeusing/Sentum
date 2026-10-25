@@ -46,9 +46,55 @@ log/rc_package.md
 
 When the downstream production-operations workflow downloads that artifact into `evidence/rc`, the RC package report is therefore consumed from `evidence/rc/log/rc_package.json`.
 
-Before the production-operations gate executes, `tools/ci/validate_rc_handoff.py` verifies the exact directory structure, report schema and PASS state, full Git SHA, expected archive path, archive SHA-256 and checksum-file contents. Missing, malformed or commit-mismatched evidence is a hard failure; alternate fallback locations are not accepted.
+Before the production-operations gate executes, `tools/ci/validate_rc_handoff.py`
+verifies the exact directory structure, report schema and PASS state, full Git SHA,
+source workflow run, expected archive path, archive SHA-256 and checksum-file
+contents. It reads the original readiness and manifest from the archive without
+extracting paths, validates their complete contracts, and compares the readiness
+digest and preserved source records with the RC report. Missing, malformed,
+stale or mismatched evidence is a hard failure; alternate fallback locations are
+not accepted.
 
-The downstream workflow selects the artifact by the completed Core CI run's `head_sha` and `run-id`. Production-operations evidence retains that source workflow run ID so reports remain traceable to the exact Core CI execution that produced the RC.
+The downstream workflow qualifies successful Core CI **pushes to `master` in this
+repository**. Pull-request, manual, scheduled, unsuccessful and foreign-repository
+source runs are skipped. PRs still build, qualify and package their evaluated merge
+commit in Core CI; integrated operations qualification starts after the master
+push succeeds. This event boundary avoids confusing a PR branch head with its
+built merge commit.
+
+For a qualifying master push, checkout, artifact selection and evidence validation
+all use that source run's `head_sha`, and the download uses its exact `run-id`.
+Production-operations evidence retains and validates the producer workflow run ID.
+A same-commit artifact from another run cannot substitute for the selected run.
+
+## Complete readiness and inherited freshness
+
+Packaging requires readiness schema 2 with `contract_version = 1`, environment
+`ci_release_gate`, the expected commit/run, all five distinct required inputs, all
+successful named checks and an empty `violations` array. It independently rechecks
+input status, schema, environment, source identity, operational cycle completion,
+research reproduction and qualification completeness. Invalid input produces a
+structured FAIL RC report and summary before an archive is created.
+
+The schema-1 RC report includes a required `release_evidence` record containing
+`contract_version = 1`, `max_input_age_hours = 336`, the original readiness creation
+time and SHA-256, source workflow run, `oldest_evidence_at`, and the full input
+identity/timestamp records. The readiness digest must match
+`manifest.release_readiness_sha256`. The archive preserves the original readiness
+file byte-for-byte.
+
+The 14-day age limit applies to every original input. Readiness and packaging
+also reject missing, timezone-less, invalid or future timestamps and reversed
+observation windows. RC creation has its own timestamp, but a new wrapper cannot
+refresh the original evidence age. The handoff validator, Production Operations
+and Consolidated Readiness recheck inherited provenance and freshness at their
+own evaluation time. RC reports lacking this provenance cannot pass the current
+contract; retain them for history and obtain a new Core CI result.
+
+The outer RC report has a 720-hour age limit aligned with 30-day archive retention;
+the original inputs remain subject to the stricter 336-hour limit. Local reports
+may retain an explicit `unknown` source run, but cannot satisfy a consumer bound
+to a known CI run.
 
 The following are deliberately excluded:
 
@@ -66,7 +112,7 @@ Before using an RC in an environment:
 2. Extract into a new versioned directory; never overwrite the currently active binary in place.
 3. Verify `SHA256SUMS` inside the bundle.
 4. Confirm `MANIFEST.json.git_sha` matches the intended commit.
-5. Confirm `evidence/release_readiness.json` uses schema version 2, reports `PASS`, matches the manifest Git SHA and identifies the required underlying evidence inputs.
+5. Confirm `evidence/release_readiness.json` uses schema version 2 and contract version 1, reports `PASS` with no violations, matches the manifest Git SHA/source run, and contains all required successful checks and original input identities/timestamps within their validity period.
 6. Copy or generate environment configuration separately. Do not reuse unknown local configuration blindly.
 7. Validate filesystem permissions and ensure secrets remain outside the RC directory.
 8. Start in the lowest-risk supported mode appropriate for the environment; do not infer live-trading approval from RC status.

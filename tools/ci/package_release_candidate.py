@@ -6,11 +6,15 @@ import hashlib
 import io
 import json
 import os
-import shutil
 import tarfile
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+from release_evidence_contract import load_json_object, release_provenance, validate_readiness
+
+
+class PackagingFailure(RuntimeError):
+	pass
 
 
 def sha256(path: Path) -> str:
@@ -34,7 +38,7 @@ def add_file(tar: tarfile.TarFile, source: Path, arcname: str, mode: int) -> Non
 	tar.addfile(info, io.BytesIO(data))
 
 
-def main() -> int:
+def parse_args() -> argparse.Namespace:
 	parser = argparse.ArgumentParser(description="Create deterministic Sentum release-candidate bundle")
 	parser.add_argument("--binary", default="sentum")
 	parser.add_argument("--readiness", required=True)
@@ -42,20 +46,21 @@ def main() -> int:
 	parser.add_argument("--output-dir", default="artifacts")
 	parser.add_argument("--report", default="log/rc_package.json")
 	parser.add_argument("--summary", default="log/rc_package.md")
-	args = parser.parse_args()
+	return parser.parse_args()
 
+
+def package(args: argparse.Namespace) -> int:
 	binary = Path(args.binary)
 	readiness_path = Path(args.readiness)
 	if not binary.is_file():
-		raise SystemExit(f"release binary missing: {binary}")
+		raise PackagingFailure(f"release binary missing: {binary}")
 	if not readiness_path.is_file():
-		raise SystemExit(f"release readiness evidence missing: {readiness_path}")
+		raise PackagingFailure(f"release readiness evidence missing: {readiness_path}")
 
-	readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
-	if readiness.get("status") != "PASS":
-		raise SystemExit("release readiness evidence is not PASS")
-	if readiness.get("git_sha") != args.git_sha:
-		raise SystemExit("release readiness evidence does not match requested commit")
+	readiness = load_json_object(readiness_path)
+	violations = validate_readiness(readiness, args.git_sha, datetime.now(timezone.utc), os.environ.get("GITHUB_RUN_ID"))
+	if violations:
+		raise PackagingFailure("; ".join(violations))
 
 	root_name = f"sentum-rc-{args.git_sha[:12]}"
 	output_dir = Path(args.output_dir)
@@ -85,12 +90,12 @@ def main() -> int:
 	for name in doc_names:
 		path = Path("docs") / name
 		if not path.is_file():
-			raise SystemExit(f"required handoff document missing: {path}")
+			raise PackagingFailure(f"required handoff document missing: {path}")
 		package_inputs.append((path, str(path), 0o644))
 	for name in ("README.md", "LICENSE.md", "DISCLAIMER.md"):
 		path = Path(name)
 		if not path.is_file():
-			raise SystemExit(f"required release file missing: {path}")
+			raise PackagingFailure(f"required release file missing: {path}")
 		package_inputs.append((path, name, 0o644))
 	package_inputs.append((readiness_path, "evidence/release_readiness.json", 0o644))
 
@@ -111,7 +116,7 @@ def main() -> int:
 		"files": manifest_files,
 		"excluded": ["config/config.json", "runtime databases", "logs", "credentials", "secrets"],
 	}
-	manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
+	manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8")
 
 	checksum_lines = [f"{entry['sha256']}  {entry['path']}" for entry in manifest_files]
 	manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
@@ -149,14 +154,15 @@ def main() -> int:
 		"environment_class": "ci_artifact",
 		"status": "PASS",
 		"git_sha": args.git_sha,
-		"workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
+		"workflow_run_id": readiness["workflow_run_id"],
+		"release_evidence": release_provenance(readiness, sha256(readiness_path)),
 		"binary_sha256": sha256(binary),
 		"archive": str(archive_path),
 		"archive_sha256": archive_digest,
 		"archive_size": archive_path.stat().st_size,
 		"manifest": manifest,
 	}
-	report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+	report_path.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
 	summary_path.write_text(
 		"# Sentum release candidate package\n\n"
 		f"**Status:** PASS\n\n"
@@ -168,6 +174,29 @@ def main() -> int:
 	)
 	print(summary_path.read_text(encoding="utf-8"), end="")
 	return 0
+
+
+def main() -> int:
+	args = parse_args()
+	try:
+		return package(args)
+	except (PackagingFailure, OSError, ValueError, TypeError) as error:
+		report_path, summary_path = Path(args.report), Path(args.summary)
+		report_path.parent.mkdir(parents=True, exist_ok=True)
+		summary_path.parent.mkdir(parents=True, exist_ok=True)
+		report = {
+			"schema_version": 1,
+			"generated_at": datetime.now(timezone.utc).isoformat(),
+			"environment_class": "ci_artifact",
+			"status": "FAIL",
+			"git_sha": args.git_sha,
+			"workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
+			"violations": [str(error)],
+		}
+		report_path.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+		summary_path.write_text("# Sentum release candidate package\n\n**Status:** FAIL\n\n- " + str(error) + "\n", encoding="utf-8")
+		print(summary_path.read_text(encoding="utf-8"), end="")
+		return 1
 
 
 if __name__ == "__main__":

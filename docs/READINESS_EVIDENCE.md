@@ -65,12 +65,12 @@ Later gates consume earlier immutable evidence rather than recreating its author
 
 | Evidence | Producer | Schema | Git binding | Artifact binding | Environment class | Retention / expiry | Consumer | PASS means | PASS does not prove |
 | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |
-| Performance gate | `tools/ci/performance_gate.py` | 2 | `git_sha` | report SHA-256 in Release Readiness | `ci_hosted_runner` | CI artifact 14 days; wrong SHA invalid immediately | Release Readiness | enforced CI performance/correctness budgets passed | production latency, memory or SLA behavior |
-| Operational acceptance | `tools/ci/operational_acceptance.py` | 1 | `git_sha` | report SHA-256 in Release Readiness | `ci_rehearsal` | CI artifact 14 days; wrong SHA invalid immediately | Release Readiness | repeated lifecycle/observability cycles passed | target deployment acceptance |
-| Runtime qualification smoke | `tools/ci/runtime_qualification.py` | 1 | `git_sha` | report SHA-256 in Release Readiness | `ci_rehearsal` | CI artifact 14 days; wrong SHA invalid immediately | Performance + Release Readiness | bounded Paper/fault qualification evidence is complete | long-duration target behavior |
-| Independent research validation | `tools/verify_research.py` | 1 | `git_sha` / persisted code identity | report SHA-256 in Release Readiness | `research_validation` | CI artifact 14 days; wrong SHA invalid immediately | Release Readiness | persisted research provenance, boundaries, metrics and canonical reproduction validated | profitability, model promotion or execution readiness |
-| Release Readiness | `tools/ci/release_readiness.py` | 2 | `git_sha` | SHA-256 of every consumed evidence report | `ci_release_gate` | CI artifact 30 days; wrong SHA invalid immediately | RC packager | all required repository release evidence for the exact commit passed | target-environment acceptance |
-| RC package | `tools/ci/package_release_candidate.py` | 1 | `git_sha` | binary, release-readiness and archive SHA-256 | `ci_artifact` | CI artifact 30 days; consolidated policy maximum 720 hours | Production Operations + Consolidated Readiness | immutable handoff artifact was produced from approved evidence | deployment or runtime acceptance |
+| Performance gate | `tools/ci/performance_gate.py` | 2 | `git_sha` | report SHA-256 in Release Readiness | `ci_hosted_runner` | maximum age 336 hours; CI artifact 14 days; wrong SHA/run invalid immediately | Release Readiness | enforced CI performance/correctness budgets passed | production latency, memory or SLA behavior |
+| Operational acceptance | `tools/ci/operational_acceptance.py` | 1 | `git_sha` | report SHA-256 in Release Readiness | `ci_rehearsal` | maximum age 336 hours; CI artifact 14 days; wrong SHA/run invalid immediately | Release Readiness | repeated lifecycle/observability cycles passed | target deployment acceptance |
+| Runtime qualification smoke | `tools/ci/runtime_qualification.py` | 1 | `git_sha` | report SHA-256 in Release Readiness | `ci_rehearsal` | maximum age 336 hours; CI artifact 14 days; wrong SHA/run invalid immediately | Performance + Release Readiness | bounded Paper/fault qualification evidence is complete | long-duration target behavior |
+| Independent research validation | `tools/verify_research.py` | 1 | `git_sha` / persisted code identity | report SHA-256 in Release Readiness | `research_validation` | maximum age 336 hours; CI artifact 14 days; wrong SHA/run invalid immediately | Release Readiness | persisted research provenance, boundaries, metrics and canonical reproduction validated | profitability, model promotion or execution readiness |
+| Release Readiness | `tools/ci/release_readiness.py` | 2, contract 1 | `git_sha` | SHA-256 of every consumed evidence report | `ci_release_gate` | source age maximum 336 hours; CI artifact 30 days; wrong SHA/run invalid immediately | RC packager | all required repository release evidence for the exact commit passed | target-environment acceptance |
+| RC package | `tools/ci/package_release_candidate.py` | 1 | `git_sha` | binary, release-readiness and archive SHA-256 | `ci_artifact` | original inputs maximum 336 hours; wrapper/retention maximum 720 hours | Production Operations + Consolidated Readiness | immutable handoff artifact was produced from approved evidence | deployment or runtime acceptance |
 | Production Operations Gate | `tools/ci/production_operations_gate.py` | 1 | `git_sha` | RC report SHA-256 | `ci_rehearsal` | consolidated policy maximum 720 hours | Consolidated Readiness | RC identity and required operations contracts passed repository validation | real deployment execution |
 | Operational validation rehearsal | `tools/ci/operational_validation_rehearsal.py` | 1 | `git_sha` | report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Consolidated Readiness | controlled backup/rollback/incident rehearsal passed | actual target backup, rollback or incident exercise |
 | Continuous readiness rehearsal | `tools/ci/continuous_readiness_rehearsal.py` | 1 | `git_sha` | report SHA-256 in consolidated result | `ci_rehearsal` | consolidated policy maximum 720 hours | Reliability + Consolidated Readiness | readiness classification policy behaves as expected | live observation window |
@@ -94,7 +94,35 @@ A scheduled advisory failure must be investigated for the affected commit before
 
 Evidence is valid only for the Git SHA that produced it.
 
-The consolidated policy additionally enforces a maximum age of 720 hours for repository operational evidence. This matches the current 30-day handoff retention boundary. Evidence timestamps in the future are invalid. The evaluator calculates and records the SHA-256 of every consumed JSON report and verifies configured direct-upstream artifact links.
+Original release inputs have a **336-hour (14-day)** maximum age, aligned with
+Core CI input-artifact retention. The authoritative fields are performance and
+operational `generated_at`, research `validated_at_utc`, and qualification
+`started_at_utc`/`ended_at_utc`. Qualification windows must be ordered and their
+start anchors observation age. All timestamps require an explicit UTC offset;
+missing, malformed, timezone-less, future and expired values fail closed.
+
+Release Readiness schema 2 requires contract version 1. Each source record retains
+its exact identity, SHA-256, schema, status, environment, source workflow run and
+original timestamps. The original oldest observation is propagated in
+`oldest_evidence_at`. The RC report carries these records in `release_evidence`,
+bound to the original readiness digest in its manifest. Packaging independently
+validates all inputs and all named checks; handoff validation compares the snapshot
+against the original readiness embedded in the archive.
+
+Consolidated Readiness revalidates inherited RC provenance, including the required
+five identities and original observation times. It displays RC age from
+`release_evidence.oldest_evidence_at`, not its newest packaging timestamp. A fresh
+wrapper around stale inputs remains blocked. When `SOURCE_WORKFLOW_RUN_ID` is
+provided, the RC must come from that exact source run, and every inherited leaf
+must carry the same identity.
+
+The consolidated policy retains a 720-hour maximum for other repository
+operational evidence and the RC wrapper itself, matching 30-day handoff retention.
+This does not extend the stricter original-input validity period. Target timestamps
+also require explicit offsets. The evaluator calculates each consumed report's
+SHA-256 and verifies configured direct-upstream artifact links. Historical reports
+without the required release provenance are not silently upgraded; a new Core CI
+run produces current evidence.
 
 Target-environment acceptance is evaluated with a 24-hour maximum age because it represents a concrete deployment observation rather than a reusable repository CI result. Its `artifact_sha256` must equal the `binary_sha256` recorded by the RC package report, so target acceptance cannot be attached to a different deployed binary.
 
@@ -104,7 +132,12 @@ These rules are fail-closed:
 - a missing required report is invalid;
 - an unsupported schema is invalid;
 - a non-PASS required repository report is invalid;
-- a stale or future-dated report is invalid;
+- a stale, future-dated or timezone-ambiguous report is invalid;
+- repackaging cannot refresh the oldest original release observation;
+- original-input, readiness and RC source workflow identities must agree;
+- local `unknown` source identity cannot satisfy a known CI workflow run;
+- missing, duplicated or substituted qualification identities are invalid;
+- incomplete named readiness checks or a nonempty violations array are invalid;
 - a configured upstream artifact-hash mismatch is invalid;
 - a target observation window must use valid ISO-8601 timestamps, must not be reversed and must end no later than `validated_at_utc`;
 - a `ci_rehearsal` record can never satisfy `target_environment` acceptance;

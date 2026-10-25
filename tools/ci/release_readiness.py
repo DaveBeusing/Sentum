@@ -5,233 +5,120 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
-class ReadinessFailure(RuntimeError):
-	pass
+from release_evidence_contract import (
+    CONTRACT_VERSION, INPUT_CONTRACTS, MAX_INPUT_AGE_HOURS, REQUIRED_SCENARIOS,
+    input_checks, input_record, load_json_object, oldest_evidence_at,
+    valid_run_id, valid_sha, validate_readiness,
+)
 
 
 def parse_args() -> argparse.Namespace:
-	parser = argparse.ArgumentParser(description="Validate Sentum release-readiness evidence.")
-	parser.add_argument("--performance", default="evidence/performance/performance_gate.json")
-	parser.add_argument("--operational", default="evidence/operational/operational_acceptance.json")
-	parser.add_argument("--research", default="evidence/research/research_validation.json")
-	parser.add_argument("--qualification", action="append", default=None)
-	parser.add_argument("--report", default="log/release_readiness.json")
-	parser.add_argument("--summary", default="log/release_readiness.md")
-	parser.add_argument("--expected-sha", default=os.environ.get("GITHUB_SHA", "unknown"))
-	return parser.parse_args()
-
-
-def load_report(path: Path, name: str) -> dict[str, Any]:
-	if not path.is_file():
-		raise ReadinessFailure(f"missing {name} evidence: {path}")
-	try:
-		value = json.loads(path.read_text(encoding="utf-8"))
-	except (OSError, json.JSONDecodeError) as error:
-		raise ReadinessFailure(f"invalid {name} evidence: {error}") from error
-	if not isinstance(value, dict):
-		raise ReadinessFailure(f"{name} evidence root must be an object")
-	return value
-
-
-def sha256(path: Path) -> str:
-	digest = hashlib.sha256()
-	with path.open("rb") as stream:
-		for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-			digest.update(chunk)
-	return digest.hexdigest()
+    parser = argparse.ArgumentParser(description="Validate Sentum release-readiness evidence.")
+    parser.add_argument("--performance", default="evidence/performance/performance_gate.json")
+    parser.add_argument("--operational", default="evidence/operational/operational_acceptance.json")
+    parser.add_argument("--research", default="evidence/research/research_validation.json")
+    parser.add_argument("--qualification", action="append", default=None)
+    parser.add_argument("--report", default="log/release_readiness.json")
+    parser.add_argument("--summary", default="log/release_readiness.md")
+    parser.add_argument("--expected-sha", default=os.environ.get("GITHUB_SHA", "unknown"))
+    return parser.parse_args()
 
 
 def check(name: str, condition: bool, detail: str) -> dict[str, str]:
-	return {"name": name, "status": "PASS" if condition else "FAIL", "detail": detail}
+    return {"name": name, "status": "PASS" if condition else "FAIL", "detail": detail}
 
 
-def input_record(
-	name: str,
-	path: Path,
-	report: dict[str, Any],
-	git_sha: Any,
-	environment_class: Any,
-) -> dict[str, Any]:
-	return {
-		"name": name,
-		"path": str(path),
-		"sha256": sha256(path),
-		"schema_version": report.get("schema_version"),
-		"status": report.get("status"),
-		"git_sha": git_sha,
-		"environment_class": environment_class,
-	}
+def write_evidence(args: argparse.Namespace, payload: dict[str, Any]) -> None:
+    report_path, summary_path = Path(args.report), Path(args.summary)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+    lines = ["# Release readiness", "", f"Status: **{payload['status']}**", "",
+             "| Gate | Status | Detail |", "| --- | --- | --- |"]
+    lines.extend(f"| {item['name']} | {item['status']} | {item['detail']} |" for item in payload["checks"])
+    if payload["violations"]:
+        lines.extend(["", "## Blocking evidence problems", ""])
+        lines.extend(f"- {item}" for item in payload["violations"])
+    lines.extend(["", "PASS is repository evidence only and is not target-environment production acceptance.", ""])
+    summary_path.write_text("\n".join(lines), encoding="utf-8")
+    print(summary_path.read_text(encoding="utf-8"), end="")
 
 
 def main() -> int:
-	args = parse_args()
-	checks: list[dict[str, str]] = []
-	try:
-		performance_path = Path(args.performance)
-		operational_path = Path(args.operational)
-		research_path = Path(args.research)
-		qualification_paths = [
-			Path(path)
-			for path in (
-				args.qualification
-				or [
-					"evidence/qualification/paper-soak.json",
-					"evidence/qualification/all-faults.json",
-				]
-			)
-		]
-
-		performance = load_report(performance_path, "performance")
-		operational = load_report(operational_path, "operational")
-		research = load_report(research_path, "research validation")
-		qualifications = [
-			(path, load_report(path, f"runtime qualification {path.name}"))
-			for path in qualification_paths
-		]
-		expected_sha = str(args.expected_sha)
-
-		checks.append(check("performance-status", performance.get("status") == "PASS", str(performance.get("status"))))
-		checks.append(check("operational-status", operational.get("status") == "PASS", str(operational.get("status"))))
-		checks.append(check("research-status", research.get("status") == "PASS", str(research.get("status"))))
-		checks.append(check("performance-schema", performance.get("schema_version") == 2, str(performance.get("schema_version"))))
-		checks.append(check("operational-schema", operational.get("schema_version") == 1, str(operational.get("schema_version"))))
-		checks.append(check("research-schema", research.get("schema_version") == 1, str(research.get("schema_version"))))
-		checks.append(check("performance-sha", performance.get("git_sha") == expected_sha, str(performance.get("git_sha"))))
-		checks.append(check("operational-sha", operational.get("git_sha") == expected_sha, str(operational.get("git_sha"))))
-		checks.append(check(
-			"performance-environment",
-			performance.get("environment_class") == "ci_hosted_runner",
-			str(performance.get("environment_class")),
-		))
-		checks.append(check(
-			"operational-environment",
-			operational.get("environment_class") == "ci_rehearsal",
-			str(operational.get("environment_class")),
-		))
-		research_sha = research.get("git_sha") or research.get("code_identity", {}).get("git_commit")
-		checks.append(check("research-sha", research_sha == expected_sha, str(research_sha)))
-		checks.append(check(
-			"research-environment",
-			research.get("environment_class") == "research_validation",
-			str(research.get("environment_class")),
-		))
-		checks.append(check(
-			"operational-cycles",
-			operational.get("cycles_completed") == operational.get("cycles_requested")
-			and int(operational.get("cycles_requested", 0)) > 0,
-			f"{operational.get('cycles_completed')}/{operational.get('cycles_requested')}",
-		))
-		checks.append(check(
-			"research-reproduction",
-			research.get("reproduction", {}).get("status") == "PASS",
-			str(research.get("reproduction", {}).get("status")),
-		))
-
-		for path, qualification in qualifications:
-			label = str(qualification.get("scenario") or path.stem)
-			checks.append(check(
-				f"qualification-{label}-schema",
-				qualification.get("schema_version") == 1,
-				str(qualification.get("schema_version")),
-			))
-			checks.append(check(
-				f"qualification-{label}-status",
-				qualification.get("status") == "PASS" and qualification.get("evidence_complete") is True,
-				f"status={qualification.get('status')} complete={qualification.get('evidence_complete')}",
-			))
-			checks.append(check(
-				f"qualification-{label}-sha",
-				qualification.get("git_sha") == expected_sha,
-				str(qualification.get("git_sha")),
-			))
-			checks.append(check(
-				f"qualification-{label}-environment",
-				qualification.get("environment_class") == "ci_rehearsal",
-				str(qualification.get("environment_class")),
-			))
-
-		status = "PASS" if all(item["status"] == "PASS" for item in checks) else "FAIL"
-		inputs = [
-			input_record(
-				"performance",
-				performance_path,
-				performance,
-				performance.get("git_sha"),
-				performance.get("environment_class"),
-			),
-			input_record(
-				"operational_acceptance",
-				operational_path,
-				operational,
-				operational.get("git_sha"),
-				operational.get("environment_class"),
-			),
-			input_record(
-				"independent_research_validation",
-				research_path,
-				research,
-				research_sha,
-				research.get("environment_class"),
-			),
-		]
-		for path, qualification in qualifications:
-			inputs.append(
-				input_record(
-					f"runtime_qualification:{qualification.get('scenario', path.stem)}",
-					path,
-					qualification,
-					qualification.get("git_sha"),
-					qualification.get("environment_class"),
-				)
-			)
-
-		payload = {
-			"schema_version": 2,
-			"generated_at": datetime.now(timezone.utc).isoformat(),
-			"environment_class": "ci_release_gate",
-			"status": status,
-			"git_sha": expected_sha,
-			"workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
-			"inputs": inputs,
-			"checks": checks,
-			"limitations": [
-				"PASS is repository release-readiness evidence for the exact commit only.",
-				"PASS does not prove target-environment production acceptance, exchange availability or profitability.",
-			],
-		}
-		Path(args.report).parent.mkdir(parents=True, exist_ok=True)
-		Path(args.report).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-		lines = [
-			"# Release readiness",
-			"",
-			f"Status: **{status}**",
-			"",
-			"| Gate | Status | Detail |",
-			"| --- | --- | --- |",
-		]
-		for item in checks:
-			lines.append(f"| {item['name']} | {item['status']} | {item['detail']} |")
-		lines.extend([
-			"",
-			"PASS is repository evidence only and is not target-environment production acceptance.",
-			"",
-		])
-		Path(args.summary).write_text("\n".join(lines), encoding="utf-8")
-		print(Path(args.summary).read_text(encoding="utf-8"), end="")
-		return 0 if status == "PASS" else 1
-	except (ReadinessFailure, TypeError, ValueError) as error:
-		print(f"release readiness failure: {error}", file=sys.stderr)
-		return 2
+    args = parse_args()
+    now = datetime.now(timezone.utc)
+    expected_sha = str(args.expected_sha)
+    run_id = os.environ.get("GITHUB_RUN_ID", "unknown")
+    checks = [check("commit-identity", valid_sha(expected_sha), expected_sha),
+              check("workflow-run-identity", valid_run_id(run_id), run_id)]
+    violations: list[str] = []
+    inputs: list[dict[str, Any]] = []
+    sources = [("performance", Path(args.performance)),
+               ("operational_acceptance", Path(args.operational)),
+               ("independent_research_validation", Path(args.research))]
+    qualifications = args.qualification or [f"evidence/qualification/{name}.json" for name in REQUIRED_SCENARIOS]
+    scenario_names: list[Any] = []
+    for raw_path in qualifications:
+        path = Path(raw_path)
+        try:
+            report = load_json_object(path)
+            scenario = report.get("scenario")
+            scenario_names.append(scenario)
+            if not isinstance(scenario, str) or scenario not in REQUIRED_SCENARIOS:
+                violations.append(f"{path}: unknown or missing qualification scenario {scenario!r}")
+                continue
+            name = f"runtime_qualification:{scenario}"
+            record = input_record(name, path, report)
+            inputs.append(record)
+            checks.extend(input_checks(record, expected_sha, run_id, now))
+        except (OSError, ValueError, TypeError) as error:
+            violations.append(f"{path}: invalid qualification evidence: {error}")
+    complete_scenarios = (len(scenario_names) == len(REQUIRED_SCENARIOS)
+                          and all(isinstance(name, str) for name in scenario_names)
+                          and set(scenario_names) == set(REQUIRED_SCENARIOS))
+    checks.append(check("qualification-scenarios", complete_scenarios,
+                        f"expected exactly {list(REQUIRED_SCENARIOS)}, got {scenario_names}"))
+    for name, path in sources:
+        try:
+            report = load_json_object(path)
+            record = input_record(name, path, report)
+            inputs.append(record)
+            checks.extend(input_checks(record, expected_sha, run_id, now))
+        except (OSError, ValueError, TypeError) as error:
+            violations.append(f"{name}: invalid evidence: {error}")
+    # Stable logical ordering is independent of filenames and argument order.
+    inputs.sort(key=lambda item: list(INPUT_CONTRACTS).index(item["name"]))
+    payload = {
+        "schema_version": 2,
+        "contract_version": CONTRACT_VERSION,
+        "generated_at": now.isoformat(),
+        "environment_class": "ci_release_gate",
+        "status": "PASS",
+        "git_sha": expected_sha,
+        "workflow_run_id": run_id,
+        "max_input_age_hours": MAX_INPUT_AGE_HOURS,
+        "oldest_evidence_at": oldest_evidence_at(inputs),
+        "inputs": inputs,
+        "checks": checks,
+        "violations": list(violations),
+        "limitations": [
+            "PASS is repository release-readiness evidence for the exact commit only.",
+            "Local unknown workflow identity cannot satisfy a CI-bound source-run handoff.",
+            "PASS does not prove target-environment production acceptance, exchange availability or profitability.",
+        ],
+    }
+    violations.extend(validate_readiness(payload, expected_sha, now, run_id))
+    payload["violations"] = list(dict.fromkeys(violations))
+    payload["status"] = "FAIL" if violations else "PASS"
+    write_evidence(args, payload)
+    return 0 if payload["status"] == "PASS" else 1
 
 
 if __name__ == "__main__":
-	raise SystemExit(main())
+    raise SystemExit(main())

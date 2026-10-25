@@ -7,10 +7,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from release_evidence_contract import decode_json_object, parse_timestamp, validate_rc_provenance
 
 
 class EvidenceFailure(RuntimeError):
@@ -23,18 +26,6 @@ def sha256(path: Path) -> str:
 		for chunk in iter(lambda: stream.read(1024 * 1024), b""):
 			digest.update(chunk)
 	return digest.hexdigest()
-
-
-def parse_timestamp(value: Any) -> datetime | None:
-	if not isinstance(value, str) or not value.strip():
-		return None
-	try:
-		parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-	except ValueError:
-		return None
-	if parsed.tzinfo is None:
-		parsed = parsed.replace(tzinfo=timezone.utc)
-	return parsed.astimezone(timezone.utc)
 
 
 def nested_value(payload: dict[str, Any], path: str) -> Any:
@@ -50,8 +41,8 @@ def load_json(path: Path, label: str) -> dict[str, Any]:
 	if not path.is_file():
 		raise EvidenceFailure(f"missing {label} evidence: {path}")
 	try:
-		payload = json.loads(path.read_text(encoding="utf-8"))
-	except (OSError, json.JSONDecodeError) as error:
+		payload = decode_json_object(path.read_text(encoding="utf-8"))
+	except (OSError, ValueError) as error:
 		raise EvidenceFailure(f"invalid {label} evidence: {error}") from error
 	if not isinstance(payload, dict):
 		raise EvidenceFailure(f"{label} evidence root must be an object")
@@ -79,6 +70,8 @@ def validate_evidence(
 ) -> dict[str, Any]:
 	payload = load_json(path, name)
 	violations: list[str] = []
+	if name == "rc_package":
+		violations.extend(validate_rc_provenance(payload, expected_sha, now, os.environ.get("SOURCE_WORKFLOW_RUN_ID")))
 
 	expected_schema = contract.get("schema_version")
 	if expected_schema is not None and payload.get("schema_version") != expected_schema:
@@ -144,6 +137,7 @@ def validate_evidence(
 		"timestamps": timestamps,
 		"age_hours": age_hours,
 		"workflow_run_id": payload.get("workflow_run_id"),
+		"release_evidence": payload.get("release_evidence") if name == "rc_package" else None,
 		"bindings": bindings,
 		"result": "PASS" if not violations else "FAIL",
 		"violations": violations,
@@ -400,7 +394,7 @@ def main() -> int:
 		report_path = Path(args.report)
 		report_path.parent.mkdir(parents=True, exist_ok=True)
 		report_path.write_text(
-			json.dumps(report, indent=2, sort_keys=True) + "\n",
+			json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
 			encoding="utf-8",
 		)
 		write_summary(Path(args.summary), report)

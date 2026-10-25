@@ -6,13 +6,19 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import tempfile
+import sys
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from release_evidence_fixtures import static_rc_provenance
+
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools" / "ci"))
 SPEC = importlib.util.spec_from_file_location(
 	"consolidated_readiness",
 	ROOT / "tools" / "ci" / "consolidated_readiness.py",
@@ -54,6 +60,7 @@ class ConsolidatedReadinessTests(unittest.TestCase):
 			payload["binary_sha256"] = "d" * 64
 			payload["archive_sha256"] = "b" * 64
 			payload["manifest"] = {"release_readiness_sha256": "c" * 64}
+			payload["release_evidence"] = static_rc_provenance(self.now, self.sha)
 		return payload
 
 	def complete_evidence(self) -> dict[str, Path]:
@@ -135,6 +142,54 @@ class ConsolidatedReadinessTests(unittest.TestCase):
 		evidence["production_operations"] = self.write("link-mismatch", payload)
 		report = MODULE.evaluate(self.policy, evidence, self.sha, self.now)
 		self.assertEqual("BLOCKED", report["status"])
+
+	def test_fresh_rc_wrapper_cannot_hide_stale_original_release_inputs(self) -> None:
+		evidence = self.complete_evidence()
+		payload = self.base_payload("rc_package")
+		stale = (self.now - timedelta(hours=337)).isoformat()
+		provenance = payload["release_evidence"]
+		provenance["oldest_evidence_at"] = stale
+		for item in provenance["inputs"]:
+			item["observed_at"] = stale
+			item["timestamps"] = {field: stale for field in item["timestamps"]}
+		evidence["rc_package"] = self.write("fresh-rc-stale-inputs", payload)
+		# Refresh the direct wrapper link so only the inherited source age fails.
+		operations = json.loads(evidence["production_operations"].read_text())
+		operations["rc_package"]["sha256"] = MODULE.sha256(evidence["rc_package"])
+		evidence["production_operations"] = self.write("linked-operations", operations)
+		report = MODULE.evaluate(self.policy, evidence, self.sha, self.now)
+		self.assertEqual("BLOCKED", report["status"])
+		self.assertTrue(any("stale" in item for item in report["violations"]))
+
+	def test_rc_missing_original_provenance_cannot_satisfy_readiness(self) -> None:
+		evidence = self.complete_evidence()
+		payload = self.base_payload("rc_package")
+		del payload["release_evidence"]
+		evidence["rc_package"] = self.write("rc-without-provenance", payload)
+		report = MODULE.evaluate(self.policy, evidence, self.sha, self.now)
+		self.assertEqual("BLOCKED", report["status"])
+
+	def test_rc_source_run_must_match_the_workflow_handoff(self) -> None:
+		evidence = self.complete_evidence()
+		with patch.dict(os.environ, {"SOURCE_WORKFLOW_RUN_ID": "43"}):
+			report = MODULE.evaluate(self.policy, evidence, self.sha, self.now)
+		self.assertEqual("BLOCKED", report["status"])
+		self.assertTrue(any("source run" in item for item in report["violations"]))
+
+	def test_rc_repackaging_cannot_refresh_the_reported_observation_age(self) -> None:
+		evidence = self.complete_evidence()
+		payload = self.base_payload("rc_package")
+		observed = self.now - timedelta(hours=12)
+		payload["release_evidence"] = static_rc_provenance(observed, self.sha)
+		evidence["rc_package"] = self.write("fresh-wrapper-older-observations", payload)
+		operations = json.loads(evidence["production_operations"].read_text())
+		operations["rc_package"]["sha256"] = MODULE.sha256(evidence["rc_package"])
+		evidence["production_operations"] = self.write("linked-operations", operations)
+		report = MODULE.evaluate(self.policy, evidence, self.sha, self.now)
+		self.assertEqual("REPOSITORY_READY", report["status"])
+		rc = next(item for item in report["evidence"] if item["name"] == "rc_package")
+		self.assertEqual(12, rc["age_hours"])
+		self.assertEqual("release_evidence.oldest_evidence_at", rc["timestamp_field"])
 
 	def test_ci_rehearsal_never_satisfies_target_acceptance(self) -> None:
 		target = {

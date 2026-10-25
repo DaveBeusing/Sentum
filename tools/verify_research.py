@@ -754,6 +754,7 @@ def validate_run(
         "validation_kind": "sentum.research.independent",
         "environment_class": os.environ.get("SENTUM_EVIDENCE_ENVIRONMENT_CLASS", "research_validation"),
         "validated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
         "run_directory": str(run_dir),
         "run_id": run_dir.name,
         "status": "FAIL",

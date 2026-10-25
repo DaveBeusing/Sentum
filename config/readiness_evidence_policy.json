@@ -14,13 +14,19 @@
         "ci_artifact"
       ],
       "timestamp_fields": [
+        "release_evidence.oldest_evidence_at",
         "generated_at"
       ],
       "max_age_hours": 720,
       "required_fields": [
         "binary_sha256",
         "archive_sha256",
-        "manifest.release_readiness_sha256"
+        "manifest.release_readiness_sha256",
+        "release_evidence.contract_version",
+        "release_evidence.readiness_generated_at",
+        "release_evidence.readiness_sha256",
+        "release_evidence.oldest_evidence_at",
+        "release_evidence.inputs"
       ]
     },
     "production_operations": {
