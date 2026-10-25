@@ -76,31 +76,6 @@ double BinanceRestClient::get_current_price(const std::string& symbol) {
 	}
 }
 
-std::string BinanceRestClient::send_signed_order(const std::string& symbol, const std::string& quantity) {
-	std::string base_url = "https://api.binance.com";
-	std::string endpoint = "/api/v3/order";
-	std::string params = "symbol=" + symbol + "&side=BUY&type=MARKET&quantity=" + quantity;
-	std::string query = params + "&timestamp=" + get_timestamp();
-	std::string signature = hmac_sha256(query, api_secret_);
-	query += "&signature=" + signature;
-	std::string url = base_url + endpoint + "?" + query;
-	std::string response_string;
-	CURL* curl = curl_easy_init();
-	struct curl_slist* headers = NULL;
-	headers = curl_slist_append(headers, ("X-MBX-APIKEY: " + api_key_).c_str());
-	if (curl) {
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl, CURLOPT_POST, 1L);
-		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);
-		curl_easy_perform(curl);
-		curl_easy_cleanup(curl);
-		curl_slist_free_all(headers);
-	}
-	return response_string;
-}
-
 double BinanceRestClient::get_coin_balance(const std::string& asset_symbol) {
 	std::string base_url = "https://api.binance.com";
 	std::string endpoint = "/api/v3/account";
