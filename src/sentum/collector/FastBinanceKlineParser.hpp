@@ -2,6 +2,8 @@
 
 #include <charconv>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 
@@ -67,44 +69,36 @@ private:
     }
 
     static bool integer_field(std::string_view body, std::string_view key, std::int64_t& value) noexcept {
-        auto pos = value_pos(body, key);
+        const auto pos = value_pos(body, key);
         if (pos == std::string_view::npos) return false;
-        bool negative = false;
-        if (pos < body.size() && body[pos] == '-') { negative = true; ++pos; }
-        std::int64_t result = 0;
-        bool any = false;
-        while (pos < body.size() && body[pos] >= '0' && body[pos] <= '9') {
-            any = true;
-            result = result * 10 + (body[pos++] - '0');
-        }
-        if (!any) return false;
-        value = negative ? -result : result;
+        const auto* begin = body.data() + pos;
+        const auto* end = body.data() + body.size();
+        std::int64_t parsed = 0;
+        const auto result = std::from_chars(begin, end, parsed);
+        if (result.ec != std::errc{} || result.ptr == begin || result.ptr == end ||
+            (*result.ptr != ',' && *result.ptr != '}')) return false;
+        value = parsed;
         return true;
     }
 
     static bool decimal_field(std::string_view body, std::string_view key, double& value) noexcept {
         auto pos = value_pos(body, key);
-        if (pos == std::string_view::npos) return false;
-        if (pos < body.size() && body[pos] == '\"') ++pos;
-        bool negative = false;
-        if (pos < body.size() && body[pos] == '-') { negative = true; ++pos; }
-        double result = 0.0;
-        bool any = false;
-        while (pos < body.size() && body[pos] >= '0' && body[pos] <= '9') {
-            any = true;
-            result = result * 10.0 + static_cast<double>(body[pos++] - '0');
+        if (pos == std::string_view::npos || pos >= body.size()) return false;
+        const bool quoted = body[pos] == '"';
+        if (quoted) ++pos;
+        const auto* begin = body.data() + pos;
+        const auto* end = body.data() + body.size();
+        double parsed = 0.0;
+        const auto result = std::from_chars(begin, end, parsed, std::chars_format::fixed);
+        if (result.ec != std::errc{} || result.ptr == begin || !std::isfinite(parsed)) return false;
+        if (quoted) {
+            if (result.ptr == end || *result.ptr != '"') return false;
+            const auto* delimiter = result.ptr + 1;
+            if (delimiter == end || (*delimiter != ',' && *delimiter != '}')) return false;
+        } else if (result.ptr == end || (*result.ptr != ',' && *result.ptr != '}')) {
+            return false;
         }
-        if (pos < body.size() && body[pos] == '.') {
-            ++pos;
-            double scale = 0.1;
-            while (pos < body.size() && body[pos] >= '0' && body[pos] <= '9') {
-                any = true;
-                result += static_cast<double>(body[pos++] - '0') * scale;
-                scale *= 0.1;
-            }
-        }
-        if (!any) return false;
-        value = negative ? -result : result;
+        value = parsed;
         return true;
     }
 
