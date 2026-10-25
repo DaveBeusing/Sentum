@@ -146,7 +146,9 @@ Start:
 ./sentum paper
 ```
 
-Paper mode uses live Binance market data and simulated execution only. It starts the scanner, trading engine, terminal trading console and web dashboard.
+Paper mode uses live Binance market data and simulated execution only.
+
+Paper mode needs the tracked `config/config.json` and `config/risk.json` files, but does not require `config/secrets.json`. Private exchange credentials are only needed for authenticated Testnet workflows. It starts the scanner, trading engine, terminal trading console and web dashboard.
 
 The terminal console provides seven views:
 
