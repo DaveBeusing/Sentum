@@ -23,7 +23,7 @@ public:
 
     nlohmann::json equity_curve(int limit = 500) const {
         sqlite3* db=open_readonly(db_path_);nlohmann::json result=nlohmann::json::array();if(!db)return result;sqlite3_stmt* stmt=nullptr;double equity=0.0;
-        if(sqlite3_prepare_v2(db,"SELECT exit_ts,net_profit FROM trades ORDER BY exit_ts ASC LIMIT ?;",-1,&stmt,nullptr)==SQLITE_OK){sqlite3_bind_int(stmt,1,std::clamp(limit,1,5000));while(sqlite3_step(stmt)==SQLITE_ROW){equity+=sqlite3_column_double(stmt,1);result.push_back({{"ts",sqlite3_column_int64(stmt,0)},{"equity",equity}});}}
+        if(sqlite3_prepare_v2(db,"WITH running AS (SELECT id, exit_ts, SUM(net_profit) OVER (ORDER BY exit_ts ASC, id ASC ROWS UNBOUNDED PRECEDING) AS equity FROM trades) SELECT exit_ts,equity FROM (SELECT id,exit_ts,equity FROM running ORDER BY exit_ts DESC,id DESC LIMIT ?) ORDER BY exit_ts ASC,id ASC;",-1,&stmt,nullptr)==SQLITE_OK){sqlite3_bind_int(stmt,1,std::clamp(limit,1,5000));while(sqlite3_step(stmt)==SQLITE_ROW){equity=sqlite3_column_double(stmt,1);result.push_back({{"ts",sqlite3_column_int64(stmt,0)},{"equity",equity}});}}
         if(stmt)sqlite3_finalize(stmt);sqlite3_close(db);return result;
     }
 
