@@ -5,6 +5,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <charconv>
+#include <cstdlib>
 #include <csignal>
 #include <exception>
 #include <filesystem>
@@ -87,7 +89,16 @@ DashboardConfig load_dashboard_config(const sentum::cli::Options& options) {
             throw std::runtime_error("config.json dashboardPort must be between 1 and 65535");
         config.port = static_cast<std::uint16_t>(port);
     }
-    // CLI port override remains available for scripts and one-off runs.
+    if (const char* value = std::getenv("SENTUM_DASHBOARD_PORT")) {
+        const std::string text(value);
+        unsigned int port = 0;
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), port);
+        if (text.empty() || parsed.ec != std::errc{} ||
+            parsed.ptr != text.data() + text.size() || port < 1 || port > 65535) {
+            throw std::runtime_error("SENTUM_DASHBOARD_PORT must be an integer between 1 and 65535");
+        }
+        config.port = static_cast<std::uint16_t>(port);
+    }
     if (options.dashboard_port) config.port = *options.dashboard_port;
     return config;
 }
