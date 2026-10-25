@@ -153,6 +153,32 @@ The gate evaluates the following repository-controlled budgets:
 
 Market, scanner and terminal timing gates execute repeated measurements and evaluate both median and worst-sample behavior. Correctness failure remains a gate failure even when timing is within budget.
 
+### Numeric evidence integrity
+
+Every accepted measurement and budget must contain finite numbers. `NaN`, positive
+or negative infinity, exponent overflow and boolean values in numeric fields are
+rejected before comparison. This applies to both ENFORCED and OBSERVED dimensions;
+OBSERVED removes a performance threshold, while still requiring valid evidence.
+
+Elapsed times, event rates and per-event/per-frame timings must be positive. Event,
+iteration, allocation, copy and payload counts must be integers in their documented
+non-negative or positive domain. Workload counts are checked against the invocation;
+delivered events cannot exceed generated events, scanner counts cannot exceed the
+reported workload, and snapshot copies cannot exceed polls. Parser allocations per
+parse must agree with the recorded allocation and iteration counts, allowing only
+the benchmark's six-significant-digit output rounding.
+
+Runtime observations retain signed RSS growth and trend measurements, but RSS
+endpoints, samples and latency counters must remain valid finite measurements.
+Memory peaks and growth must agree with the recorded endpoints. Copied baseline
+metadata and runtime observation trees are also checked for non-finite numbers.
+
+Both normal and failure reports use strict JSON. Invalid measurements, invalid
+budget files and execution errors produce a structured `status = FAIL` report and
+Markdown summary with diagnostic violations, so a prior PASS file cannot survive
+as the apparent result of a failed invocation. Configuration/execution failures
+return exit code 2; completed evaluations with a violated threshold return 1.
+
 The original market/parser budgets were derived from successful GitHub-hosted Release evidence on workflow run `35090140340` (`ubuntu-24.04`, GNU 13.3.0), where the three market-path cases measured approximately 62.10, 77.74 and 63.64 ns/event and the parser reported zero allocations per parse.
 
 Scanner, dashboard and terminal qualification used five additional successful Core CI runs: `35201427700`, `35204003032`, `35207600347`, `35788383555` and `35791460185`, all on `ubuntu-24.04` with GNU 13.3.0. Scanner measurements stayed within approximately 291-314 ns/event (500 symbols), 316-325 ns/event (1,000 symbols) and 319-352 ns/event (2,000 symbols). Terminal frame-diff measurements stayed within approximately 849-905 ns/frame unchanged and 1,030-1,107 ns/frame changed. The enforced guardrails retain deliberate hosted-runner headroom above those observed ranges.
