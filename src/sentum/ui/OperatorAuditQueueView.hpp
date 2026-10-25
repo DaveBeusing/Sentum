@@ -50,8 +50,12 @@ inline OperatorEvidenceState operator_evidence_state(const nlohmann::json& snaps
 		return OperatorEvidenceState::Missing;
 	}
 	const auto& control_plane = snapshot["operations_control_plane"];
-	const auto status = json_text(control_plane, "evidence_status", "AVAILABLE");
-	if (status == "STALE" || control_plane.value("evidence_stale", false)) return OperatorEvidenceState::Stale;
+	const auto status = json_text(control_plane, "evidence_status", "MISSING");
+	const auto stale = control_plane.find("evidence_stale");
+	if (stale != control_plane.end() && !stale->is_boolean()) return OperatorEvidenceState::Missing;
+	if (stale != control_plane.end() && stale->get<bool>()) return OperatorEvidenceState::Stale;
+	if (status == "STALE") return OperatorEvidenceState::Stale;
+	if (status != "AVAILABLE") return OperatorEvidenceState::Missing;
 	return OperatorEvidenceState::Available;
 }
 

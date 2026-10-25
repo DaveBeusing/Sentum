@@ -13,6 +13,7 @@ void require(bool condition, const char* message) {
 nlohmann::json base_snapshot() {
 	return {
 		{"operations_control_plane", {
+			{"evidence_status", "AVAILABLE"},
 			{"approval_queue", nlohmann::json::array({
 				{{"request_id", "req-1"}, {"action", "enter_maintenance"}, {"classification", "APPROVAL_REQUIRED"}, {"actor", "operator-a"}, {"reason", "planned maintenance"}},
 				{{"request_id", "req-2"}, {"action", "synthesize_fill"}, {"classification", "FORBIDDEN"}, {"actor", "operator-b"}, {"reason", "test"}}
@@ -34,6 +35,24 @@ void test_approval_queue_projection() {
 	require(!view.approvals[0].execution_authorized, "approval row authorized execution");
 	require(view.approvals[1].classification == "FORBIDDEN", "forbidden class lost");
 	require(view.approvals[1].status == "BLOCKED", "forbidden row not blocked");
+}
+
+void test_invalid_evidence_fails_closed() {
+	for (const auto& state : {"MISSING", "UNAVAILABLE", "UNKNOWN", ""}) {
+		auto snapshot = base_snapshot();
+		snapshot["operations_control_plane"]["evidence_status"] = state;
+		const auto view = sentum::ui::derive_operator_audit_queue_view(snapshot);
+		require(view.evidence_state == sentum::ui::OperatorEvidenceState::Missing, "invalid evidence was marked available");
+		require(view.approvals.empty(), "invalid evidence exposed approvals");
+	}
+	auto snapshot = base_snapshot();
+	snapshot["operations_control_plane"].erase("evidence_status");
+	require(sentum::ui::derive_operator_audit_queue_view(snapshot).approvals.empty(), "absent evidence exposed approvals");
+	snapshot["operations_control_plane"]["evidence_status"] = 123;
+	require(sentum::ui::derive_operator_audit_queue_view(snapshot).approvals.empty(), "wrong-type evidence exposed approvals");
+	snapshot["operations_control_plane"]["evidence_status"] = "AVAILABLE";
+	snapshot["operations_control_plane"]["evidence_stale"] = "false";
+	require(sentum::ui::derive_operator_audit_queue_view(snapshot).approvals.empty(), "wrong-type stale flag exposed approvals");
 }
 
 void test_missing_classification_fails_closed() {
@@ -93,6 +112,7 @@ void test_missing_evidence_stays_empty_and_explicit() {
 int main() {
 	try {
 		test_approval_queue_projection();
+		test_invalid_evidence_fails_closed();
 		test_missing_classification_fails_closed();
 		test_stale_evidence_blocks_all_approvals();
 		test_audit_projection_is_read_only_context();
