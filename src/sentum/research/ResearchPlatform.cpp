@@ -179,7 +179,7 @@ ResearchConfig load_research_config(const std::string& path) {
 ResearchRunner::ResearchRunner(RiskConfig base_risk):base_risk_(base_risk){}
 double ResearchRunner::score(const BacktestMetrics&m,const std::string&o){if(o=="sharpe")return m.sharpe;if(o=="sortino")return m.sortino;if(o=="net_profit")return m.net_profit;if(o=="profit_factor")return std::isfinite(m.profit_factor)?m.profit_factor:1000000.0;if(o=="expectancy")return m.expectancy;if(o=="risk_adjusted_profit")return m.net_profit/(1.0+std::max(0.0,m.max_drawdown));throw std::runtime_error("Unsupported research objective: "+o);}
 
-ResearchSummary ResearchRunner::run(const ResearchConfig& input){return ResearchSummary{};}
+ResearchSummary ResearchRunner::run(const ResearchConfig& input){return static_cast<const ResearchRunner&>(*this).run(input);}
 
 ResearchSummary ResearchRunner::run(const ResearchConfig& input) const {
     ResearchConfig c=input;if(c.stop_losses.empty())c.stop_losses={base_risk_.stop_loss_percent};if(c.take_profits.empty())c.take_profits={base_risk_.take_profit_percent};if(c.slippages.empty())c.slippages={base_risk_.slippage_percent};const auto trial_count=checked_trial_count(c);
