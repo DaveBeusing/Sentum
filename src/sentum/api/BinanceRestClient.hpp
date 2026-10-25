@@ -35,7 +35,6 @@ class BinanceRestClient {
 	public:
 		BinanceRestClient(const std::string& api_key, const std::string& api_secret);
 		double get_current_price(const std::string& symbol);
-		std::string send_signed_order(const std::string& symbol, const std::string& quantity);
 		double get_coin_balance(const std::string& asset_symbol);
 		std::vector<Kline> get_historical_klines(const std::string& symbol, const std::string& interval, int limit);
 		static nlohmann::json get_exchange_info();

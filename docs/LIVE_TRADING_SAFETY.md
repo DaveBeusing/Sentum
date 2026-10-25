@@ -8,6 +8,12 @@ Paper, replay, shadow and research use `SimulatedExecutionVenue`. Paper consumes
 
 Paper trading uses a persistent simulated account rather than the authenticated Binance account balance.
 
+## Shared REST client boundary
+
+`BinanceRestClient` exposes market-data reads and its existing read-only account query. It has no order-submission method. The former unused `send_signed_order` API has been removed because it bypassed the execution venue, order manager and risk approval path and selected the production exchange. Callers must use the supported simulated venue or the guarded Testnet execution stack; there is no replacement production-order API.
+
+The execution-boundary regression checks the public API at compile time and intercepts the concrete Testnet client's HTTP transport to verify the configured destination without sending network traffic.
+
 ## Testnet
 
 Binance Spot Testnet uses exchange-confirmed order state. A local signal or REST acknowledgement is never treated as an executed position without a confirmed fill or successful reconciliation.

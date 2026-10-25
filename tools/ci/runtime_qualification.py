@@ -4,7 +4,10 @@
 
 import argparse
 import json
+import math
 import os
+import selectors
+import signal
 import subprocess
 import sys
 import time
@@ -25,6 +28,7 @@ FAULT_SCENARIOS = (
 )
 SPECIAL_SCENARIOS = ("paper-soak", "all-faults", "runtime-restart", "persistence-write-failure")
 SCENARIOS = FAULT_SCENARIOS + SPECIAL_SCENARIOS
+MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 
 
 def utc_now():
@@ -66,56 +70,105 @@ def read_process_status(pid):
 
 
 def terminate_process(process):
-    if process.poll() is not None:
-        return
-    process.terminate()
+    # The command owns a separate session, including children inheriting its pipes.
+    # A reaped group leader does not imply that its descendants have exited.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
     try:
         process.wait(timeout=2)
     except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=2)
+        pass
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait(timeout=2)
 
 
-def monitor_command(command, timeout_seconds, sample_interval_seconds):
+def monitor_command(command, timeout_seconds, sample_interval_seconds, max_output_bytes=MAX_OUTPUT_BYTES):
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("command timeout must be finite and positive")
+    if not math.isfinite(sample_interval_seconds) or sample_interval_seconds <= 0:
+        raise ValueError("sample interval must be finite and positive")
+    if isinstance(max_output_bytes, bool) or not isinstance(max_output_bytes, int) or max_output_bytes <= 0:
+        raise ValueError("output limit must be a positive byte count")
+
     started = time.monotonic()
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
     samples = []
     timed_out = False
+    output_limit_exceeded = False
+    output = {"stdout": bytearray(), "stderr": bytearray()}
+    output_bytes = {"stdout": 0, "stderr": 0}
+    next_sample = started
+    stop_drain_at = None
 
-    while process.poll() is None:
-        elapsed = time.monotonic() - started
-        rss, threads = read_process_status(process.pid)
-        if rss is not None or threads is not None:
-            sample = {"elapsed_seconds": elapsed}
-            if rss is not None:
-                sample["rss_kib"] = rss
-            if threads is not None:
-                sample["threads"] = threads
-            samples.append(sample)
-        if elapsed >= timeout_seconds:
-            timed_out = True
-            terminate_process(process)
-            break
-        time.sleep(sample_interval_seconds)
+    try:
+        with selectors.DefaultSelector() as selector:
+            for name, pipe in (("stdout", process.stdout), ("stderr", process.stderr)):
+                os.set_blocking(pipe.fileno(), False)
+                selector.register(pipe, selectors.EVENT_READ, name)
 
-    if not timed_out:
-        rss, threads = read_process_status(process.pid)
-        if rss is not None or threads is not None:
-            sample = {"elapsed_seconds": time.monotonic() - started}
-            if rss is not None:
-                sample["rss_kib"] = rss
-            if threads is not None:
-                sample["threads"] = threads
-            samples.append(sample)
+            while process.poll() is None or selector.get_map():
+                now = time.monotonic()
+                if now >= next_sample and process.poll() is None:
+                    rss, threads = read_process_status(process.pid)
+                    if rss is not None or threads is not None:
+                        sample = {"elapsed_seconds": now - started}
+                        if rss is not None:
+                            sample["rss_kib"] = rss
+                        if threads is not None:
+                            sample["threads"] = threads
+                        samples.append(sample)
+                    next_sample = now + sample_interval_seconds
 
-    stdout, stderr = process.communicate()
+                if stop_drain_at is None and now - started >= timeout_seconds:
+                    timed_out = True
+                    terminate_process(process)
+                    stop_drain_at = time.monotonic() + 1
+                if stop_drain_at is not None and now >= stop_drain_at:
+                    break
+
+                wait = min(sample_interval_seconds, 0.1)
+                if stop_drain_at is None:
+                    wait = min(wait, max(0, started + timeout_seconds - now))
+                else:
+                    wait = min(wait, max(0, stop_drain_at - now))
+                for key, _ in selector.select(wait):
+                    try:
+                        chunk = os.read(key.fileobj.fileno(), 65536)
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        key.fileobj.close()
+                        continue
+                    name = key.data
+                    output_bytes[name] += len(chunk)
+                    remaining = max_output_bytes - len(output[name])
+                    output[name].extend(chunk[:remaining])
+                    if len(chunk) > remaining and not output_limit_exceeded:
+                        output_limit_exceeded = True
+                        terminate_process(process)
+                        stop_drain_at = time.monotonic() + 1
+    finally:
+        terminate_process(process)
+        process.stdout.close()
+        process.stderr.close()
+
     return {
         "command": command,
-        "returncode": 124 if timed_out else process.returncode,
+        "returncode": 124 if timed_out else (125 if output_limit_exceeded else process.returncode),
         "timed_out": timed_out,
+        "output_limit_exceeded": output_limit_exceeded,
+        "output_limit_bytes": max_output_bytes,
+        "output_bytes": output_bytes,
         "elapsed_seconds": time.monotonic() - started,
-        "stdout": stdout,
-        "stderr": stderr,
+        "stdout": output["stdout"].decode("utf-8", errors="replace"),
+        "stderr": output["stderr"].decode("utf-8", errors="replace"),
         "rss_samples": samples,
     }
 
@@ -366,15 +419,18 @@ def main():
     parser.add_argument("--summary", default="log/runtime_qualification.md")
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
     parser.add_argument("--sample-interval-seconds", type=float, default=0.10)
+    parser.add_argument("--max-output-bytes", type=int, default=MAX_OUTPUT_BYTES)
     parser.add_argument("--max-rss-growth-kib", type=int, default=0)
     args = parser.parse_args()
 
-    if args.duration_seconds <= 0:
-        raise SystemExit("--duration-seconds must be > 0")
-    if args.timeout_seconds <= 0:
-        raise SystemExit("--timeout-seconds must be > 0")
-    if args.sample_interval_seconds <= 0:
-        raise SystemExit("--sample-interval-seconds must be > 0")
+    if not math.isfinite(args.duration_seconds) or args.duration_seconds <= 0:
+        raise SystemExit("--duration-seconds must be finite and > 0")
+    if not math.isfinite(args.timeout_seconds) or args.timeout_seconds <= 0:
+        raise SystemExit("--timeout-seconds must be finite and > 0")
+    if not math.isfinite(args.sample_interval_seconds) or args.sample_interval_seconds <= 0:
+        raise SystemExit("--sample-interval-seconds must be finite and > 0")
+    if args.max_output_bytes <= 0:
+        raise SystemExit("--max-output-bytes must be > 0")
     if args.max_rss_growth_kib < 0:
         raise SystemExit("--max-rss-growth-kib must be >= 0")
 
@@ -398,6 +454,7 @@ def main():
                 command,
                 max(0.1, remaining_timeout),
                 args.sample_interval_seconds,
+                args.max_output_bytes,
             )
             parsed = parse_json_line(result["stdout"])
             result["parsed_result"] = parsed
@@ -405,6 +462,8 @@ def main():
             parsed_results.append(parsed if parsed is not None else {})
             if result["timed_out"]:
                 failures.append("qualification command timed out")
+            if result["output_limit_exceeded"]:
+                failures.append(f"qualification command exceeded the {args.max_output_bytes}-byte per-stream output limit")
             if result["returncode"] != 0:
                 detail = result["stderr"].strip() or result["stdout"].strip() or f"exit code {result['returncode']}"
                 failures.append(detail[-4000:])
@@ -462,7 +521,7 @@ def main():
         "schema_version": 1,
         "environment_class": os.environ.get("SENTUM_EVIDENCE_ENVIRONMENT_CLASS", "ci_rehearsal"),
         "git_sha": git_sha,
-        "workflow_run_id": os.environ.get("GITHUB_RUN_ID", "local"),
+        "workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
         "scenario": args.scenario,
         "started_at_utc": started_utc,
         "ended_at_utc": utc_now(),
@@ -486,7 +545,11 @@ def main():
                 "command": command["command"],
                 "returncode": command["returncode"],
                 "timed_out": command["timed_out"],
+                "output_limit_exceeded": command["output_limit_exceeded"],
+                "output_limit_bytes": command["output_limit_bytes"],
+                "output_bytes": command["output_bytes"],
                 "elapsed_seconds": command["elapsed_seconds"],
+                "stdout": command["stdout"][-4000:],
                 "stderr": command["stderr"][-4000:],
             }
             for command in command_results

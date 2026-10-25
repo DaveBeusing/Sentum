@@ -100,6 +100,12 @@ jobs:
         run: python3 tests/research_validation_tests.py
       - name: Validate consolidated readiness evaluator
         run: python3 tests/consolidated_readiness_tests.py
+      - name: Validate subprocess and release evidence boundaries
+        run: |
+          python3 tests/subprocess_evidence_tests.py
+          python3 tests/release_evidence_contract_tests.py
+          python3 tests/production_operations_gate_tests.py
+          python3 tests/operations_handoff_workflow_tests.py
       - name: Enforce performance budgets
         shell: bash
         run: |

@@ -5,6 +5,7 @@
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -12,17 +13,52 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def output_text(value):
+	if isinstance(value, bytes):
+		return value.decode("utf-8", errors="replace")
+	return value or ""
+
+
 def run_cycle(command, timeout_seconds):
 	started = time.monotonic()
-	completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds)
-	elapsed = time.monotonic() - started
-	return {
-		"command": command,
-		"returncode": completed.returncode,
-		"elapsed_seconds": elapsed,
-		"stdout": completed.stdout,
-		"stderr": completed.stderr,
-	}
+	try:
+		with subprocess.Popen(
+			command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+			text=True, encoding="utf-8", errors="replace", start_new_session=True,
+		) as process:
+			try:
+				stdout, stderr = process.communicate(timeout=timeout_seconds)
+				result = {
+					"returncode": process.returncode,
+					"timed_out": False,
+					"stdout": stdout,
+					"stderr": stderr,
+				}
+			except subprocess.TimeoutExpired as error:
+				result = {
+					"returncode": 124,
+					"timed_out": True,
+					"stdout": output_text(error.stdout),
+					"stderr": output_text(error.stderr),
+					"failure": f"acceptance command timed out after {timeout_seconds} seconds",
+				}
+			finally:
+				# Also stop descendants that inherited the command's output pipes.
+				try:
+					os.killpg(process.pid, signal.SIGKILL)
+				except ProcessLookupError:
+					pass
+				process.wait(timeout=2)
+	except OSError as error:
+		result = {
+			"returncode": 127,
+			"timed_out": False,
+			"stdout": "",
+			"stderr": str(error),
+			"failure": "acceptance command could not be started",
+		}
+	result.update({"command": command, "elapsed_seconds": time.monotonic() - started})
+	return result
 
 
 def main():
@@ -36,6 +72,8 @@ def main():
 
 	if args.cycles < 1:
 		raise SystemExit("--cycles must be >= 1")
+	if args.timeout_seconds < 1:
+		raise SystemExit("--timeout-seconds must be >= 1")
 
 	build_dir = Path(args.build_dir)
 	lifecycle = build_dir / "sentum_runtime_lifecycle_tests"
@@ -53,16 +91,7 @@ def main():
 	for cycle in range(1, args.cycles + 1):
 		cycle_result = {"cycle": cycle, "checks": []}
 		for binary in (lifecycle, observability):
-			try:
-				check = run_cycle([str(binary)], args.timeout_seconds)
-			except subprocess.TimeoutExpired as error:
-				check = {
-					"command": [str(binary)],
-					"returncode": 124,
-					"elapsed_seconds": args.timeout_seconds,
-					"stdout": error.stdout or "",
-					"stderr": error.stderr or "timeout",
-				}
+			check = run_cycle([str(binary)], args.timeout_seconds)
 			cycle_result["checks"].append(check)
 			if check["returncode"] != 0:
 				passed = False
@@ -94,17 +123,34 @@ def main():
 		"| Cycle | Check | Result | Elapsed (s) |",
 		"| ---: | --- | --- | ---: |",
 	]
+	failure_lines = []
 	for cycle in results:
 		for check in cycle["checks"]:
 			name = Path(check["command"][0]).name
 			result = "PASS" if check["returncode"] == 0 else "FAIL"
 			lines.append(f"| {cycle['cycle']} | {name} | {result} | {check['elapsed_seconds']:.3f} |")
+			if check["returncode"] != 0:
+				failure_lines += [
+					"", f"## Failed check: cycle {cycle['cycle']}, {name}", "",
+					f"Command: `{json.dumps(check['command'])}`",
+					f"Return code: `{check['returncode']}`; timed out: `{str(check['timed_out']).lower()}`",
+					f"Elapsed: {check['elapsed_seconds']:.3f}s",
+					check.get("failure", "acceptance command returned a non-zero status"),
+				]
+				for stream in ("stdout", "stderr"):
+					failure_lines += ["", f"### {stream}", ""]
+					failure_lines.extend(f"    {line}" for line in check[stream].splitlines())
+					if not check[stream]:
+						failure_lines.append("(no output)")
+	lines.extend(failure_lines)
 	summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 	if not passed:
 		for cycle in results:
 			for check in cycle["checks"]:
 				if check["returncode"] != 0:
+					if "failure" in check:
+						print(check["failure"], file=sys.stderr)
 					print(check["stdout"], end="")
 					print(check["stderr"], file=sys.stderr, end="")
 		return 1

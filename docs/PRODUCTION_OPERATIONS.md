@@ -18,7 +18,24 @@ A production promotion must not begin unless all of the following are true:
 
 ## Automated RC evidence preflight
 
-The production-operations workflow consumes the completed Core CI artifact `sentum-rc-<full-git-sha>` for the exact evaluated `head_sha` and source workflow run ID.
+The production-operations workflow qualifies **successful Core CI push runs on
+`master` in this repository**. Pull-request runs, other branches, other events,
+failed runs and foreign source repositories do not qualify and are explicitly
+skipped before checkout or artifact download. Core CI still builds, tests,
+validates readiness and packages an RC for every pull request.
+
+For an integrated master push, the producer's evaluated `github.sha` equals the
+source run's `head_sha`. Checkout, the exact artifact name
+`sentum-rc-<full-git-sha>`, every downstream expected SHA and the final evidence
+artifact use that same identity. Downloads remain bound to the completed Core CI
+run ID, never to the latest artifact with a similar name. A pull request's
+synthetic merge SHA is intentionally not replaced with its branch-head SHA.
+
+Representative workflow payload tests cover the historical PR merge/head
+mismatch, a successful master push, other branches/events/repositories and
+unsuccessful runs. They evaluate the workflow's actual condition and resolve its
+checkout/download expressions against those payloads. Final acceptance also
+requires the integrated master-push chain to complete with the produced artifact.
 
 After download into `evidence/rc`, the required evidence locations are:
 
@@ -27,7 +44,17 @@ After download into `evidence/rc`, the required evidence locations are:
 - `evidence/rc/artifacts/sentum-rc-<first-12-git-sha>.tar.gz`;
 - `evidence/rc/artifacts/sentum-rc-<first-12-git-sha>.tar.gz.sha256`.
 
-The handoff validator checks this structure, the RC report status and schema, Git SHA equality, archive path, actual archive digest and checksum evidence before the production-operations gate runs. Any mismatch remains fail-closed.
+The handoff validator checks this structure, the RC report status and schema, Git
+SHA and source-run equality, archive path, actual archive digest and checksum
+evidence before the production-operations gate runs. It also checks the original
+readiness report embedded in the archive and the preserved leaf evidence
+identities and timestamps. Repackaging cannot extend their validity.
+
+Direct invocation of the production-operations gate independently requires an RC
+JSON object with the supported schema, status, commit, source run and complete
+release-evidence provenance. Null, scalar, array, malformed or stale input produces
+a structured FAIL report and summary; a preceding workflow step is not required
+to enforce this boundary. Any mismatch remains fail-closed.
 
 ## Deployment procedure
 

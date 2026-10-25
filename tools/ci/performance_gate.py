@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
+import re
 import statistics
 import subprocess
 import sys
@@ -75,22 +77,59 @@ def parse_key_value(output: str) -> dict[str, str]:
     return values
 
 
-def require_float(values: dict[str, str], key: str) -> float:
+def finite_number(value: Any, label: str, minimum: float | None = 0.0, *, positive: bool = False) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise GateFailure(f"{label} must be a finite number")
+    try:
+        result = float(value)
+    except (ValueError, OverflowError) as error:
+        raise GateFailure(f"{label} must be a finite number") from error
+    if not math.isfinite(result):
+        raise GateFailure(f"{label} must be a finite number")
+    if positive and result <= 0.0:
+        raise GateFailure(f"{label} must be positive")
+    if minimum is not None and result < minimum:
+        raise GateFailure(f"{label} must be at least {minimum}")
+    return result
+
+
+def validate_finite_json(value: Any, label: str) -> None:
+    """Reject nonstandard JSON numbers even in copied baseline/observation metadata."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            validate_finite_json(item, f"{label}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            validate_finite_json(item, f"{label}[{index}]")
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        finite_number(value, label, minimum=None)
+
+
+def require_float(values: dict[str, str], key: str, *, positive: bool = False) -> float:
     if key not in values:
         raise GateFailure(f"benchmark output is missing '{key}'")
     try:
-        return float(values[key])
-    except ValueError as error:
+        if isinstance(values[key], bool):
+            raise ValueError("boolean is not a measurement")
+        result = float(values[key])
+    except (ValueError, TypeError, OverflowError) as error:
         raise GateFailure(f"benchmark output '{key}' is not numeric: {values[key]!r}") from error
+    return finite_number(result, f"benchmark output '{key}'", positive=positive)
 
 
-def require_int(values: dict[str, str], key: str) -> int:
+def require_int(values: dict[str, str], key: str, *, minimum: int = 0) -> int:
     if key not in values:
         raise GateFailure(f"benchmark output is missing '{key}'")
     try:
-        return int(values[key])
-    except ValueError as error:
+        raw = values[key]
+        if isinstance(raw, bool) or not isinstance(raw, (str, int)) or not re.fullmatch(r"[+-]?[0-9]+", str(raw)):
+            raise ValueError("integer representation required")
+        result = int(raw)
+    except (ValueError, TypeError) as error:
         raise GateFailure(f"benchmark output '{key}' is not an integer: {values[key]!r}") from error
+    if result < minimum:
+        raise GateFailure(f"benchmark output '{key}' must be at least {minimum}")
+    return result
 
 
 def require_mapping(container: dict[str, Any], key: str) -> dict[str, Any]:
@@ -109,7 +148,7 @@ def require_list(container: dict[str, Any], key: str) -> list[Any]:
 
 def require_state(container: dict[str, Any], key: str) -> str:
     value = container.get(key)
-    if value not in EVIDENCE_STATES:
+    if not isinstance(value, str) or value not in EVIDENCE_STATES:
         raise GateFailure(
             f"performance budget '{key}' must be one of {sorted(EVIDENCE_STATES)}, got {value!r}"
         )
@@ -124,10 +163,14 @@ def require_positive_int(container: dict[str, Any], key: str) -> int:
 
 
 def require_non_negative_number(container: dict[str, Any], key: str) -> float:
+    return finite_number(container.get(key), f"performance budget '{key}'")
+
+
+def require_non_negative_int(container: dict[str, Any], key: str) -> int:
     value = container.get(key)
-    if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
-        raise GateFailure(f"performance budget '{key}' must be a non-negative number")
-    return float(value)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise GateFailure(f"performance budget '{key}' must be a non-negative integer")
+    return value
 
 
 def validate_case(case: Any, required_numbers: tuple[str, ...]) -> None:
@@ -144,7 +187,8 @@ def validate_case(case: Any, required_numbers: tuple[str, ...]) -> None:
 def validate_budgets(budgets: Any) -> dict[str, Any]:
     if not isinstance(budgets, dict):
         raise GateFailure("performance budget root must be an object")
-    if budgets.get("schema_version") != 2:
+    validate_finite_json(budgets, "performance budget")
+    if type(budgets.get("schema_version")) is not int or budgets.get("schema_version") != 2:
         raise GateFailure("unsupported performance budget schema version")
 
     policy = require_mapping(budgets, "measurement_policy")
@@ -168,13 +212,14 @@ def validate_budgets(budgets: Any) -> dict[str, Any]:
         raise GateFailure("scanner performance gate requires at least three repetitions")
     for case in require_list(scanner, "cases"):
         validate_case(case, ("max_median_ns_per_event", "max_worst_ns_per_event"))
-        require_positive_int(case, "expected_top_count")
+        if require_positive_int(case, "expected_top_count") > case["symbols"]:
+            raise GateFailure("scanner expected_top_count cannot exceed symbols")
 
     dashboard = require_mapping(budgets, "dashboard_snapshot")
     require_state(dashboard, "timing_state")
     require_state(dashboard, "correctness_state")
     require_positive_int(dashboard, "iterations")
-    require_non_negative_number(dashboard, "max_conditional_snapshot_copies")
+    require_non_negative_int(dashboard, "max_conditional_snapshot_copies")
 
     terminal = require_mapping(budgets, "terminal_render_pipeline")
     require_state(terminal, "timing_state")
@@ -182,8 +227,8 @@ def validate_budgets(budgets: Any) -> dict[str, Any]:
     if require_positive_int(terminal, "repetitions") < 3:
         raise GateFailure("terminal performance gate requires at least three repetitions")
     require_positive_int(terminal, "iterations")
+    require_non_negative_int(terminal, "max_unchanged_payload_bytes")
     for key in (
-        "max_unchanged_payload_bytes",
         "max_median_unchanged_ns_per_frame",
         "max_worst_unchanged_ns_per_frame",
         "max_median_changed_ns_per_frame",
@@ -213,6 +258,8 @@ def evaluate_upper_bound(
     evidence_state: str,
     unit: str,
 ) -> None:
+    value = finite_number(value, f"{label} measurement")
+    maximum = finite_number(maximum, f"{label} budget")
     if evidence_state == "ENFORCED" and value > maximum:
         violations.append(f"{label}: {value:.2f} {unit} exceeds budget {maximum:.2f} {unit}")
 
@@ -250,20 +297,19 @@ def market_case(
                 f"{result.stderr.strip() or result.stdout.strip()}"
             )
         values = parse_key_value(result.stdout)
-        events = require_int(values, "events")
+        events = require_int(values, "events", minimum=1)
         delivered = require_int(values, "delivered_events")
-        ns_per_event = require_float(values, "nanoseconds_per_event")
-        events_per_second = require_float(values, "events_per_second")
-        seconds = require_float(values, "seconds")
+        ns_per_event = require_float(values, "nanoseconds_per_event", positive=True)
+        events_per_second = require_float(values, "events_per_second", positive=True)
+        seconds = require_float(values, "seconds", positive=True)
+        if delivered > events:
+            raise GateFailure(f"{name}: delivered events exceed generated events")
 
         if correctness_state == "ENFORCED":
             if events != expected_events:
                 violations.append(f"{name}: expected {expected_events} events, benchmark reported {events}")
             if delivered != expected_events:
                 violations.append(f"{name}: expected {expected_events} delivered events, got {delivered}")
-            if ns_per_event <= 0.0 or events_per_second <= 0.0 or seconds <= 0.0:
-                violations.append(f"{name}: benchmark reported a non-positive timing measurement")
-
         samples.append(
             {
                 "iteration": iteration + 1,
@@ -318,15 +364,17 @@ def parser_case(
         )
 
     values = parse_key_value(result.stdout)
-    iterations = require_int(values, "iterations")
+    iterations = require_int(values, "iterations", minimum=1)
     allocations = require_int(values, "allocations")
     allocations_per_parse = require_float(values, "allocations_per_parse")
     maximum = float(budget["max_allocations_per_parse"])
     state = str(budget["allocation_state"])
     violations: list[str] = []
 
-    if state == "ENFORCED" and iterations <= 0:
-        violations.append("parser: benchmark reported no iterations")
+    # The benchmark prints its ratio with the C++ stream's six significant digits.
+    expected_ratio = allocations / iterations
+    if not math.isclose(allocations_per_parse, expected_ratio, rel_tol=1e-5, abs_tol=0.0):
+        raise GateFailure("parser: allocations_per_parse disagrees with allocations / iterations")
     evaluate_upper_bound(
         violations,
         "parser allocations",
@@ -376,13 +424,15 @@ def scanner_case(
                 f"{result.stderr.strip() or result.stdout.strip()}"
             )
         values = parse_key_value(result.stdout)
-        reported_symbols = require_int(values, "symbols")
-        events = require_int(values, "events")
+        reported_symbols = require_int(values, "symbols", minimum=1)
+        events = require_int(values, "events", minimum=1)
         top_count = require_int(values, "top_count")
         top_changes = require_int(values, "top_changes")
-        ns_per_event = require_float(values, "nanoseconds_per_event")
-        events_per_second = require_float(values, "events_per_second")
-        seconds = require_float(values, "seconds")
+        ns_per_event = require_float(values, "nanoseconds_per_event", positive=True)
+        events_per_second = require_float(values, "events_per_second", positive=True)
+        seconds = require_float(values, "seconds", positive=True)
+        if top_count > reported_symbols or top_changes > events:
+            raise GateFailure(f"{name}: scanner counts exceed the reported workload")
 
         if correctness_state == "ENFORCED":
             if reported_symbols != symbols:
@@ -393,9 +443,6 @@ def scanner_case(
                 violations.append(f"{name}: expected top_count={expected_top_count}, got {top_count}")
             if top_changes <= 0:
                 violations.append(f"{name}: scanner did not report any top-symbol changes")
-            if ns_per_event <= 0.0 or events_per_second <= 0.0 or seconds <= 0.0:
-                violations.append(f"{name}: benchmark reported a non-positive timing measurement")
-
         samples.append(
             {
                 "iteration": iteration + 1,
@@ -456,12 +503,14 @@ def dashboard_case(
         )
 
     values = parse_key_value(result.stdout)
-    reported_iterations = require_int(values, "iterations")
-    unconditional_ns = require_float(values, "unconditional_ns_per_poll")
-    conditional_ns = require_float(values, "unchanged_conditional_ns_per_poll")
+    reported_iterations = require_int(values, "iterations", minimum=1)
+    unconditional_ns = require_float(values, "unconditional_ns_per_poll", positive=True)
+    conditional_ns = require_float(values, "unchanged_conditional_ns_per_poll", positive=True)
     conditional_copies = require_int(values, "conditional_snapshot_copies")
     copied_payload_bytes = require_int(values, "copied_payload_bytes")
     violations: list[str] = []
+    if conditional_copies > reported_iterations:
+        raise GateFailure("dashboard: conditional snapshot copies exceed iterations")
 
     if correctness_state == "ENFORCED":
         if reported_iterations != iterations:
@@ -517,10 +566,10 @@ def terminal_case(
                 f"{result.stderr.strip() or result.stdout.strip()}"
             )
         values = parse_key_value(result.stdout)
-        reported_iterations = require_int(values, "iterations")
-        unchanged_ns = require_float(values, "unchanged_ns_per_frame")
+        reported_iterations = require_int(values, "iterations", minimum=1)
+        unchanged_ns = require_float(values, "unchanged_ns_per_frame", positive=True)
         unchanged_payload = require_int(values, "unchanged_payload_bytes")
-        changed_ns = require_float(values, "changed_ns_per_frame")
+        changed_ns = require_float(values, "changed_ns_per_frame", positive=True)
         changed_payload = require_int(values, "changed_payload_bytes")
 
         if correctness_state == "ENFORCED":
@@ -614,6 +663,50 @@ def terminal_case(
     )
 
 
+def validate_runtime_memory(memory: Any) -> None:
+    if not isinstance(memory, dict) or type(memory.get("available")) is not bool:
+        raise GateFailure("runtime memory evidence must declare boolean availability")
+    require_non_negative_int(memory, "samples")
+    require_non_negative_int(memory, "guardrail_kib")
+    if type(memory.get("unbounded_growth_detected")) is not bool:
+        raise GateFailure("runtime memory growth indicator must be boolean")
+    measurements = ("starting_rss_kib", "peak_rss_kib", "ending_rss_kib", "growth_kib", "trend_slope_kib_per_minute")
+    if not memory["available"]:
+        if memory["samples"] != 0 or any(memory.get(key) is not None for key in measurements):
+            raise GateFailure("unavailable runtime memory evidence contains measurements")
+        return
+    for key in measurements[:3]:
+        require_non_negative_int(memory, key)
+    if type(memory.get("growth_kib")) is not int:
+        raise GateFailure("runtime memory growth_kib must be a signed integer")
+    finite_number(memory.get("trend_slope_kib_per_minute"), "runtime memory trend", minimum=None)
+    if memory["samples"] == 0:
+        raise GateFailure("available runtime memory evidence has no samples")
+    if memory["peak_rss_kib"] < max(memory["starting_rss_kib"], memory["ending_rss_kib"]):
+        raise GateFailure("runtime memory peak is below an observed endpoint")
+    if memory["growth_kib"] != memory["ending_rss_kib"] - memory["starting_rss_kib"]:
+        raise GateFailure("runtime memory growth disagrees with its endpoints")
+
+
+def validate_runtime_latency(value: Any, label: str = "runtime latency") -> None:
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            validate_runtime_latency(item, f"{label}[{index}]")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                validate_runtime_latency(item, f"{label}.{key}")
+            elif key == "queue_pressure" and isinstance(item, str):
+                continue
+            elif key == "avg_us":
+                finite_number(item, f"{label}.{key}")
+            else:
+                if type(item) is not int or item < 0:
+                    raise GateFailure(f"{label}.{key} must be a non-negative integer")
+    else:
+        raise GateFailure(f"{label} must be an object or list")
+
+
 def qualification_evidence(
     paths: list[str],
     budget: dict[str, Any],
@@ -625,16 +718,24 @@ def qualification_evidence(
             report = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise GateFailure(f"cannot read runtime qualification evidence {path}: {error}") from error
-        if not isinstance(report, dict) or report.get("schema_version") != 1:
+        validate_finite_json(report, f"runtime qualification evidence {path}")
+        if not isinstance(report, dict) or type(report.get("schema_version")) is not int or report.get("schema_version") != 1:
             raise GateFailure(f"runtime qualification evidence {path} has unsupported schema")
         if "scenario" not in report or "memory" not in report or "metrics" not in report:
             raise GateFailure(f"runtime qualification evidence {path} is missing required metrics")
+        if not isinstance(report["scenario"], str) or not report["scenario"]:
+            raise GateFailure(f"runtime qualification evidence {path} has no scenario identity")
+        if type(report.get("evidence_complete")) is not bool or not isinstance(report["metrics"], dict):
+            raise GateFailure(f"runtime qualification evidence {path} has invalid completeness/metrics")
+        finite_number(report.get("actual_duration_seconds"), "runtime qualification duration", positive=True)
+        validate_runtime_memory(report["memory"])
+        validate_runtime_latency(report["metrics"].get("latency"))
         evidence.append(
             {
                 "source": str(path),
                 "scenario": report["scenario"],
                 "status": report.get("status", "UNKNOWN"),
-                "evidence_complete": bool(report.get("evidence_complete", False)),
+                "evidence_complete": report["evidence_complete"],
                 "memory_state": budget["memory_state"],
                 "sampled_latency_state": budget["sampled_latency_state"],
                 "actual_duration_seconds": report.get("actual_duration_seconds"),
@@ -897,12 +998,32 @@ def main() -> int:
         }
 
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        report_path.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
         write_summary(summary_path, report)
         print(summary_path.read_text(encoding="utf-8"), end="")
         return 0 if report["status"] == "PASS" else 1
-    except (GateFailure, KeyError, TypeError, ValueError, OSError) as error:
+    except (GateFailure, KeyError, TypeError, ValueError, OverflowError, OSError) as error:
         print(f"performance gate configuration/execution failure: {error}", file=sys.stderr)
+        failure = {
+            "schema_version": 2,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "environment_class": "ci_hosted_runner",
+            "status": "FAIL",
+            "git_sha": os.environ.get("GITHUB_SHA", "unknown"),
+            "workflow_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
+            "budget_source": str(budget_path),
+            "violations": [str(error)],
+        }
+        try:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(failure, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+            summary_path.write_text(
+                "# Sentum performance gate\n\n**Status:** FAIL\n\n## Violations\n\n"
+                f"- {error}\n", encoding="utf-8"
+            )
+        except OSError as report_error:
+            print(f"cannot persist performance gate failure evidence: {report_error}", file=sys.stderr)
         return 2
 
 
