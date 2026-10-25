@@ -14,7 +14,11 @@ permissions:
 jobs:
   production_operations:
     name: Production operations baseline
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'master' &&
+          github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -105,6 +109,7 @@ jobs:
       - name: Consolidate readiness evidence
         env:
           GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           python3 tools/ci/consolidated_readiness.py \
             --policy config/readiness_evidence_policy.json \
